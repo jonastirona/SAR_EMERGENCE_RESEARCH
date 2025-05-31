@@ -1,0 +1,29 @@
+#!/bin/csh -x
+##This script test different conda environments running on Cascade Lake GPU Nodes
+#PBS -q v100@pbspl4
+#PBS -lselect=1:ncpus=48:ngpus=1:model=rom_gpu:mem=300g
+#PBS -l place=scatter:exclhost
+#PBS -l walltime=15:00:00
+#PBS -j oe
+#PBS -N variations_image_1
+#PBS -W group_list=s7614
+
+#load analytix modules
+module use -a /swbuild/analytix/tools/modulefiles
+module load miniconda3/v4
+
+#activate pyt1_12 pytorch conda environment
+source /swbuild/analytix/tools/miniconda3_220407/bin/activate.csh pyt2_1
+
+##This script trains a neural network model on MNIST characters
+##cd /home7/analytix/examples/pytorch/src/main/python
+
+echo "START RUN"
+
+## Best run
+python3 train_w_stats.py 12 4 110 3 64 1000 0.01
+
+echo "RUN COMPLETE"
+
+#exit environment
+conda deactivate
