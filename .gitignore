@@ -31,12 +31,6 @@ ENV/
 *.swp
 *.swo
 
-# Data and Models
-*.npz
-*.pth
-data/
-results/
-
 # Jupyter Notebook
 .ipynb_checkpoints
 *.ipynb

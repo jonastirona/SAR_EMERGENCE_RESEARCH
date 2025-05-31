@@ -30,8 +30,7 @@ The models are tested on several active regions:
 ├── lstm/              # LSTM model implementation
 ├── transformer/       # Transformer model implementation
 ├── evaluation/        # Evaluation scripts and utilities
-├── data/             # Data directory (not tracked)
-└── results/          # Model outputs and visualizations (not tracked)
+├── data/             # Solar Active Region Directory
 ```
 
 ## Requirements
@@ -54,4 +53,4 @@ The evaluation produces:
 - Side-by-side model comparisons
 - Derivative analysis
 - Emergence detection
-- Performance metrics (RMSE, MAE, etc.) 
+- Performance metrics
