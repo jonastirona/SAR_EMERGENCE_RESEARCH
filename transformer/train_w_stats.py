@@ -6,7 +6,7 @@ import numpy as np
 import sys
 from PIL import Image
 from sklearn.model_selection import train_test_split
-from functions import split_image, get_piece_means, dtws, lstm_ready, training_loop, training_loop_w_stats, LSTM, split_sequences, min_max_scaling
+from functions import split_image, get_piece_means, dtws, lstm_ready, training_loop, training_loop_w_stats, LSTM, split_sequences, min_max_scaling, calculate_metrics
 import time
 import torch
 import torch.nn as nn
@@ -18,6 +18,7 @@ import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel
 import os
 from models.st_transformer import SpatioTemporalTransformer
+from matplotlib.backends.backend_pdf import PdfPages
 
 start_time = time.time()
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu') # Define the device (either 'cuda' for GPU or 'cpu' for CPU)
@@ -54,9 +55,9 @@ print('Load data and split in tiles for {} ARs'.format(len(ARs)))
 all_inputs = []
 all_intensities = []
 for AR in ARs_:
-    power_maps = np.load('/home/jonas/Documents/AR_PREDICTION_MODELS/data/AR{}/mean_pmdop{}_flat.npz'.format(AR,AR),allow_pickle=True) 
-    mag_flux = np.load('/home/jonas/Documents/AR_PREDICTION_MODELS/data//AR{}/mean_mag{}_flat.npz'.format(AR,AR),allow_pickle=True)
-    intensities = np.load('/home/jonas/Documents/AR_PREDICTION_MODELS/data//AR{}/mean_int{}_flat.npz'.format(AR,AR),allow_pickle=True)
+    power_maps = np.load('../data/AR{}/mean_pmdop{}_flat.npz'.format(AR,AR),allow_pickle=True) 
+    mag_flux = np.load('../data/AR{}/mean_mag{}_flat.npz'.format(AR,AR),allow_pickle=True)
+    intensities = np.load('../data/AR{}/mean_int{}_flat.npz'.format(AR,AR),allow_pickle=True)
     power_maps23 = power_maps['arr_0']
     power_maps34 = power_maps['arr_1']
     power_maps45 = power_maps['arr_2']
@@ -98,20 +99,27 @@ elif model_name == 'st_transformer':
 loss_fn = torch.nn.MSELoss()  #torch.nn.L1Loss() #   # mean-squared error for regression
 #optimiser = torch.optim.Adam(lstm.parameters(), lr=learning_rate)
 
-# Define the path for the results file
-result_file_path = os.path.join("/home/jonas/Documents/AR_PREDICTION_MODELS/transformer/results", model_name, "all_training_results_no_sch.txt")
-os.makedirs(os.path.dirname(result_file_path), exist_ok=True)
-optimiser = torch.optim.Adam(model.parameters(), lr=learning_rate) 
+# Define paths for results
+base_path = './results'
+base_path = os.path.join(base_path, model_name)
+model_name_str = 't{}_r{}_i{}_n{}_h{}_e{}_l{}_no_sch'.format(num_pred,rid_of_top,num_in,num_layers,hidden_size,n_epochs,learning_rate)
+result_file_path = os.path.join(base_path, f"{model_name_str}_training_stats.txt")
+pdf_path = os.path.join(base_path, f"{model_name_str}_loss_curves.pdf")
+model_path = os.path.join(base_path, f"{model_name_str}.pth")
 
-print(f'Total ARs: {len(ARs)}')
+os.makedirs(base_path, exist_ok=True)
 
-# Open the file once, before the loop
+# Dictionary to store all results
+all_training_results = {}
+
+# Open the file for writing training stats
 with open(result_file_path, "w") as file:
     # Iterate over ARs and tiles, writing results to the same file
     for AR_ in range(len(ARs)):
         power_maps = all_inputs[:,:,:,AR_] #change to inputs, its not only power maps
         intensities = all_intensities[:,:,AR_]
         for tile in range(tiles):
+            optimiser = torch.optim.Adam(model.parameters(), lr=learning_rate)
             print('[Total Tiles]: {} \t AR{} - Tile: {}'.format(tiles, ARs[AR_],tile))
             X_train, y_train = lstm_ready(tile,size,power_maps,intensities,num_in,num_pred)
             X_test, y_test = lstm_ready(int(tiles/2),size,power_maps,intensities,num_in,num_pred)
@@ -129,16 +137,94 @@ with open(result_file_path, "w") as file:
                         X_train=X_train_final,
                         y_train=y_train,
                         X_test=X_test_final,
-                        y_test=y_test, 
+                        y_test=y_test,
                         use_scheduler=True)
+            
+            # Store results for plotting
+            all_training_results[f'AR{ARs[AR_]}_Tile{tile}'] = results
+            
             # Write AR and tile header
             file.write(f"\nAR {ARs[AR_]} - Tile {tile}\n")
             file.write("Epoch, Train Loss, Test Loss, Learning Rate\n")
             for epoch, train_loss, test_loss, lr in results:
                 file.write(f"{epoch}, {train_loss:.5f}, {test_loss:.5f}, {lr:.5f}\n")
 
+# Create PDF with loss curves
+with PdfPages(pdf_path) as pdf:
+    # Create summary plots
+    fig = plt.figure(figsize=(15, 10))
+    gs = plt.GridSpec(2, 2, figure=fig)
+    
+    # Plot 1: Average losses across all tiles
+    ax1 = fig.add_subplot(gs[0, :])
+    avg_train_losses = np.mean([np.array([r[1] for r in results]) for results in all_training_results.values()], axis=0)
+    avg_test_losses = np.mean([np.array([r[2] for r in results]) for results in all_training_results.values()], axis=0)
+    epochs = range(n_epochs)
+    
+    ax1.plot(epochs, avg_train_losses, label='Avg Training Loss')
+    ax1.plot(epochs, avg_test_losses, label='Avg Test Loss')
+    ax1.set_xlabel('Epoch')
+    ax1.set_ylabel('Average Loss')
+    ax1.set_title('Average Training and Test Loss Across All Tiles')
+    ax1.legend()
+    ax1.grid(True)
+    
+    # Plot 2: Average learning rate
+    ax2 = fig.add_subplot(gs[1, 0])
+    avg_lr = np.mean([np.array([r[3] for r in results]) for results in all_training_results.values()], axis=0)
+    ax2.plot(epochs, avg_lr, label='Avg Learning Rate', color='green')
+    ax2.set_xlabel('Epoch')
+    ax2.set_ylabel('Learning Rate')
+    ax2.set_title('Average Learning Rate Schedule')
+    ax2.legend()
+    ax2.grid(True)
+    
+    # Plot 3: Evaluation Metrics Distribution
+    ax3 = fig.add_subplot(gs[1, 1])
+    all_metrics = []
+    
+    # Calculate metrics for each AR and tile
+    for key, results in all_training_results.items():
+        # Get the final predictions for this AR/tile
+        final_predictions = model(X_test_final).detach().cpu().numpy()
+        true_values = y_test.cpu().numpy()
+        
+        # Calculate metrics
+        metrics = calculate_metrics(true_values, final_predictions)
+        all_metrics.append(metrics)
+    
+    # Convert to numpy array for easier manipulation
+    all_metrics = np.array(all_metrics)
+    
+    # Create box plot of metrics
+    metric_names = ['MAE', 'MSE', 'RMSE', 'RMSLE', 'R²']
+    bp = ax3.boxplot(all_metrics, labels=metric_names)
+    ax3.set_title('Distribution of Evaluation Metrics')
+    ax3.grid(True)
+    
+    # Add mean values as text
+    mean_metrics = np.mean(all_metrics, axis=0)
+    textstr = '\n'.join([f'{name}: {val:.4f}' for name, val in zip(metric_names, mean_metrics)])
+    props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
+    ax3.text(0.05, 0.95, textstr, transform=ax3.transAxes, fontsize=8,
+             verticalalignment='top', bbox=props)
+    
+    plt.suptitle(f'Training Summary - {model_name.upper()}\nParameters: TW={num_pred}, RoT={rid_of_top}, In={num_in}, Layers={num_layers}, Hidden={hidden_size}', 
+                 fontsize=12)
+    plt.tight_layout()
+    pdf.savefig(fig)
+    plt.close()
+
 # Save the model weights
-torch.save(model.state_dict(),'/home/jonas/Documents/AR_PREDICTION_MODELS/transformer/results/{}/t{}_r{}_i{}_n{}_h{}_e{}_l{}_no_sch.pth'.format(model_name,num_pred,rid_of_top,num_in,num_layers,hidden_size,n_epochs,learning_rate))
+torch.save(model.state_dict(), model_path)
 end_time = time.time()
 print("Elapsed time: {} minutes".format((end_time - start_time)/60))
+print(f"Results saved at: {result_file_path}")
+print(f"Loss curves saved at: {pdf_path}")
+print(f"Model saved at: {model_path}")
+
+# Print final average metrics
+print("\nFinal Average Metrics:")
+for name, value in zip(metric_names, mean_metrics):
+    print(f"{name}: {value:.4f}")
 
