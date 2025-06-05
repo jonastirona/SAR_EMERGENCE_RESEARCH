@@ -73,9 +73,9 @@ def evaluate_models_for_ar(test_AR, lstm_path, transformer_path):
 
     # Load and preprocess data
     size = 9
-    power_maps = np.load(f'/mmfs1/project/mx6/jst26/data/AR{test_AR}/mean_pmdop{test_AR}_flat.npz', allow_pickle=True)
-    mag_flux = np.load(f'/mmfs1/project/mx6/jst26/data/AR{test_AR}/mean_mag{test_AR}_flat.npz', allow_pickle=True)
-    intensities = np.load(f'/mmfs1/project/mx6/jst26/data/AR{test_AR}/mean_int{test_AR}_flat.npz', allow_pickle=True)
+    power_maps = np.load(f'/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/data/AR{test_AR}/mean_pmdop{test_AR}_flat.npz', allow_pickle=True)
+    mag_flux = np.load(f'/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/data/AR{test_AR}/mean_mag{test_AR}_flat.npz', allow_pickle=True)
+    intensities = np.load(f'/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/data/AR{test_AR}/mean_int{test_AR}_flat.npz', allow_pickle=True)
 
     power_maps23 = power_maps['arr_0'][rid_of_top*size:-rid_of_top*size, :]
     power_maps34 = power_maps['arr_1'][rid_of_top*size:-rid_of_top*size, :]

@@ -47,9 +47,9 @@ NOAA_second_int_map = find_closest_fits_frame_to_NOAA_record(intensity_files, NO
 #NOAA_second_int_map = np.random.rand(512, 512)  # Another random noise image
 
 #Preprocessing
-power_maps = np.load('/home/jonas/Documents/AR_PREDICTION_MODELS/data/AR{}/mean_tiles9/mean_pmdop{}_flat.npz'.format(test_AR,test_AR),allow_pickle=True) 
-mag_flux = np.load('/home/jonas/Documents/AR_PREDICTION_MODELS/data/AR{}/mean_tiles9/mean_mag{}_flat.npz'.format(test_AR,test_AR),allow_pickle=True)
-intensities = np.load('/home/jonas/Documents/AR_PREDICTION_MODELS/data/AR{}/mean_tiles9/mean_int{}_flat.npz'.format(test_AR,test_AR),allow_pickle=True) 
+power_maps = np.load('/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/data/AR{}/mean_tiles9/mean_pmdop{}_flat.npz'.format(test_AR,test_AR),allow_pickle=True) 
+mag_flux = np.load('/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/data/AR{}/mean_tiles9/mean_mag{}_flat.npz'.format(test_AR,test_AR),allow_pickle=True)
+intensities = np.load('/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/data/AR{}/mean_tiles9/mean_int{}_flat.npz'.format(test_AR,test_AR),allow_pickle=True) 
 power_maps23 = power_maps['arr_0']
 power_maps34 = power_maps['arr_1']
 power_maps45 = power_maps['arr_2']

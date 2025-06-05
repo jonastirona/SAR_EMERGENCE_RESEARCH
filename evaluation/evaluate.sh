@@ -15,7 +15,7 @@
 #SBATCH --mail-user=jst26@njit.edu
 
 module load wulver
-source sar-env/bin/activate
+source /mmfs1/project/mx6/jst26/sar-env/bin/activate
 
-cd /project/mx6/jst26/evaluation/
+cd /mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/evaluation/
 python eval_comparison.py

@@ -54,9 +54,9 @@ print('Load data and split in tiles for {} ARs'.format(len(ARs)))
 all_inputs = []
 all_intensities = []
 for AR in ARs_:
-    power_maps = np.load('../data/AR{}/mean_pmdop{}_flat.npz'.format(AR,AR),allow_pickle=True) 
-    mag_flux = np.load('../data/AR{}/mean_mag{}_flat.npz'.format(AR,AR),allow_pickle=True)
-    intensities = np.load('../data/AR{}/mean_int{}_flat.npz'.format(AR,AR),allow_pickle=True)
+    power_maps = np.load('/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/data/AR{}/mean_pmdop{}_flat.npz'.format(AR,AR),allow_pickle=True) 
+    mag_flux = np.load('/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/data/AR{}/mean_mag{}_flat.npz'.format(AR,AR),allow_pickle=True)
+    intensities = np.load('/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/data/AR{}/mean_int{}_flat.npz'.format(AR,AR),allow_pickle=True)
     power_maps23 = power_maps['arr_0']
     power_maps34 = power_maps['arr_1']
     power_maps45 = power_maps['arr_2']

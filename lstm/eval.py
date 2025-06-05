@@ -26,7 +26,7 @@ def eval_AR_emergence_with_plots(test_AR):
     warnings.filterwarnings('ignore')
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu') # Define the device (either 'cuda' for GPU or 'cpu' for CPU)
     print('Runs on: {}'.format(device)," / Using", torch.cuda.device_count(), "GPUs!")
-    pth_file = glob.glob('/home/jonas/Documents/AR_PREDICTION_MODELS/lstm/results/*.pth') # Assuming there's only one .pth file and its naming follows the specific pattern
+    pth_file = glob.glob('/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/lstm/results/*.pth') # Assuming there's only one .pth file and its naming follows the specific pattern
     filename = pth_file[0]
     matches = re.findall(r't(\d+)_r(\d+)_i(\d+)_n(\d+)_h(\d+)_e(\d+)_l([0-9.]+)\.pth', filename) # Extract numbers from the filename
     num_pred, rid_of_top, num_in, num_layers, hidden_size, n_epochs, learning_rate = (int(x) if i != 6 else float(x) for i, x in enumerate(matches[0])) # Unpack the matched values into variables
@@ -66,9 +66,9 @@ def eval_AR_emergence_with_plots(test_AR):
     #NOAA_second_int_map = np.random.rand(512, 512)  # Another random noise image
 
     #Preprocessing
-    power_maps = np.load('/home/jonas/Documents/AR_PREDICTION_MODELS/data/AR{}/mean_pmdop{}_flat.npz'.format(test_AR,test_AR),allow_pickle=True) 
-    mag_flux = np.load('/home/jonas/Documents/AR_PREDICTION_MODELS/data/AR{}/mean_mag{}_flat.npz'.format(test_AR,test_AR),allow_pickle=True)
-    intensities = np.load('/home/jonas/Documents/AR_PREDICTION_MODELS/data/AR{}/mean_int{}_flat.npz'.format(test_AR,test_AR),allow_pickle=True) 
+    power_maps = np.load('/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/data/AR{}/mean_pmdop{}_flat.npz'.format(test_AR,test_AR),allow_pickle=True) 
+    mag_flux = np.load('/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/data/AR{}/mean_mag{}_flat.npz'.format(test_AR,test_AR),allow_pickle=True)
+    intensities = np.load('/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/data/AR{}/mean_int{}_flat.npz'.format(test_AR,test_AR),allow_pickle=True) 
     power_maps23 = power_maps['arr_0']
     power_maps34 = power_maps['arr_1']
     power_maps45 = power_maps['arr_2']
