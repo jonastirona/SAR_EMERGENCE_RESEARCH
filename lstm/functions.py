@@ -193,44 +193,32 @@ def training_loop_w_stats(n_epochs, lstm, optimiser, loss_fn, X_train, y_train, 
     return results
 
 class LSTM(nn.Module):
-    def __init__(self, input_size, hidden_size, num_layers, output_length):
+    def __init__(self, input_size, hidden_size, num_layers, output_length, dropout=0.0):
         super(LSTM, self).__init__()
         self.hidden_size = hidden_size
         self.num_layers = num_layers
         self.output_length = output_length
         # Encoder
-        self.encoder_lstm = nn.LSTM(input_size, hidden_size, num_layers, batch_first=True)
+        self.encoder_lstm = nn.LSTM(input_size, hidden_size, num_layers, batch_first=True, dropout=dropout)
         # Decoder
-        self.decoder_lstm = nn.LSTM(hidden_size, hidden_size, num_layers, batch_first=True)
+        self.decoder_lstm = nn.LSTM(hidden_size, hidden_size, num_layers, batch_first=True, dropout=dropout)
         self.decoder_fc = nn.Linear(hidden_size, 1)  # Only outputting 1 value for each time step
 
     def forward(self, x):
         # Encoder
-        #print(np.shape(x))
         _, (hidden, cell) = self.encoder_lstm(x)
-        #print(np.shape(_))
         # Initial input for the decoder can be zeros with shape [batch_size, 1, hidden_size]
-        decoder_input = torch.zeros(x.size(0), 1, self.hidden_size).to(x.device) #change this!!!!!!
-        #print(np.shape(decoder_input))
+        decoder_input = torch.zeros(x.size(0), 1, self.hidden_size).to(x.device)
         outputs = []
         for t in range(self.output_length):
-            #print(t)
             # Decoder
             out_dec, (hidden, cell) = self.decoder_lstm(decoder_input, (hidden, cell))
-            #print(np.shape(out))
             out = self.decoder_fc(out_dec)
-            #print(np.shape(out))
             outputs.append(out)
-            # For the next iteration, you can use the output as input or just use zeros.
-            # If you want to use the output as input, make sure the dimensions match.
-            # Here, I'm continuing to use zeros for simplicity.
-            decoder_input = out_dec #torch.zeros(x.size(0), 1, self.hidden_size).to(x.device)
-            #print(np.shape(decoder_input))
+            # For the next iteration, use the decoder output as input
+            decoder_input = out_dec
         outputs = torch.cat(outputs, dim=1)
-        #print(np.shape(outputs))
         outputs = outputs.squeeze(-1)  # This removes the last dimension to ensure shape is [batch_size, output_length]
-        #print(np.shape(outputs))
-        #sys.exit()
         return outputs
 
 
