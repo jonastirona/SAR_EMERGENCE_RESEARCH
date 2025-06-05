@@ -1,0 +1,561 @@
+Best trial value: 0.006867301091551781
+Best trial params:
+num_heads: 8
+hidden_size: 408
+num_layers: 7
+ff_ratio: 7.313157861084029
+learning_rate: 0.009810255183792306
+dropout: 0.3973226820560444
+warmup_ratio: 0.0021978378487542277
+
+All trials:
+Trial 0:
+  Value: 0.02270694470498711
+  Params:
+    num_heads: 6
+    hidden_size: 486
+    num_layers: 6
+    ff_ratio: 5.59195090518222
+    learning_rate: 2.9380279387035334e-05
+    dropout: 0.07799726016810132
+    warmup_ratio: 0.011616722433639893
+
+Trial 1:
+  Value: 0.012832613848149776
+  Params:
+    num_heads: 14
+    hidden_size: 308
+    num_layers: 6
+    ff_ratio: 2.1235069657748147
+    learning_rate: 0.008123245085588688
+    dropout: 0.41622132040021087
+    warmup_ratio: 0.04246782213565523
+
+Trial 2:
+  Value: 0.027432896720711142
+  Params:
+    num_heads: 4
+    hidden_size: 96
+    num_layers: 3
+    ff_ratio: 5.148538589793427
+    learning_rate: 0.00019762189340280086
+    dropout: 0.14561457009902096
+    warmup_ratio: 0.1223705789444759
+
+Trial 3:
+  Value: 0.02908549952553585
+  Params:
+    num_heads: 4
+    hidden_size: 152
+    num_layers: 3
+    ff_ratio: 4.736419905302215
+    learning_rate: 0.0022673986523780395
+    dropout: 0.09983689107917987
+    warmup_ratio: 0.10284688768272232
+
+Trial 4:
+  Value: 0.4149251341819763
+  Params:
+    num_heads: 10
+    hidden_size: 30
+    num_layers: 5
+    ff_ratio: 3.0231447421237494
+    learning_rate: 1.5673095467235405e-05
+    dropout: 0.4744427686266666
+    warmup_ratio: 0.19312640661491187
+
+Trial 5:
+  Value: 0.01502989917062223
+  Params:
+    num_heads: 14
+    hidden_size: 154
+    num_layers: 1
+    ff_ratio: 6.105398159072942
+    learning_rate: 0.00020914981329035596
+    dropout: 0.06101911742238941
+    warmup_ratio: 0.09903538202225404
+
+Trial 6:
+  Value: 0.015773273922968657
+  Params:
+    num_heads: 2
+    hidden_size: 466
+    num_layers: 3
+    ff_ratio: 5.975133706123891
+    learning_rate: 8.612579192594876e-05
+    dropout: 0.2600340105889054
+    warmup_ratio: 0.10934205586865593
+
+Trial 7:
+  Value: 0.007211570511572063
+  Params:
+    num_heads: 4
+    hidden_size: 500
+    num_layers: 7
+    ff_ratio: 7.6369936493851345
+    learning_rate: 0.004835952776465951
+    dropout: 0.29894998940554257
+    warmup_ratio: 0.18437484700462337
+
+Trial 8:
+  Value: 0.03625002986518666
+  Params:
+    num_heads: 2
+    hidden_size: 102
+    num_layers: 1
+    ff_ratio: 3.951981984579586
+    learning_rate: 0.00014656553886225324
+    dropout: 0.13567451588694796
+    warmup_ratio: 0.1657475018303859
+
+Trial 9:
+  Value: 0.03131652462179772
+  Params:
+    num_heads: 6
+    hidden_size: 144
+    num_layers: 5
+    ff_ratio: 2.845545349848576
+    learning_rate: 0.002550298070162891
+    dropout: 0.03727532183988541
+    warmup_ratio: 0.19737738732010346
+
+Trial 10:
+  Value: 0.02420704880496487
+  Params:
+    num_heads: 10
+    hidden_size: 360
+    num_layers: 8
+    ff_ratio: 7.730839621858694
+    learning_rate: 0.0009028168422346188
+    dropout: 0.2876040334076363
+    warmup_ratio: 0.14607337904140194
+
+Trial 11:
+  Value: 0.0071892475098138675
+  Params:
+    num_heads: 16
+    hidden_size: 304
+    num_layers: 8
+    ff_ratio: 7.954333154551393
+    learning_rate: 0.006877477209765817
+    dropout: 0.39913585301982163
+    warmup_ratio: 0.03067363619026747
+
+Trial 12:
+  Value: 0.011104772594990209
+  Params:
+    num_heads: 16
+    hidden_size: 400
+    num_layers: 8
+    ff_ratio: 7.993978947458309
+    learning_rate: 0.007666859109081673
+    dropout: 0.3646691585283363
+    warmup_ratio: 0.05887160316902196
+
+Trial 13:
+  Value: 0.017826576897641645
+  Params:
+    num_heads: 8
+    hidden_size: 248
+    num_layers: 7
+    ff_ratio: 7.159826548696111
+    learning_rate: 0.0010217134766920355
+    dropout: 0.338585531934124
+    warmup_ratio: 0.06855985765326325
+
+Trial 14:
+  Value: 0.014402898255502805
+  Params:
+    num_heads: 12
+    hidden_size: 240
+    num_layers: 7
+    ff_ratio: 6.937185750636184
+    learning_rate: 0.003407019614122448
+    dropout: 0.19231651044202397
+    warmup_ratio: 0.025011595761002994
+
+Trial 15:
+  Value: 0.03135168745939154
+  Params:
+    num_heads: 16
+    hidden_size: 512
+    num_layers: 8
+    ff_ratio: 6.848396206682985
+    learning_rate: 0.0006594470685447036
+    dropout: 0.49943499517595863
+    warmup_ratio: 0.07400835474682523
+
+Trial 16:
+  Value: 0.006867301091551781
+  Params:
+    num_heads: 8
+    hidden_size: 408
+    num_layers: 7
+    ff_ratio: 7.313157861084029
+    learning_rate: 0.009810255183792306
+    dropout: 0.3973226820560444
+    warmup_ratio: 0.0021978378487542277
+
+Trial 17:
+  Value: 0.015111712875659577
+  Params:
+    num_heads: 8
+    hidden_size: 400
+    num_layers: 6
+    ff_ratio: 6.56636551398642
+    learning_rate: 0.0017888215493537306
+    dropout: 0.41652382625940776
+    warmup_ratio: 0.0018578803013898602
+
+Trial 18:
+  Value: 0.006954505774774589
+  Params:
+    num_heads: 12
+    hidden_size: 312
+    num_layers: 4
+    ff_ratio: 7.326646825016853
+    learning_rate: 0.00967479685122098
+    dropout: 0.4226703998099135
+    warmup_ratio: 0.03392743167288379
+
+Trial 19:
+  Value: 0.026993373315781354
+  Params:
+    num_heads: 12
+    hidden_size: 432
+    num_layers: 4
+    ff_ratio: 6.26110471641631
+    learning_rate: 0.00044853465777668615
+    dropout: 0.44786689695498894
+    warmup_ratio: 0.049855404882928056
+
+Trial 20:
+  Value: 0.024139767920132726
+  Params:
+    num_heads: 12
+    hidden_size: 336
+    num_layers: 4
+    ff_ratio: 4.346557692086979
+    learning_rate: 5.1652454401364524e-05
+    dropout: 0.21637280559024566
+    warmup_ratio: 0.022964043466677284
+
+Trial 21:
+  Value: 0.02280978831986431
+  Params:
+    num_heads: 14
+    hidden_size: 280
+    num_layers: 7
+    ff_ratio: 7.3907199638946555
+    learning_rate: 0.009832168492613204
+    dropout: 0.3735934740735538
+    warmup_ratio: 0.04011747312323645
+
+Trial 22:
+  Value: 0.019088533736066893
+  Params:
+    num_heads: 10
+    hidden_size: 210
+    num_layers: 2
+    ff_ratio: 7.300279515635072
+    learning_rate: 0.004648236388718801
+    dropout: 0.4070272599502985
+    warmup_ratio: 0.03051468039602807
+
+Trial 23:
+  Value: 0.029163603024790062
+  Params:
+    num_heads: 16
+    hidden_size: 352
+    num_layers: 5
+    ff_ratio: 7.992359477016824
+    learning_rate: 0.001464647664812708
+    dropout: 0.33739458270174094
+    warmup_ratio: 0.0023241923255105795
+
+Trial 24:
+  Value: 0.02584511876630131
+  Params:
+    num_heads: 8
+    hidden_size: 304
+    num_layers: 8
+    ff_ratio: 6.558329508856216
+    learning_rate: 0.00419232480308837
+    dropout: 0.4624944507502405
+    warmup_ratio: 0.07437830469667753
+
+Trial 25:
+  Value: 0.019373589736642317
+  Params:
+    num_heads: 14
+    hidden_size: 406
+    num_layers: 4
+    ff_ratio: 5.57187400932843
+    learning_rate: 0.006050368670100797
+    dropout: 0.37440060050641183
+    warmup_ratio: 0.01860598322183429
+
+Trial 26:
+  Value: 0.02684736854280345
+  Params:
+    num_heads: 12
+    hidden_size: 372
+    num_layers: 6
+    ff_ratio: 7.423966516648811
+    learning_rate: 0.0030796268490596193
+    dropout: 0.3162723623188138
+    warmup_ratio: 0.03513540284715023
+
+Trial 27:
+  Value: 0.018562921180273407
+  Params:
+    num_heads: 6
+    hidden_size: 312
+    num_layers: 7
+    ff_ratio: 6.852141750744151
+    learning_rate: 0.009517158696818368
+    dropout: 0.4186302054147285
+    warmup_ratio: 0.061836858839959
+
+Trial 28:
+  Value: 0.026954813650809227
+  Params:
+    num_heads: 10
+    hidden_size: 200
+    num_layers: 2
+    ff_ratio: 6.492509843496906
+    learning_rate: 0.0014796144911424904
+    dropout: 0.25417827001006915
+    warmup_ratio: 0.012692105061325124
+
+Trial 29:
+  Value: 0.01826798455440439
+  Params:
+    num_heads: 16
+    hidden_size: 448
+    num_layers: 6
+    ff_ratio: 5.647339692805637
+    learning_rate: 0.006129029814936534
+    dropout: 0.4435849383457133
+    warmup_ratio: 0.0879236767786917
+
+Trial 30:
+  Value: 0.01329211748961825
+  Params:
+    num_heads: 8
+    hidden_size: 272
+    num_layers: 5
+    ff_ratio: 7.064273029017967
+    learning_rate: 0.0004186368711746358
+    dropout: 0.00013105615235636803
+    warmup_ratio: 0.049194822273063
+
+Trial 31:
+  Value: 0.00838048753212206
+  Params:
+    num_heads: 4
+    hidden_size: 508
+    num_layers: 7
+    ff_ratio: 7.661554105099463
+    learning_rate: 0.004923359180149568
+    dropout: 0.30103162600971434
+    warmup_ratio: 0.15039953339924353
+
+Trial 32:
+  Value: 0.008675774748553522
+  Params:
+    num_heads: 6
+    hidden_size: 462
+    num_layers: 8
+    ff_ratio: 7.631556204591222
+    learning_rate: 0.005668797962745021
+    dropout: 0.38484943137879934
+    warmup_ratio: 0.17941186333070938
+
+Trial 33:
+  Value: 0.015746920916717498
+  Params:
+    num_heads: 4
+    hidden_size: 428
+    num_layers: 7
+    ff_ratio: 7.971018491932864
+    learning_rate: 0.003597212129078379
+    dropout: 0.3370884337135905
+    warmup_ratio: 0.1372978073727665
+
+Trial 34:
+  Value: 0.011894616420613601
+  Params:
+    num_heads: 14
+    hidden_size: 490
+    num_layers: 6
+    ff_ratio: 7.49786112005275
+    learning_rate: 0.0095589054639717
+    dropout: 0.3995181625136732
+    warmup_ratio: 0.010048361654891702
+
+Trial 35:
+  Value: 0.021141697384882717
+  Params:
+    num_heads: 2
+    hidden_size: 332
+    num_layers: 8
+    ff_ratio: 5.1699513511911945
+    learning_rate: 0.0023837328907109043
+    dropout: 0.4824965850143973
+    warmup_ratio: 0.12823557451477535
+
+Trial 36:
+  Value: 0.04985109131084755
+  Params:
+    num_heads: 6
+    hidden_size: 366
+    num_layers: 3
+    ff_ratio: 7.188326035899373
+    learning_rate: 1.2884413967811205e-05
+    dropout: 0.4322720171024576
+    warmup_ratio: 0.04584416888277053
+
+Trial 37:
+  Value: 0.02054560972028412
+  Params:
+    num_heads: 12
+    hidden_size: 288
+    num_layers: 7
+    ff_ratio: 5.771161366410291
+    learning_rate: 0.00688023834448244
+    dropout: 0.2871261862475425
+    warmup_ratio: 0.08448856342424531
+
+Trial 38:
+  Value: 0.02760848237667233
+  Params:
+    num_heads: 10
+    hidden_size: 470
+    num_layers: 5
+    ff_ratio: 6.706252797889258
+    learning_rate: 2.063133344162735e-05
+    dropout: 0.3541655961958463
+    warmup_ratio: 0.10850607749160052
+
+Trial 39:
+  Value: 0.0190265767974779
+  Params:
+    num_heads: 14
+    hidden_size: 14
+    num_layers: 6
+    ff_ratio: 6.2857293056351375
+    learning_rate: 0.0021434252700915347
+    dropout: 0.21232271664772784
+    warmup_ratio: 0.1771275204785847
+
+Trial 40:
+  Value: 0.02862860062450636
+  Params:
+    num_heads: 2
+    hidden_size: 386
+    num_layers: 3
+    ff_ratio: 3.7495701699927286
+    learning_rate: 0.003994920938283921
+    dropout: 0.3924744421145506
+    warmup_ratio: 0.012415349155232867
+
+Trial 41:
+  Value: 0.007350538784521632
+  Params:
+    num_heads: 4
+    hidden_size: 424
+    num_layers: 7
+    ff_ratio: 7.707991135865536
+    learning_rate: 0.005638932376752578
+    dropout: 0.2898173415768899
+    warmup_ratio: 0.153649416048442
+
+Trial 42:
+  Value: 0.008256323501700535
+  Params:
+    num_heads: 4
+    hidden_size: 432
+    num_layers: 8
+    ff_ratio: 7.7461318752150925
+    learning_rate: 0.006737115059541059
+    dropout: 0.2744905304512181
+    warmup_ratio: 0.16445228715741303
+
+Trial 43:
+  Value: 0.02495036303298548
+  Params:
+    num_heads: 4
+    hidden_size: 484
+    num_layers: 7
+    ff_ratio: 7.689804981287425
+    learning_rate: 0.003020187485767985
+    dropout: 0.31727941875511534
+    warmup_ratio: 0.16287259502959234
+
+Trial 44:
+  Value: 0.00846899050520733
+  Params:
+    num_heads: 6
+    hidden_size: 330
+    num_layers: 6
+    ff_ratio: 7.2767929911435285
+    learning_rate: 0.007713179314212536
+    dropout: 0.18998124914070683
+    warmup_ratio: 0.1852719070430281
+
+Trial 45:
+  Value: 0.023731517521082424
+  Params:
+    num_heads: 4
+    hidden_size: 220
+    num_layers: 8
+    ff_ratio: 2.5795143281722153
+    learning_rate: 0.0053349496526240055
+    dropout: 0.14626947708109067
+    warmup_ratio: 0.12157116063461314
+
+Trial 46:
+  Value: 0.020038870722055437
+  Params:
+    num_heads: 2
+    hidden_size: 424
+    num_layers: 4
+    ff_ratio: 7.013244225984377
+    learning_rate: 0.0001855290437361938
+    dropout: 0.35369066197437804
+    warmup_ratio: 0.19915199968980735
+
+Trial 47:
+  Value: 0.020897835283540188
+  Params:
+    num_heads: 6
+    hidden_size: 384
+    num_layers: 7
+    ff_ratio: 7.849913794976692
+    learning_rate: 0.007263154327199633
+    dropout: 0.24353014569273182
+    warmup_ratio: 0.15300845346016084
+
+Trial 48:
+  Value: 0.03794270401704125
+  Params:
+    num_heads: 8
+    hidden_size: 176
+    num_layers: 8
+    ff_ratio: 7.527005830103113
+    learning_rate: 0.0010445204516552013
+    dropout: 0.4626633390538274
+    warmup_ratio: 0.030392397599048892
+
+Trial 49:
+  Value: 0.06859748127753847
+  Params:
+    num_heads: 16
+    hidden_size: 64
+    num_layers: 7
+    ff_ratio: 2.0087000707565204
+    learning_rate: 8.983856802062442e-05
+    dropout: 0.428555943499202
+    warmup_ratio: 0.18751268949736954
+
