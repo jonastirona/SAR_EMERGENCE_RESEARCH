@@ -62,14 +62,10 @@ def evaluate_models_for_ar(test_AR, lstm_path, transformer_path):
 
     # Extract model parameters from transformer path
     matches = re.findall(r't(\d+)_r(\d+)_i(\d+)_n(\d+)_h(\d+)_e(\d+)_l([0-9.]+)\.pth', transformer_path)
-    num_pred, rid_of_top, _, _, hidden_size, n_epochs, learning_rate = (
+    num_pred, rid_of_top, _, num_layers, hidden_size, n_epochs, learning_rate = (
         int(x) if i != 6 else float(x) for i, x in enumerate(matches[0])
     )
     
-    # LSTM uses 3 layers, Transformer uses 2
-    lstm_layers = 3
-    transformer_layers = 2
-
     # Get AR settings
     starting_tile, before_plot, num_in, NOAA_first, NOAA_second = get_ar_settings(test_AR, rid_of_top)
     NOAA_first_record = mdates.date2num(NOAA_first)
@@ -77,9 +73,9 @@ def evaluate_models_for_ar(test_AR, lstm_path, transformer_path):
 
     # Load and preprocess data
     size = 9
-    power_maps = np.load(f'/home/jonas/Documents/AR_PREDICTION_MODELS/data/AR{test_AR}/mean_pmdop{test_AR}_flat.npz', allow_pickle=True)
-    mag_flux = np.load(f'/home/jonas/Documents/AR_PREDICTION_MODELS/data/AR{test_AR}/mean_mag{test_AR}_flat.npz', allow_pickle=True)
-    intensities = np.load(f'/home/jonas/Documents/AR_PREDICTION_MODELS/data/AR{test_AR}/mean_int{test_AR}_flat.npz', allow_pickle=True)
+    power_maps = np.load(f'/mmfs1/project/mx6/jst26/data/AR{test_AR}/mean_pmdop{test_AR}_flat.npz', allow_pickle=True)
+    mag_flux = np.load(f'/mmfs1/project/mx6/jst26/data/AR{test_AR}/mean_mag{test_AR}_flat.npz', allow_pickle=True)
+    intensities = np.load(f'/mmfs1/project/mx6/jst26/data/AR{test_AR}/mean_int{test_AR}_flat.npz', allow_pickle=True)
 
     power_maps23 = power_maps['arr_0'][rid_of_top*size:-rid_of_top*size, :]
     power_maps34 = power_maps['arr_1'][rid_of_top*size:-rid_of_top*size, :]
@@ -106,26 +102,36 @@ def evaluate_models_for_ar(test_AR, lstm_path, transformer_path):
 
     # Initialize models
     input_size = inputs.shape[1]
-    lstm_model = LSTM(input_size, hidden_size, lstm_layers, num_pred).to(device)
-    transformer_model = SpatioTemporalTransformer(
-        input_dim=input_size, seq_len=num_in, embed_dim=hidden_size,
-        num_heads=4, ff_dim=hidden_size*2, num_layers=transformer_layers,
-        output_dim=num_pred
-    ).to(device)
-
-    # Load model weights with proper state dict handling
-    # LSTM loading with module prefix handling
+    
+    # Initialize LSTM with the correct architecture from the trained model
     lstm_state_dict = torch.load(lstm_path, map_location=device)
+    lstm_hidden_size = 140  # From the saved model's architecture
+    lstm_num_layers = 5     # From the error message (l0-l4)
+    lstm_model = LSTM(input_size, lstm_hidden_size, lstm_num_layers, num_pred).to(device)
+    
+    # Load LSTM weights
     new_lstm_state_dict = OrderedDict()
     for k, v in lstm_state_dict.items():
-        name = k[7:] if k.startswith('module.') else k  # remove 'module.' prefix
+        name = k[7:] if k.startswith('module.') else k
         new_lstm_state_dict[name] = v
     lstm_model.load_state_dict(new_lstm_state_dict)
-    
-    # Transformer loading
-    transformer_model.load_state_dict(torch.load(transformer_path, map_location=device))
-    
     lstm_model.eval()
+
+    # Initialize Transformer with the correct architecture
+    transformer_model = SpatioTemporalTransformer(
+        input_dim=input_size,
+        seq_len=num_in,
+        embed_dim=64,    # From saved model
+        num_heads=4,     # 64/4=16 per head, which is reasonable
+        ff_dim=128,      # From saved model
+        num_layers=2,    # From saved model
+        output_dim=num_pred,
+        dropout=0.1      # Default value since not critical for inference
+    ).to(device)
+    
+    # Load Transformer weights
+    transformer_state_dict = torch.load(transformer_path, map_location=device)
+    transformer_model.load_state_dict(transformer_state_dict)
     transformer_model.eval()
 
     # Setup plotting
@@ -273,10 +279,10 @@ def evaluate_models_for_ar(test_AR, lstm_path, transformer_path):
 
     plt.tight_layout()
     plt.subplots_adjust(top=0.95, bottom=0.1)
-    plt.suptitle(f'Model Comparison for Active Region {test_AR}\n(Time Window={num_pred}h, Rid of Top={rid_of_top}, Input Length={num_in}h)', y=0.98)
+    plt.suptitle(f'Model Comparison for Active Region {test_AR}\n(Time Window={num_pred}h, Rid of Top={rid_of_top}, Input Length={num_in}h, Hidden Size={hidden_size}, Layers={num_layers}, LR={learning_rate}, Epochs={n_epochs})', y=0.98)
     
     # Save results
-    save_path = f"/home/jonas/Documents/AR_PREDICTION_MODELS/evaluation/results/AR{test_AR}_comparison.png"
+    save_path = f"/mmfs1/project/mx6/jst26/evaluation/results/AR{test_AR}_comparison.png"
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
     plt.savefig(save_path, dpi=300, bbox_inches='tight')
     print(f'Saved comparison plot at: {save_path}')
@@ -284,8 +290,8 @@ def evaluate_models_for_ar(test_AR, lstm_path, transformer_path):
 
 if __name__ == "__main__":
     # Model paths
-    lstm_path = "/home/jonas/Documents/AR_PREDICTION_MODELS/lstm/results/t12_r4_i110_n3_h64_e1000_l0.01.pth"
-    transformer_path = "/home/jonas/Documents/AR_PREDICTION_MODELS/transformer/results/t12_r4_i110_n3_h64_e1000_l0.01.pth"
+    lstm_path = "/mmfs1/project/mx6/jst26/lstm/results/t12_r4_i110_n5_h140_e300_l0.0012.pth"
+    transformer_path = "/mmfs1/project/mx6/jst26/transformer/results/st_transformer/t12_r4_i110_n3_h64_e300_l0.005.pth"
     
     # ARs to evaluate
     test_ARs = [11698, 11726, 13165, 13179, 13183]

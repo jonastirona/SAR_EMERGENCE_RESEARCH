@@ -102,7 +102,7 @@ loss_fn = torch.nn.MSELoss()  #torch.nn.L1Loss() #   # mean-squared error for re
 # Define paths for results
 base_path = './results'
 base_path = os.path.join(base_path, model_name)
-model_name_str = 't{}_r{}_i{}_n{}_h{}_e{}_l{}_no_sch'.format(num_pred,rid_of_top,num_in,num_layers,hidden_size,n_epochs,learning_rate)
+model_name_str = 't{}_r{}_i{}_n{}_h{}_e{}_l{}'.format(num_pred,rid_of_top,num_in,num_layers,hidden_size,n_epochs,learning_rate)
 result_file_path = os.path.join(base_path, f"{model_name_str}_training_stats.txt")
 pdf_path = os.path.join(base_path, f"{model_name_str}_loss_curves.pdf")
 model_path = os.path.join(base_path, f"{model_name_str}.pth")

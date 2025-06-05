@@ -25,10 +25,10 @@ print('Runs on: {}'.format(device))
 print("Using", torch.cuda.device_count(), "GPUs!")
 
 # Check if the correct number of arguments is provided
-if len(sys.argv) != 8:
-    print("Usage: script.py num_ARs n_epochs learning_rate rid_of_top hidden_size")
+if len(sys.argv) != 9:
+    print("Usage: script.py num_ARs n_epochs learning_rate rid_of_top hidden_size dropout")
     sys.exit(1)
-try: # Extract arguments and convert them to the appropriate types  #python3 train_w_stats.py 12 4 120 3 64 500 0.01
+try: # Extract arguments and convert them to the appropriate types
     num_pred = int(sys.argv[1]); print("Time Windows:", num_pred)
     rid_of_top = int(sys.argv[2]); print("Rid of Top:", rid_of_top)
     num_in = int(sys.argv[3]); print("Number of Inputs:", num_in)
@@ -36,6 +36,7 @@ try: # Extract arguments and convert them to the appropriate types  #python3 tra
     hidden_size = int(sys.argv[5]); print("Hidden Size:", hidden_size)
     n_epochs = int(sys.argv[6]); print("Number of Epochs:", n_epochs)
     learning_rate = float(sys.argv[7]); print("Learning Rate:", learning_rate)
+    dropout = float(sys.argv[8]); print("Dropout:", dropout)
 except ValueError as e:
     print("Error: Please ensure that all arguments are numbers.")
     sys.exit(1)
@@ -88,7 +89,7 @@ all_intensities = np.stack(all_intensities, axis=-1)
 input_size = np.shape(all_inputs)[1]
 
 # Start Training
-lstm = LSTM(input_size, hidden_size, num_layers, num_pred).to(device)
+lstm = LSTM(input_size, hidden_size, num_layers, num_pred, dropout=dropout).to(device)
 #if torch.cuda.device_count() > 1: lstm = torch.nn.DataParallel(lstm)
 loss_fn = torch.nn.MSELoss()  #torch.nn.L1Loss() #   # mean-squared error for regression
 #optimiser = torch.optim.Adam(lstm.parameters(), lr=learning_rate)
