@@ -163,9 +163,25 @@ def training_loop(n_epochs, lstm, optimiser, loss_fn, X_train, y_train, X_test, 
         if epoch % int(n_epochs/10) == 0: print("Epoch: %d, train loss: %1.5f, test loss: %1.5f" % (epoch, loss.item(), test_loss.item())) 
         scheduler.step()
 
-def training_loop_w_stats(n_epochs, lstm, optimiser, loss_fn, X_train, y_train, X_test, y_test,use_scheduler=True):
+def training_loop_w_stats(n_epochs, lstm, optimiser, loss_fn, X_train, y_train, X_test, y_test, use_scheduler=True):
+    # Warmup scheduler setup
+    warmup_epochs = n_epochs // 10  # 10% of total epochs for warmup
+    
     if use_scheduler:
-        scheduler = StepLR(optimiser, step_size=n_epochs//10, gamma=0.9)
+        # Linear warmup scheduler
+        def warmup_lambda(epoch):
+            if epoch < warmup_epochs:
+                return float(epoch) / float(max(1, warmup_epochs))
+            return 1.0
+        
+        warmup_scheduler = torch.optim.lr_scheduler.LambdaLR(optimiser, warmup_lambda)
+        # Cosine annealing scheduler
+        cosine_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimiser, 
+            T_max=n_epochs - warmup_epochs,
+            eta_min=0.0
+        )
+
     results = []
     pbar = trange(n_epochs, desc="Training", leave=True)
     
@@ -187,10 +203,17 @@ def training_loop_w_stats(n_epochs, lstm, optimiser, loss_fn, X_train, y_train, 
         with torch.no_grad():  # Turn off gradients for validation, saves memory and computations
             test_preds = lstm(X_test)
             test_loss = loss_fn(test_preds, y_test)
+        
         if use_scheduler:
-            learning_rate = scheduler.get_last_lr()[0]
+            if epoch < warmup_epochs:
+                warmup_scheduler.step()
+                learning_rate = warmup_scheduler.get_last_lr()[0]
+            else:
+                cosine_scheduler.step()
+                learning_rate = cosine_scheduler.get_last_lr()[0]
         else:
             learning_rate = optimiser.param_groups[0]['lr']
+            
         pbar.set_description(f"Epoch {epoch}")
         pbar.set_postfix({
             "train_loss": f"{loss.item():.5f}",
@@ -198,8 +221,6 @@ def training_loop_w_stats(n_epochs, lstm, optimiser, loss_fn, X_train, y_train, 
             "lr": f"{learning_rate:.5f}"
         })
         results.append((epoch, loss.item(), test_loss.item(), learning_rate)) # Collect results for saving
-        if use_scheduler:
-            scheduler.step()
     
     return results
 

@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 
 class SpatioTemporalTransformer(nn.Module):
-    def __init__(self, input_dim=5, seq_len=110, embed_dim=64, num_heads=4, ff_dim=128, num_layers=2, output_dim=12, dropout=0.1):
+    def __init__(self, input_dim=5, seq_len=110, embed_dim=408, num_heads=8, ff_dim=2984, num_layers=7, output_dim=12, dropout=0.3973226820560444):
         super(SpatioTemporalTransformer, self).__init__()
         
         self.embedding = nn.Linear(input_dim, embed_dim)
@@ -13,9 +13,12 @@ class SpatioTemporalTransformer(nn.Module):
             nhead=num_heads,
             dim_feedforward=ff_dim,
             dropout=dropout,
-            batch_first=True
+            batch_first=True,
+            norm_first=True
         )
         self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
+        
+        self.pre_mlp_norm = nn.LayerNorm(embed_dim)
 
         self.mlp_head = nn.Sequential(
             nn.Linear(embed_dim, ff_dim),
@@ -37,6 +40,7 @@ class SpatioTemporalTransformer(nn.Module):
         x = self.transformer_encoder(x)  # -> (batch, seq_len, embed_dim)
 
         x = x.mean(dim=1)  # Global average pooling over time
+        x = self.pre_mlp_norm(x)  # Apply layer norm before MLP head
         out = self.mlp_head(x)  # -> (batch, output_dim)
         return out
     
