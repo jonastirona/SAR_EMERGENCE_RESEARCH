@@ -78,66 +78,81 @@ def objective(trial):
     
     for AR in optimization_ARs:
         try:
+            print(f"\nProcessing AR {AR}")
             # Load and preprocess data for this AR
             inputs, intensities = load_and_preprocess_ar(AR, rid_of_top, size)
-    input_size = inputs.shape[1]
-    
-    # Create model
-    model = LSTM(input_size, hidden_size, num_layers, num_pred).to(device)
-    
-    # Training setup
-    criterion = nn.MSELoss()
-    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
-    scheduler = StepLR(optimizer, step_size=50, gamma=0.9)
-    
-            # Prepare data for training (middle tile) and validation (first tile)
-            middle_tile = tiles // 2
-            X_train, y_train = lstm_ready(middle_tile, size, inputs, intensities, num_in, num_pred)
-            X_test, y_test = lstm_ready(0, size, inputs, intensities, num_in, num_pred)
-    
-    # Reshape data
-    X_train = torch.reshape(X_train, (X_train.shape[0], num_in, X_train.shape[2]))
-    X_test = torch.reshape(X_test, (X_test.shape[0], num_in, X_test.shape[2]))
-    
-    # Move data to device
-    X_train = X_train.to(device)
-    y_train = y_train.to(device)
-    X_test = X_test.to(device)
-    y_test = y_test.to(device)
-    
-    # Training loop
-    n_epochs = 100  # Reduced epochs for optimization
-    best_val_loss = float('inf')
-    
-    for epoch in range(n_epochs):
-        model.train()
-        optimizer.zero_grad()
-        
-        # Forward pass
-        outputs = model(X_train)
-        loss = criterion(outputs, y_train)
-        
-        # Backward pass
-        loss.backward()
-        optimizer.step()
-        
-        # Validation
-        model.eval()
-        with torch.no_grad():
-            val_outputs = model(X_test)
-            val_loss = criterion(val_outputs, y_test)
+            input_size = inputs.shape[1]
             
-            if val_loss < best_val_loss:
-                best_val_loss = val_loss.item()
-        
-        scheduler.step()
-        
-        # Optuna pruning
-        trial.report(val_loss.item(), epoch)
-        if trial.should_prune():
-            raise optuna.TrialPruned()
-    
-            all_val_losses.append(best_val_loss)
+            # Create model
+            model = LSTM(input_size, hidden_size, num_layers, num_pred, dropout=dropout).to(device)
+            
+            # Training setup
+            criterion = nn.MSELoss()
+            optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+            scheduler = StepLR(optimizer, step_size=50, gamma=0.9)
+            
+            # Train on all available tiles
+            ar_val_losses = []
+            for tile in range(tiles):
+                print(f"Training on tile {tile}")
+                # Split data into train/val sets
+                X_data, y_data = lstm_ready(tile, size, inputs, intensities, num_in, num_pred)
+                train_size = int(0.8 * len(X_data))
+                
+                X_train = X_data[:train_size]
+                y_train = y_data[:train_size]
+                X_val = X_data[train_size:]
+                y_val = y_data[train_size:]
+                
+                # Reshape data
+                X_train = torch.reshape(X_train, (X_train.shape[0], num_in, X_train.shape[2]))
+                X_val = torch.reshape(X_val, (X_val.shape[0], num_in, X_val.shape[2]))
+                
+                # Move data to device
+                X_train = X_train.to(device)
+                y_train = y_train.to(device)
+                X_val = X_val.to(device)
+                y_val = y_val.to(device)
+                
+                # Training loop
+                n_epochs = 100  # Reduced epochs for optimization
+                best_val_loss = float('inf')
+                
+                for epoch in range(n_epochs):
+                    model.train()
+                    optimizer.zero_grad()
+                    
+                    # Forward pass
+                    outputs = model(X_train)
+                    loss = criterion(outputs, y_train)
+                    
+                    # Backward pass
+                    loss.backward()
+                    optimizer.step()
+                    
+                    # Validation
+                    model.eval()
+                    with torch.no_grad():
+                        val_outputs = model(X_val)
+                        val_loss = criterion(val_outputs, y_val)
+                        
+                        if val_loss < best_val_loss:
+                            best_val_loss = val_loss.item()
+                    
+                    scheduler.step()
+                    
+                    # Optuna pruning
+                    trial.report(val_loss.item(), epoch)
+                    if trial.should_prune():
+                        raise optuna.TrialPruned()
+                
+                ar_val_losses.append(best_val_loss)
+                print(f"Tile {tile} best validation loss: {best_val_loss:.6f}")
+            
+            # Average validation loss across all tiles for this AR
+            ar_avg_loss = np.mean(ar_val_losses)
+            all_val_losses.append(ar_avg_loss)
+            print(f"AR {AR} average validation loss: {ar_avg_loss:.6f}")
             
         except Exception as e:
             print(f"Error processing AR {AR}: {str(e)}")
@@ -146,7 +161,10 @@ def objective(trial):
     # Return average validation loss across all successfully processed ARs
     if not all_val_losses:
         return float('inf')
-    return np.mean(all_val_losses)
+    
+    final_loss = np.mean(all_val_losses)
+    print(f"\nTrial average validation loss across all ARs: {final_loss:.6f}")
+    return final_loss
 
 def main():
     # Create study

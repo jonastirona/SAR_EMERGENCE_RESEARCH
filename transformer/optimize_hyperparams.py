@@ -64,6 +64,7 @@ def objective(trial):
     num_in = 110
     n_epochs = 300  # Increased epochs for better convergence
     size = 9
+    tiles = size**2 - 2*size*rid_of_top
     
     # Hyperparameters to optimize
     # First select number of heads (must be a power of 2)
@@ -104,54 +105,71 @@ def objective(trial):
             inputs, intensities = load_and_preprocess_ar(AR, rid_of_top, size)
             input_size = inputs.shape[1]
 
-    # Prepare data for model
-            middle_tile = (size**2 - 2*size*rid_of_top) // 2  # Use middle tile for training
-            X_train, y_train = lstm_ready(middle_tile, size, inputs, intensities, num_in, num_pred)
-            X_test, y_test = lstm_ready(0, size, inputs, intensities, num_in, num_pred)  # Use first tile for validation
+            # Initialize model
+            model = SpatioTemporalTransformer(
+                input_dim=input_size,
+                seq_len=num_in,
+                embed_dim=hidden_size,
+                num_heads=num_heads,
+                ff_dim=ff_dim,
+                num_layers=num_layers,
+                output_dim=num_pred,
+                dropout=dropout
+            ).to(device)
 
-    # Move data to device
-    X_train = X_train.to(device)
-    y_train = y_train.to(device)
-    X_test = X_test.to(device)
-    y_test = y_test.to(device)
+            # Loss and optimizer
+            criterion = nn.MSELoss()
+            optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 
-    # Initialize model
-    model = SpatioTemporalTransformer(
-        input_dim=input_size,
-        seq_len=num_in,
-        embed_dim=hidden_size,
-        num_heads=num_heads,
-        ff_dim=ff_dim,
-        num_layers=num_layers,
-        output_dim=num_pred,
-        dropout=dropout
-    ).to(device)
+            # Train on all available tiles
+            ar_val_losses = []
+            for tile in range(tiles):
+                logging.info(f"Training on tile {tile}")
+                # Split data into train/val sets
+                X_data, y_data = lstm_ready(tile, size, inputs, intensities, num_in, num_pred)
+                train_size = int(0.8 * len(X_data))
+                
+                X_train = X_data[:train_size]
+                y_train = y_data[:train_size]
+                X_val = X_data[train_size:]
+                y_val = y_data[train_size:]
+                
+                # Reshape data for transformer
+                X_train = torch.reshape(X_train, (X_train.shape[0], num_in, X_train.shape[2]))
+                X_val = torch.reshape(X_val, (X_val.shape[0], num_in, X_val.shape[2]))
+                
+                # Move data to device
+                X_train = X_train.to(device)
+                y_train = y_train.to(device)
+                X_val = X_val.to(device)
+                y_val = y_val.to(device)
 
-    # Loss and optimizer
-    criterion = nn.MSELoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
-
-    # Training
-        results = training_loop_w_stats(
-            n_epochs=n_epochs,
-            lstm=model,
-            optimiser=optimizer,
-            loss_fn=criterion,
-            X_train=X_train,
-            y_train=y_train,
-            X_test=X_test,
-            y_test=y_test,
-            use_scheduler=True
-        )
-        
-        # Get the best validation loss
-        _, _, test_losses, _ = zip(*results)
-        best_val_loss = min(test_losses)
-            all_val_losses.append(best_val_loss)
-        
-            logging.info(f"AR {AR} best validation loss: {best_val_loss:.6f}")
+                # Training
+                results = training_loop_w_stats(
+                    n_epochs=n_epochs,
+                    lstm=model,
+                    optimiser=optimizer,
+                    loss_fn=criterion,
+                    X_train=X_train,
+                    y_train=y_train,
+                    X_test=X_val,
+                    y_test=y_val,
+                    use_scheduler=True
+                )
+                
+                # Get the best validation loss
+                _, _, test_losses, _ = zip(*results)
+                best_val_loss = min(test_losses)
+                ar_val_losses.append(best_val_loss)
+                
+                logging.info(f"Tile {tile} best validation loss: {best_val_loss:.6f}")
+            
+            # Average validation loss across all tiles for this AR
+            ar_avg_loss = np.mean(ar_val_losses)
+            all_val_losses.append(ar_avg_loss)
+            logging.info(f"AR {AR} average validation loss: {ar_avg_loss:.6f}")
     
-    except Exception as e:
+        except Exception as e:
             logging.error(f"Error processing AR {AR}: {str(e)}")
             continue
     
@@ -160,7 +178,7 @@ def objective(trial):
         return float('inf')
     
     avg_loss = np.mean(all_val_losses)
-    logging.info(f"\nAverage validation loss across all ARs: {avg_loss:.6f}")
+    logging.info(f"\nTrial average validation loss across all ARs: {avg_loss:.6f}")
     return avg_loss
 
 def main():
