@@ -108,37 +108,74 @@ all_training_results = {}
 
 # Open the file for writing training stats
 with open(result_file_path, "w") as file:
-    # Iterate over ARs and tiles, writing results to the same file
+    # Iterate over ARs, writing results to the same file
     for AR_ in range(len(ARs)):
-        power_maps = all_inputs[:,:,:,AR_] #change to inputs, its not only power maps
+        power_maps = all_inputs[:,:,:,AR_] 
         intensities = all_intensities[:,:,AR_]
-        for tile in range(tiles):
-            optimiser = torch.optim.Adam(lstm.parameters(), lr=learning_rate)
-            print('AR{} - Tile: {}'.format(ARs[AR_],tile))
-            X_train, y_train = lstm_ready(tile,size,power_maps,intensities,num_in,num_pred)
-            X_test, y_test = lstm_ready(int(tiles/2),size,power_maps,intensities,num_in,num_pred)
-            # reshaping to rows, timestamps, features
-            X_train_final = torch.reshape(X_train,(X_train.shape[0], num_in, X_train.shape[2]))
-            X_test_final = torch.reshape(X_test,(X_test.shape[0], num_in, X_test.shape[2])) 
-            # Move data to GPU
-            X_train_final = X_train_final.to(device)
-            y_train = y_train.to(device)
-            X_test_final = X_test_final.to(device)
-            y_test = y_test.to(device)
-            results = training_loop_w_stats(n_epochs=n_epochs,lstm=lstm,optimiser=optimiser,loss_fn=loss_fn,
-                        X_train=X_train_final,
-                        y_train=y_train,
-                        X_test=X_test_final,
-                        y_test=y_test)
+        
+        # Prepare data from all tiles
+        all_tiles = list(range(tiles))
+        X_trains = []
+        y_trains = []
+        
+        # Collect data from all tiles
+        for tile in all_tiles:
+            X_tile, y_tile = lstm_ready(tile, size, power_maps, intensities, num_in, num_pred)
+            X_trains.append(X_tile)
+            y_trains.append(y_tile)
+        
+        # Concatenate all tile data
+        X_train = torch.cat(X_trains, dim=0)
+        y_train = torch.cat(y_trains, dim=0)
+        
+        # Reshape data for LSTM
+        X_train = torch.reshape(X_train, (X_train.shape[0], num_in, X_train.shape[2]))
+        
+        # Move data to GPU
+        X_train = X_train.to(device)
+        y_train = y_train.to(device)
+        
+        # For validation, use all tiles with different splits
+        X_test_tiles = []
+        y_test_tiles = []
+        for tile in all_tiles:
+            X_test, y_test = lstm_ready(tile, size, power_maps, intensities, num_in, num_pred)
+            X_test = torch.reshape(X_test, (X_test.shape[0], num_in, X_test.shape[2]))
+            X_test_tiles.append(X_test.to(device))
+            y_test_tiles.append(y_test.to(device))
+        
+        # Initialize optimizer for this AR
+        optimiser = torch.optim.Adam(lstm.parameters(), lr=learning_rate)
+        print(f'Training on AR{ARs[AR_]} - All Tiles')
+        
+        # Train on all tiles together
+        results = training_loop_w_stats(
+            n_epochs=n_epochs,
+            lstm=lstm,
+            optimiser=optimiser,
+            loss_fn=loss_fn,
+            X_train=X_train,
+            y_train=y_train,
+            X_test=X_test_tiles[0],  # Use first tile for main validation
+            y_test=y_test_tiles[0]
+        )
+        
+        # Store results for plotting
+        all_training_results[f'AR{ARs[AR_]}'] = results
+        
+        # Write AR header
+        file.write(f"\nAR {ARs[AR_]} - All Tiles\n")
+        file.write("Epoch, Train Loss, Test Loss, Learning Rate\n")
+        for epoch, train_loss, test_loss, lr in results:
+            file.write(f"{epoch}, {train_loss:.5f}, {test_loss:.5f}, {lr:.5f}\n")
             
-            # Store results for plotting
-            all_training_results[f'AR{ARs[AR_]}_Tile{tile}'] = results
-            
-            # Write AR and tile header
-            file.write(f"\nAR {ARs[AR_]} - Tile {tile}\n")
-            file.write("Epoch, Train Loss, Test Loss, Learning Rate\n")
-            for epoch, train_loss, test_loss, lr in results:
-                file.write(f"{epoch}, {train_loss:.5f}, {test_loss:.5f}, {lr:.5f}\n")
+        # Evaluate on each tile separately for detailed metrics
+        file.write("\nPer-tile validation metrics after training:\n")
+        for tile in all_tiles:
+            with torch.no_grad():
+                test_pred = lstm(X_test_tiles[tile])
+                test_loss = loss_fn(test_pred, y_test_tiles[tile])
+                file.write(f"Tile {tile} - Test Loss: {test_loss:.5f}\n")
 
 # Create PDF with loss curves
 with PdfPages(pdf_path) as pdf:
@@ -177,8 +214,8 @@ with PdfPages(pdf_path) as pdf:
     # Calculate metrics for each AR and tile
     for key, results in all_training_results.items():
         # Get the final predictions for this AR/tile
-        final_predictions = lstm(X_test_final).detach().cpu().numpy()
-        true_values = y_test.cpu().numpy()
+        final_predictions = lstm(X_test_tiles[int(key[-1])]).detach().cpu().numpy()
+        true_values = y_test_tiles[int(key[-1])].cpu().numpy()
         
         # Calculate metrics
         metrics = calculate_metrics(true_values, final_predictions)

@@ -7,7 +7,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
-#SBATCH --gres=gpu:1
+#SBATCH --gres=gpu:2
 #SBATCH --time=72:00:00
 #SBATCH --output=%x_%j.out
 #SBATCH --error=%x_%j.err
@@ -17,11 +17,7 @@
 module load wulver
 source sar-env/bin/activate
 
-cd /project/mx6/jst26/transformer/
-
-# Set environment variables for better performance
-export CUDA_LAUNCH_BLOCKING=1
-export TORCH_CUDA_ARCH_LIST="7.0;7.5;8.0;8.6"
+cd /project/mx6/jst26/SAR_EMERGENCE_RESEARCH/transformer/
 
 # Run optimization with more trials
-python optimize_hyperparams.py
+python optimize_shape.py
