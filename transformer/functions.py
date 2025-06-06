@@ -445,6 +445,36 @@ def highlight_tile(ax, tile_number, divisions=9, color='r', linewidth=2):
     rect = Rectangle((x, y), tile_width, tile_height, linewidth=linewidth, edgecolor=color, facecolor='none')
     ax.add_patch(rect)
 
+def calculate_extended_metrics(model, timeline_true, timeline_predicted, training_time=None):
+    """Calculate extended metrics including RMSE@1, RMSE@5, parameter count, and training time."""
+    # Basic metrics
+    MAE, MSE, RMSE, RMSLE, R_squared = calculate_metrics(timeline_true, timeline_predicted)
+    
+    # Calculate RMSE@1 (RMSE for 1-hour prediction)
+    if len(timeline_true.shape) > 1:
+        RMSE_1 = np.sqrt(np.mean(np.square(timeline_predicted[:, 0] - timeline_true[:, 0])))
+        # Calculate RMSE@5 (RMSE for 5-hour prediction)
+        if timeline_true.shape[1] >= 5:
+            RMSE_5 = np.sqrt(np.mean(np.square(timeline_predicted[:, 4] - timeline_true[:, 4])))
+        else:
+            RMSE_5 = None
+    else:
+        RMSE_1 = RMSE
+        RMSE_5 = None
+    
+    # Calculate parameter count
+    param_count = sum(p.numel() for p in model.parameters())
+    
+    return {
+        'MAE': MAE,
+        'RMSE': RMSE,
+        'R2': R_squared,
+        'params': param_count,
+        'train_time': training_time,
+        'RMSE@1': RMSE_1,
+        'RMSE@5': RMSE_5
+    }
+
 
 
 
