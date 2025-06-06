@@ -104,12 +104,14 @@ def evaluate_models_for_ar(test_AR, lstm_path, transformer_path):
     input_size = inputs.shape[1]
     
     # Initialize LSTM with the correct architecture from the trained model
-    lstm_state_dict = torch.load(lstm_path, map_location=device)
-    lstm_hidden_size = 140  # From the saved model's architecture
-    lstm_num_layers = 5     # From the error message (l0-l4)
-    lstm_model = LSTM(input_size, lstm_hidden_size, lstm_num_layers, num_pred).to(device)
+    input_size = 5  # Fixed input size (4 power maps + 1 magnetic flux)
+    hidden_size = 64  # Original hidden size from checkpoint
+    num_layers = 3  # Original number of layers from checkpoint
+    
+    lstm_model = LSTM(input_size, hidden_size, num_layers, num_pred).to(device)
     
     # Load LSTM weights
+    lstm_state_dict = torch.load(lstm_path, map_location=device)
     new_lstm_state_dict = OrderedDict()
     for k, v in lstm_state_dict.items():
         name = k[7:] if k.startswith('module.') else k
@@ -121,12 +123,12 @@ def evaluate_models_for_ar(test_AR, lstm_path, transformer_path):
     transformer_model = SpatioTemporalTransformer(
         input_dim=input_size,
         seq_len=num_in,
-        embed_dim=64,    # From saved model
-        num_heads=4,     # 64/4=16 per head, which is reasonable
-        ff_dim=128,      # From saved model
-        num_layers=2,    # From saved model
+        embed_dim=408,
+        num_heads=8,
+        ff_dim=2984,
+        num_layers=7,
         output_dim=num_pred,
-        dropout=0.1      # Default value since not critical for inference
+        dropout=0.1
     ).to(device)
     
     # Load Transformer weights
@@ -175,9 +177,12 @@ def evaluate_models_for_ar(test_AR, lstm_path, transformer_path):
 
         # Main prediction plot
         ax0 = plt.subplot(gs[0])
+        # Plot raw data and predictions with full opacity
         ax0.plot(time_cut_mpl, np.concatenate((int_before_pred, true)), 'k-', label='Observed', alpha=0.7)
         ax0.plot(time_cut_mpl, np.concatenate((nan_array, lstm_pred)), 'b-', label='LSTM Prediction', alpha=0.7)
         ax0.plot(time_cut_mpl, np.concatenate((nan_array, transformer_pred)), 'r-', label='Transformer Prediction', alpha=0.7)
+        # Plot smoothed data with lower opacity
+        ax0.plot(time_cut_mpl, smooth_with_numpy(np.concatenate((int_before_pred, true))), 'k-', label='Observed (Smoothed)', alpha=0.25)
         ax0.axvline(x=NOAA_first_record, color='magenta', linestyle='--', label='NOAA 1st Record')
         ax0.axvline(x=NOAA_second_record, color='darkmagenta', linestyle='--', label='After Emergence')
         ax0.set_ylabel(f'Normalized Intensity\nTile {display_tile}')
@@ -282,7 +287,7 @@ def evaluate_models_for_ar(test_AR, lstm_path, transformer_path):
     plt.suptitle(f'Model Comparison for Active Region {test_AR}\n(Time Window={num_pred}h, Rid of Top={rid_of_top}, Input Length={num_in}h, Hidden Size={hidden_size}, Layers={num_layers}, LR={learning_rate}, Epochs={n_epochs})', y=0.98)
     
     # Save results
-    save_path = f"/mmfs1/project/mx6/jst26/evaluation/results/AR{test_AR}_comparison.png"
+    save_path = f"/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/evaluation/results/AR{test_AR}_comparison.png"
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
     plt.savefig(save_path, dpi=300, bbox_inches='tight')
     print(f'Saved comparison plot at: {save_path}')
@@ -290,8 +295,8 @@ def evaluate_models_for_ar(test_AR, lstm_path, transformer_path):
 
 if __name__ == "__main__":
     # Model paths
-    lstm_path = "/mmfs1/project/mx6/jst26/lstm/results/t12_r4_i110_n5_h140_e300_l0.0012.pth"
-    transformer_path = "/mmfs1/project/mx6/jst26/transformer/results/st_transformer/t12_r4_i110_n3_h64_e300_l0.005.pth"
+    lstm_path = "/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/lstm/results/t12_r4_i110_n3_h64_e1000_l0.01.pth"
+    transformer_path = "/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/transformer/results/st_transformer/t12_r4_i110_n7_h408_e500_l0.009810255183792306.pth"
     
     # ARs to evaluate
     test_ARs = [11698, 11726, 13165, 13179, 13183]

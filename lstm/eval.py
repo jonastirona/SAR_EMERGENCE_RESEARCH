@@ -96,15 +96,22 @@ def eval_AR_emergence_with_plots(test_AR):
     inputs = np.concatenate([stacked_maps, mag_flux_reshaped], axis=1)
     input_size = np.shape(inputs)[1]
 
+    # Initialize the LSTM with the correct architecture from the saved checkpoint
+    input_size = 5  # Fixed input size (4 power maps + 1 magnetic flux)
+    hidden_size = 64  # Original hidden size
+    num_layers = 3  # Original number of layers
+    num_pred = 12  # Number of time steps to predict
+    rid_of_top = 1  # As redefined in the code
+    
     # Initialize the LSTM and move it to GPU
     lstm = LSTM(input_size, hidden_size, num_layers, num_pred).to(device)
-    saved_state_dict = torch.load(filename,map_location=device) # Load the state_dict you saved during training
-    new_state_dict = OrderedDict() # Create a new state_dict without the 'module.' prefix
+    saved_state_dict = torch.load(filename, map_location=device)
+    new_state_dict = OrderedDict()
     for k, v in saved_state_dict.items():
         name = k[7:] if k.startswith('module.') else k  # remove 'module.' prefix
         new_state_dict[name] = v
-    lstm.load_state_dict(new_state_dict) # Load the corrected state_dict into your model
-    lstm.eval() # Set the model to evaluation mode
+    lstm.load_state_dict(new_state_dict)
+    lstm.eval()  # Set the model to evaluation mode
 
     # Assuming prediction, y_test_tensors, ARs, learning_rate, and n_epochs are already defined
     fig = plt.figure(figsize=(12, 10))  # Adjust the figure size if necessary
