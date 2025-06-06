@@ -15,7 +15,7 @@ import re
 from transformer.functions import (
     split_image, get_piece_means, dtws, lstm_ready, min_max_scaling,
     calculate_metrics, emergence_indication, smooth_with_numpy,
-    recalibrate, add_grid_lines, highlight_tile, LSTM
+    recalibrate, add_grid_lines, highlight_tile, LSTM, calculate_extended_metrics
 )
 from transformer.models.st_transformer import SpatioTemporalTransformer
 
@@ -260,32 +260,40 @@ def evaluate_models_for_ar(test_AR, lstm_path, transformer_path):
         ax2.set_ylabel(r'$\frac{d Pred}{dt}$')
 
         # Calculate metrics
-        metrics_lstm = calculate_metrics(true, lstm_pred)
-        metrics_transformer = calculate_metrics(true, transformer_pred)
+        metrics_lstm = calculate_extended_metrics(lstm_model, true, lstm_pred)
+        metrics_transformer = calculate_extended_metrics(transformer_model, true, transformer_pred)
         all_metrics_lstm.append(metrics_lstm)
         all_metrics_transformer.append(metrics_transformer)
         
         # Print metrics
-        print(f"LSTM RMSE: {metrics_lstm[2]:.3f}")
-        print(f"Transformer RMSE: {metrics_transformer[2]:.3f}")
+        print(f"LSTM RMSE: {metrics_lstm['RMSE']:.3f}")
+        print(f"Transformer RMSE: {metrics_transformer['RMSE']:.3f}")
 
     # Add overall metrics
-    all_metrics_lstm_np = np.array(all_metrics_lstm)
-    all_metrics_transformer_np = np.array(all_metrics_transformer)
-    means_lstm = np.mean(all_metrics_lstm_np, axis=0)
-    means_transformer = np.mean(all_metrics_transformer_np, axis=0)
-    
+    mean_metrics_lstm = {name: np.mean([m[name] for m in all_metrics_lstm]) for name in metrics_lstm.keys()}
+    mean_metrics_transformer = {name: np.mean([m[name] for m in all_metrics_transformer]) for name in metrics_transformer.keys()}
+
+    # Create comparison table
     metrics_text = (
-        f'Average Evaluation Metrics:\n'
-        f'LSTM Model: MAE={means_lstm[0]:.3f}, MSE={means_lstm[1]:.3f}, RMSE={means_lstm[2]:.3f}, R²={means_lstm[4]:.3f}\n'
-        f'Transformer Model: MAE={means_transformer[0]:.3f}, MSE={means_transformer[1]:.3f}, RMSE={means_transformer[2]:.3f}, R²={means_transformer[4]:.3f}'
+        'Model Comparison Metrics:\n\n'
+        f"{'Metric':<15} {'LSTM':<12} {'Transformer':<12}\n"
+        f"{'-'*40}\n"
+        f"{'Parameters':<15} {mean_metrics_lstm['params']/1e6:.1f}M {mean_metrics_transformer['params']/1e6:.1f}M\n"
+        f"{'Train Time':<15} {mean_metrics_lstm['train_time']:.1f}min {mean_metrics_transformer['train_time']:.1f}min\n"
+        f"{'MAE':<15} {mean_metrics_lstm['MAE']:.3f} {mean_metrics_transformer['MAE']:.3f}\n"
+        f"{'RMSE':<15} {mean_metrics_lstm['RMSE']:.3f} {mean_metrics_transformer['RMSE']:.3f}\n"
+        f"{'R²':<15} {mean_metrics_lstm['R2']:.3f} {mean_metrics_transformer['R2']:.3f}\n"
+        f"{'RMSE@1':<15} {mean_metrics_lstm['RMSE@1']:.3f} {mean_metrics_transformer['RMSE@1']:.3f}\n"
+        f"{'RMSE@5':<15} {mean_metrics_lstm['RMSE@5']:.3f} {mean_metrics_transformer['RMSE@5']:.3f}\n"
     )
-    fig.text(0.5, 0.02, metrics_text, ha='center', va='bottom', fontsize=10)
+
+    # Add metrics table to plot
+    fig.text(0.5, 0.02, metrics_text, ha='center', va='bottom', fontsize=10, family='monospace')
 
     plt.tight_layout()
-    plt.subplots_adjust(top=0.95, bottom=0.1)
-    plt.suptitle(f'Model Comparison for Active Region {test_AR}\n(Time Window={num_pred}h, Rid of Top={rid_of_top}, Input Length={num_in}h, Hidden Size={hidden_size}, Layers={num_layers}, LR={learning_rate}, Epochs={n_epochs})', y=0.98)
-    
+    plt.subplots_adjust(top=0.95, bottom=0.2)  # Increased bottom margin for metrics table
+    plt.suptitle(f'Model Comparison for Active Region {test_AR}\n(Time Window={num_pred}h, Rid of Top={rid_of_top}, Input Length={num_in}h)', y=0.98)
+
     # Save results
     save_path = f"/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/evaluation/results/AR{test_AR}_comparison.png"
     os.makedirs(os.path.dirname(save_path), exist_ok=True)

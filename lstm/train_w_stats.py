@@ -6,7 +6,7 @@ import numpy as np
 import sys
 from PIL import Image
 from sklearn.model_selection import train_test_split
-from functions import split_image, get_piece_means, dtws, lstm_ready, training_loop, training_loop_w_stats, LSTM, split_sequences, min_max_scaling, calculate_metrics
+from functions import split_image, get_piece_means, dtws, lstm_ready, training_loop, training_loop_w_stats, LSTM, split_sequences, min_max_scaling, calculate_metrics, calculate_extended_metrics
 import time
 import torch
 import torch.nn as nn
@@ -180,8 +180,8 @@ with open(result_file_path, "w") as file:
 # Create PDF with loss curves
 with PdfPages(pdf_path) as pdf:
     # Create summary plots
-    fig = plt.figure(figsize=(15, 10))
-    gs = plt.GridSpec(2, 2, figure=fig)
+    fig = plt.figure(figsize=(15, 12))  # Increased height for new metrics
+    gs = plt.GridSpec(3, 2, figure=fig)  # Changed to 3 rows
     
     # Plot 1: Average losses across all tiles
     ax1 = fig.add_subplot(gs[0, :])
@@ -212,30 +212,49 @@ with PdfPages(pdf_path) as pdf:
     all_metrics = []
     
     # Calculate metrics for each AR and tile
+    training_time = (time.time() - start_time) / 60  # Convert to minutes
     for key, results in all_training_results.items():
         # Get the final predictions for this AR/tile
         final_predictions = lstm(X_test_tiles[int(key[-1])]).detach().cpu().numpy()
         true_values = y_test_tiles[int(key[-1])].cpu().numpy()
         
-        # Calculate metrics
-        metrics = calculate_metrics(true_values, final_predictions)
+        # Calculate extended metrics
+        metrics = calculate_extended_metrics(lstm, true_values, final_predictions, training_time)
         all_metrics.append(metrics)
     
-    # Convert to numpy array for easier manipulation
-    all_metrics = np.array(all_metrics)
+    # Convert metrics to arrays for plotting
+    metric_names = ['MAE', 'RMSE', 'R2', 'RMSE@1', 'RMSE@5']
+    metric_values = [[m[name] for m in all_metrics] for name in metric_names]
     
     # Create box plot of metrics
-    metric_names = ['MAE', 'MSE', 'RMSE', 'RMSLE', 'R²']
-    bp = ax3.boxplot(all_metrics, labels=metric_names)
+    bp = ax3.boxplot(metric_values, labels=metric_names)
     ax3.set_title('Distribution of Evaluation Metrics')
     ax3.grid(True)
     
     # Add mean values as text
-    mean_metrics = np.mean(all_metrics, axis=0)
-    textstr = '\n'.join([f'{name}: {val:.4f}' for name, val in zip(metric_names, mean_metrics)])
-    props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
-    ax3.text(0.05, 0.95, textstr, transform=ax3.transAxes, fontsize=8,
-             verticalalignment='top', bbox=props)
+    mean_metrics = {name: np.mean([m[name] for m in all_metrics]) for name in metric_names}
+    param_count = all_metrics[0]['params']  # Same for all tiles
+    
+    # Plot 4: Extended Metrics Table
+    ax4 = fig.add_subplot(gs[2, :])
+    ax4.axis('off')
+    
+    # Create table data
+    table_data = [
+        ['Metric', 'Value'],
+        ['Parameters', f'{param_count/1e6:.1f}M'],
+        ['Training Time', f'{training_time:.1f} min'],
+        ['MAE', f'{mean_metrics["MAE"]:.3f}'],
+        ['RMSE', f'{mean_metrics["RMSE"]:.3f}'],
+        ['R²', f'{mean_metrics["R2"]:.3f}'],
+        ['RMSE@1', f'{mean_metrics["RMSE@1"]:.3f}'],
+        ['RMSE@5', f'{mean_metrics["RMSE@5"]:.3f}' if mean_metrics["RMSE@5"] is not None else 'N/A']
+    ]
+    
+    table = ax4.table(cellText=table_data, loc='center', cellLoc='center')
+    table.auto_set_font_size(False)
+    table.set_fontsize(9)
+    table.scale(1.2, 1.5)
     
     plt.suptitle(f'Training Summary - LSTM\nParameters: TW={num_pred}, RoT={rid_of_top}, In={num_in}, Layers={num_layers}, Hidden={hidden_size}', 
                  fontsize=12)
@@ -251,7 +270,11 @@ print(f"Results saved at: {result_file_path}")
 print(f"Loss curves saved at: {pdf_path}")
 print(f"Model saved at: {model_path}")
 
-# Print final average metrics
-print("\nFinal Average Metrics:")
-for name, value in zip(metric_names, mean_metrics):
-    print(f"{name}: {value:.4f}")
+# Print final metrics in table format
+print("\nFinal Metrics:")
+print("-" * 40)
+print(f"{'Metric':<15} {'Value':<10}")
+print("-" * 40)
+for row in table_data[1:]:
+    print(f"{row[0]:<15} {row[1]:<10}")
+print("-" * 40)
