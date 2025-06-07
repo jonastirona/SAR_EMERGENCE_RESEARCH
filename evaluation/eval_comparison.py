@@ -101,10 +101,18 @@ def evaluate_models_for_ar(test_AR, lstm_path, transformer_path):
     inputs = np.concatenate([stacked_maps, mag_flux], axis=1)
 
     # Initialize models
-    input_size = inputs.shape[1]
+    input_size = 5  # Fixed input size (4 power maps + 1 magnetic flux)
+    
+    # Print debug information
+    print(f"\nTransformer parameters:")
+    print(f"hidden_size (embed_dim): {hidden_size}")
+    print(f"num_heads: 10")
+    print(f"num_layers: {num_layers}")
+    print(f"num_pred: {num_pred}")
+    print(f"input_size: {input_size}")
+    print(f"num_in: {num_in}")
     
     # Initialize LSTM with the correct architecture from the trained model
-    input_size = 5  # Fixed input size (4 power maps + 1 magnetic flux)
     hidden_size = 64  # Original hidden size from checkpoint
     num_layers = 3  # Original number of layers from checkpoint
     
@@ -123,12 +131,12 @@ def evaluate_models_for_ar(test_AR, lstm_path, transformer_path):
     transformer_model = SpatioTemporalTransformer(
         input_dim=input_size,
         seq_len=num_in,
-        embed_dim=408,
-        num_heads=8,
-        ff_dim=2984,
-        num_layers=7,
-        output_dim=num_pred,
-        dropout=0.1
+        embed_dim=220,
+        num_heads=10,
+        ff_dim=int(220 * 3.41),
+        num_layers=2,
+        output_dim=12,
+        dropout=0.16292645173701356
     ).to(device)
     
     # Load Transformer weights
@@ -260,32 +268,49 @@ def evaluate_models_for_ar(test_AR, lstm_path, transformer_path):
         ax2.set_ylabel(r'$\frac{d Pred}{dt}$')
 
         # Calculate metrics
-        metrics_lstm = calculate_extended_metrics(lstm_model, true, lstm_pred)
-        metrics_transformer = calculate_extended_metrics(transformer_model, true, transformer_pred)
+        metrics_lstm = calculate_extended_metrics(lstm_model, true, lstm_pred, training_time=0)  # Set training_time=0 since we're evaluating
+        metrics_transformer = calculate_extended_metrics(transformer_model, true, transformer_pred, training_time=0)
         all_metrics_lstm.append(metrics_lstm)
         all_metrics_transformer.append(metrics_transformer)
         
         # Print metrics
-        print(f"LSTM RMSE: {metrics_lstm['RMSE']:.3f}")
-        print(f"Transformer RMSE: {metrics_transformer['RMSE']:.3f}")
+        print(f"\nTile {display_tile} Metrics:")
+        print(f"LSTM - MAE: {metrics_lstm['MAE']:.3f}, RMSE: {metrics_lstm['RMSE']:.3f}, R2: {metrics_lstm['R2']:.3f}")
+        print(f"Transformer - MAE: {metrics_transformer['MAE']:.3f}, RMSE: {metrics_transformer['RMSE']:.3f}, R2: {metrics_transformer['R2']:.3f}")
 
-    # Add overall metrics
-    mean_metrics_lstm = {name: np.mean([m[name] for m in all_metrics_lstm]) for name in metrics_lstm.keys()}
-    mean_metrics_transformer = {name: np.mean([m[name] for m in all_metrics_transformer]) for name in metrics_transformer.keys()}
+    # Calculate mean metrics only if we have valid metrics
+    if all_metrics_lstm and all_metrics_transformer:
+        # Get a list of all metric names from the first metrics dictionary
+        metric_names = list(all_metrics_lstm[0].keys())
+        
+        # Calculate mean metrics, handling potential None values
+        mean_metrics_lstm = {}
+        mean_metrics_transformer = {}
+        for name in metric_names:
+            lstm_values = [m[name] for m in all_metrics_lstm if m[name] is not None]
+            transformer_values = [m[name] for m in all_metrics_transformer if m[name] is not None]
+            
+            mean_metrics_lstm[name] = np.mean(lstm_values) if lstm_values else None
+            mean_metrics_transformer[name] = np.mean(transformer_values) if transformer_values else None
 
-    # Create comparison table
-    metrics_text = (
-        'Model Comparison Metrics:\n\n'
-        f"{'Metric':<15} {'LSTM':<12} {'Transformer':<12}\n"
-        f"{'-'*40}\n"
-        f"{'Parameters':<15} {mean_metrics_lstm['params']/1e6:.1f}M {mean_metrics_transformer['params']/1e6:.1f}M\n"
-        f"{'Train Time':<15} {mean_metrics_lstm['train_time']:.1f}min {mean_metrics_transformer['train_time']:.1f}min\n"
-        f"{'MAE':<15} {mean_metrics_lstm['MAE']:.3f} {mean_metrics_transformer['MAE']:.3f}\n"
-        f"{'RMSE':<15} {mean_metrics_lstm['RMSE']:.3f} {mean_metrics_transformer['RMSE']:.3f}\n"
-        f"{'R²':<15} {mean_metrics_lstm['R2']:.3f} {mean_metrics_transformer['R2']:.3f}\n"
-        f"{'RMSE@1':<15} {mean_metrics_lstm['RMSE@1']:.3f} {mean_metrics_transformer['RMSE@1']:.3f}\n"
-        f"{'RMSE@5':<15} {mean_metrics_lstm['RMSE@5']:.3f} {mean_metrics_transformer['RMSE@5']:.3f}\n"
-    )
+        # Create comparison table
+        metrics_text = (
+            'Model Comparison Metrics:\n\n'
+            f"{'Metric':<15} {'LSTM':<12} {'Transformer':<12}\n"
+            f"{'-'*40}\n"
+        )
+        
+        for name in metric_names:
+            lstm_value = mean_metrics_lstm[name]
+            transformer_value = mean_metrics_transformer[name]
+            
+            if isinstance(lstm_value, (int, float)) and isinstance(transformer_value, (int, float)):
+                if name == 'params':
+                    metrics_text += f"{'Parameters':<15} {lstm_value/1e6:.1f}M {transformer_value/1e6:.1f}M\n"
+                elif name == 'train_time':
+                    metrics_text += f"{'Train Time':<15} {lstm_value:.1f}min {transformer_value:.1f}min\n"
+                else:
+                    metrics_text += f"{name:<15} {lstm_value:.3f} {transformer_value:.3f}\n"
 
     # Add metrics table to plot
     fig.text(0.5, 0.02, metrics_text, ha='center', va='bottom', fontsize=10, family='monospace')
@@ -304,7 +329,7 @@ def evaluate_models_for_ar(test_AR, lstm_path, transformer_path):
 if __name__ == "__main__":
     # Model paths
     lstm_path = "/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/lstm/results/t12_r4_i110_n3_h64_e1000_l0.01.pth"
-    transformer_path = "/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/transformer/results/st_transformer/t12_r4_i110_n7_h408_e500_l0.009810255183792306.pth"
+    transformer_path = "/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/transformer/results/st_transformer/t12_r4_i110_n2_h220_e500_l0.004099697696351005.pth"
     
     # ARs to evaluate
     test_ARs = [11698, 11726, 13165, 13179, 13183]

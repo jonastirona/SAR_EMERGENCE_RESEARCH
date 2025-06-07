@@ -18,4 +18,4 @@ module load wulver
 source /mmfs1/project/mx6/jst26/sar-env/bin/activate
 
 cd /mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/transformer/
-python train_w_stats.py 12 4 110 7 408 500 0.009810255183792306 st_transformer
+python train_w_stats.py 12 4 110 2 220 500 0.004099697696351005 st_transformer

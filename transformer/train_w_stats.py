@@ -46,9 +46,20 @@ except ValueError as e:
 ARs = [11130,11149,11158,11162,11199,11327,11344,11387,11393,11416,11422,11455,11619,11640,11660,11678,11682,11765,11768,11776,11916,11928,12036,12051,12085,12089,12144,12175,12203,12257,12331,12494,12659,12778,12864,12877,12900,12929,13004,13085,13098]
 flatten = True
 size = 9
-tiles = size**2 - 2*size*rid_of_top
+remaining_rows = size - 2*rid_of_top  # Calculate remaining rows after removing top and bottom
+tiles = remaining_rows * size  # Total number of tiles is remaining rows times width
 test_AR = 13179 # and the secondary will be 13165 and if I fix it, third: 13183
 ARs_ = ARs + [test_AR]
+
+# Function to convert linear tile index to row, col format
+def get_tile_position(tile_idx, size):
+    row = tile_idx // size
+    col = tile_idx % size
+    return row, col
+
+# Function to get valid tile index
+def get_valid_tile_idx(row, col, size):
+    return row * size + col
 
 #Preprocessing
 print('Load data and split in tiles for {} ARs'.format(len(ARs)))
@@ -93,7 +104,18 @@ input_size = np.shape(all_inputs)[1]
 if model_name == 'lstm':
     model = LSTM(input_size, hidden_size, num_layers, num_pred).to(device)
 elif model_name == 'st_transformer':
-    model = SpatioTemporalTransformer().to(device)
+    # Initialize transformer with optimized parameters
+    ff_dim = int(hidden_size * 3.41)  # ff_ratio from Optuna
+    model = SpatioTemporalTransformer(
+        input_dim=input_size,
+        seq_len=num_in,
+        embed_dim=hidden_size,
+        num_heads=10,  # From Optuna
+        ff_dim=ff_dim,
+        num_layers=num_layers,
+        output_dim=num_pred,
+        dropout=0.16292645173701356  # From Optuna
+    ).to(device)
 
 #if torch.cuda.device_count() > 1: lstm = torch.nn.DataParallel(lstm)
 loss_fn = torch.nn.MSELoss()  #torch.nn.L1Loss() #   # mean-squared error for regression
@@ -120,12 +142,18 @@ with open(result_file_path, "w") as file:
         intensities = all_intensities[:,:,AR_]
         
         # Prepare data from all tiles
-        all_tiles = list(range(tiles))
         X_trains = []
         y_trains = []
         
+        # Generate valid tile indices
+        valid_tiles = []
+        for tile in range(tiles):
+            row = tile // size
+            col = tile % size
+            valid_tiles.append(col)  # We only need the column index since rows are already trimmed
+        
         # Collect data from all tiles
-        for tile in all_tiles:
+        for tile in valid_tiles:
             X_tile, y_tile = lstm_ready(tile, size, power_maps, intensities, num_in, num_pred)
             X_trains.append(X_tile)
             y_trains.append(y_tile)
@@ -144,7 +172,7 @@ with open(result_file_path, "w") as file:
         # For validation, use all tiles with different splits
         X_test_tiles = []
         y_test_tiles = []
-        for tile in all_tiles:
+        for tile in valid_tiles:
             X_test, y_test = lstm_ready(tile, size, power_maps, intensities, num_in, num_pred)
             X_test = torch.reshape(X_test, (X_test.shape[0], num_in, X_test.shape[2]))
             X_test_tiles.append(X_test.to(device))
@@ -178,7 +206,7 @@ with open(result_file_path, "w") as file:
             
         # Evaluate on each tile separately for detailed metrics
         file.write("\nPer-tile validation metrics after training:\n")
-        for tile in all_tiles:
+        for tile in valid_tiles:
             with torch.no_grad():
                 test_pred = model(X_test_tiles[tile])
                 test_loss = loss_fn(test_pred, y_test_tiles[tile])
@@ -221,9 +249,11 @@ with PdfPages(pdf_path) as pdf:
     # Calculate metrics for each AR and tile
     training_time = (time.time() - start_time) / 60  # Convert to minutes
     for key, results in all_training_results.items():
-        # Get the final predictions for this AR/tile
-        final_predictions = model(X_test_tiles[int(key[-1])]).detach().cpu().numpy()
-        true_values = y_test_tiles[int(key[-1])].cpu().numpy()
+        # Extract AR number from the key (format is 'AR{number}')
+        ar_number = int(key.replace('AR', ''))
+        # Use the first tile for metrics calculation
+        final_predictions = model(X_test_tiles[0]).detach().cpu().numpy()
+        true_values = y_test_tiles[0].cpu().numpy()
         
         # Calculate extended metrics
         metrics = calculate_extended_metrics(model, true_values, final_predictions, training_time)
