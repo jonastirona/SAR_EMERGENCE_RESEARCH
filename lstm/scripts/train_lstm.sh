@@ -17,5 +17,5 @@
 module load wulver
 source sar-env/bin/activate
 
-cd /project/mx6/jst26/lstm/
-python train_w_stats.py 12 4 110 5 140 300 0.0012 0.115
+cd /mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/lstm/
+python -u train_w_stats.py 12 4 110 5 140 500 0.0012 0.115

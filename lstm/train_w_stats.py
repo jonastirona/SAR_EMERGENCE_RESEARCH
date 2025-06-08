@@ -6,7 +6,7 @@ import numpy as np
 import sys
 from PIL import Image
 from sklearn.model_selection import train_test_split
-from functions import split_image, get_piece_means, dtws, lstm_ready, training_loop, training_loop_w_stats, LSTM, split_sequences, min_max_scaling, calculate_metrics, calculate_extended_metrics
+from functions import split_image, get_piece_means, dtws, lstm_ready, training_loop, training_loop_w_stats, LSTM, split_sequences, min_max_scaling
 import time
 import torch
 import torch.nn as nn
@@ -26,9 +26,9 @@ print("Using", torch.cuda.device_count(), "GPUs!")
 
 # Check if the correct number of arguments is provided
 if len(sys.argv) != 9:
-    print("Usage: script.py num_ARs n_epochs learning_rate rid_of_top hidden_size dropout")
+    print("Usage: script.py num_pred rid_of_top num_in num_layers hidden_size n_epochs learning_rate dropout")
     sys.exit(1)
-try: # Extract arguments and convert them to the appropriate types
+try: # Extract arguments and convert them to the appropriate types  #python3 train_w_stats.py 12 4 120 3 64 500 0.01 0.1
     num_pred = int(sys.argv[1]); print("Time Windows:", num_pred)
     rid_of_top = int(sys.argv[2]); print("Rid of Top:", rid_of_top)
     num_in = int(sys.argv[3]); print("Number of Inputs:", num_in)
@@ -56,7 +56,7 @@ all_intensities = []
 for AR in ARs_:
     power_maps = np.load('/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/data/AR{}/mean_pmdop{}_flat.npz'.format(AR,AR),allow_pickle=True) 
     mag_flux = np.load('/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/data/AR{}/mean_mag{}_flat.npz'.format(AR,AR),allow_pickle=True)
-    intensities = np.load('/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/data/AR{}/mean_int{}_flat.npz'.format(AR,AR),allow_pickle=True)
+    intensities = np.load('/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/data/AR{}/mean_int{}_flat.npz'.format(AR,AR),allow_pickle=True) 
     power_maps23 = power_maps['arr_0']
     power_maps34 = power_maps['arr_1']
     power_maps45 = power_maps['arr_2']
@@ -94,90 +94,51 @@ lstm = LSTM(input_size, hidden_size, num_layers, num_pred, dropout=dropout).to(d
 loss_fn = torch.nn.MSELoss()  #torch.nn.L1Loss() #   # mean-squared error for regression
 #optimiser = torch.optim.Adam(lstm.parameters(), lr=learning_rate)
 
-# Define paths for results
-base_path = './results'  # Creates results in lstm/results/
-model_name_str = 't{}_r{}_i{}_n{}_h{}_e{}_l{}'.format(num_pred,rid_of_top,num_in,num_layers,hidden_size,n_epochs,learning_rate)
-result_file_path = os.path.join(base_path, f"{model_name_str}_training_stats.txt")
-pdf_path = os.path.join(base_path, f"{model_name_str}_loss_curves.pdf")
-model_path = os.path.join(base_path, f"{model_name_str}.pth")
+# Define the path for the results file
+# JONAS: CHANGED THIS TO MY LOCAL PATH
+result_file_path = os.path.join("/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/lstm/results.txt")
+os.makedirs(os.path.dirname(result_file_path), exist_ok=True)
 
-os.makedirs(base_path, exist_ok=True)
-
-# Dictionary to store all results
-all_training_results = {}
-
-# Open the file for writing training stats
+# Open the file once, before the loop
 with open(result_file_path, "w") as file:
-    # Iterate over ARs, writing results to the same file
+    # Dictionary to store all results
+    all_training_results = {}
+    
+    # Iterate over ARs and tiles, writing results to the same file
     for AR_ in range(len(ARs)):
-        power_maps = all_inputs[:,:,:,AR_] 
+        power_maps = all_inputs[:,:,:,AR_] #change to inputs, its not only power maps
         intensities = all_intensities[:,:,AR_]
-        
-        # Prepare data from all tiles
-        all_tiles = list(range(tiles))
-        X_trains = []
-        y_trains = []
-        
-        # Collect data from all tiles
-        for tile in all_tiles:
-            X_tile, y_tile = lstm_ready(tile, size, power_maps, intensities, num_in, num_pred)
-            X_trains.append(X_tile)
-            y_trains.append(y_tile)
-        
-        # Concatenate all tile data
-        X_train = torch.cat(X_trains, dim=0)
-        y_train = torch.cat(y_trains, dim=0)
-        
-        # Reshape data for LSTM
-        X_train = torch.reshape(X_train, (X_train.shape[0], num_in, X_train.shape[2]))
-        
-        # Move data to GPU
-        X_train = X_train.to(device)
-        y_train = y_train.to(device)
-        
-        # For validation, use all tiles with different splits
-        X_test_tiles = []
-        y_test_tiles = []
-        for tile in all_tiles:
-            X_test, y_test = lstm_ready(tile, size, power_maps, intensities, num_in, num_pred)
-            X_test = torch.reshape(X_test, (X_test.shape[0], num_in, X_test.shape[2]))
-            X_test_tiles.append(X_test.to(device))
-            y_test_tiles.append(y_test.to(device))
-        
-        # Initialize optimizer for this AR
-        optimiser = torch.optim.Adam(lstm.parameters(), lr=learning_rate)
-        print(f'Training on AR{ARs[AR_]} - All Tiles')
-        
-        # Train on all tiles together
-        results = training_loop_w_stats(
-            n_epochs=n_epochs,
-            lstm=lstm,
-            optimiser=optimiser,
-            loss_fn=loss_fn,
-            X_train=X_train,
-            y_train=y_train,
-            X_test=X_test_tiles[0],  # Use first tile for main validation
-            y_test=y_test_tiles[0]
-        )
-        
-        # Store results for plotting
-        all_training_results[f'AR{ARs[AR_]}'] = results
-        
-        # Write AR header
-        file.write(f"\nAR {ARs[AR_]} - All Tiles\n")
-        file.write("Epoch, Train Loss, Test Loss, Learning Rate\n")
-        for epoch, train_loss, test_loss, lr in results:
-            file.write(f"{epoch}, {train_loss:.5f}, {test_loss:.5f}, {lr:.5f}\n")
+        for tile in range(tiles):
+            optimiser = torch.optim.Adam(lstm.parameters(), lr=learning_rate) # WAS MOVED HERE, SEEMS MORE CORRECT
+            print('AR{} - Tile: {}'.format(ARs[AR_],tile))
+            X_train, y_train = lstm_ready(tile,size,power_maps,intensities,num_in,num_pred)
+            X_test, y_test = lstm_ready(int(tiles/2),size,power_maps,intensities,num_in,num_pred)
+            # reshaping to rows, timestamps, features
+            X_train_final = torch.reshape(X_train,(X_train.shape[0], num_in, X_train.shape[2]))
+            X_test_final = torch.reshape(X_test,(X_test.shape[0], num_in, X_test.shape[2])) 
+            # Move data to GPU
+            X_train_final = X_train_final.to(device)
+            y_train = y_train.to(device)
+            X_test_final = X_test_final.to(device)
+            y_test = y_test.to(device)
+            results = training_loop_w_stats(n_epochs=n_epochs,lstm=lstm,optimiser=optimiser,loss_fn=loss_fn,
+                        X_train=X_train_final,
+                        y_train=y_train,
+                        X_test=X_test_final,
+                        y_test=y_test)
             
-        # Evaluate on each tile separately for detailed metrics
-        file.write("\nPer-tile validation metrics after training:\n")
-        for tile in all_tiles:
-            with torch.no_grad():
-                test_pred = lstm(X_test_tiles[tile])
-                test_loss = loss_fn(test_pred, y_test_tiles[tile])
-                file.write(f"Tile {tile} - Test Loss: {test_loss:.5f}\n")
+            # Store results for plotting
+            all_training_results[f'AR{ARs[AR_]}_Tile{tile}'] = results
+            
+            # Write AR and tile header
+            file.write(f"\nAR {ARs[AR_]} - Tile {tile}\n")
+            file.write("Epoch, Train Loss, Test Loss, Learning Rate\n")
+            for epoch, train_loss, test_loss, lr in results:
+                file.write(f"{epoch}, {train_loss:.5f}, {test_loss:.5f}, {lr:.5f}\n")
 
 # Create PDF with loss curves
+pdf_path = os.path.join("/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/lstm/results", f"t{num_pred}_r{rid_of_top}_i{num_in}_n{num_layers}_h{hidden_size}_e{n_epochs}_l{learning_rate}_loss_curves.pdf")
+
 with PdfPages(pdf_path) as pdf:
     # Create summary plots
     fig = plt.figure(figsize=(15, 12))  # Increased height for new metrics
@@ -207,74 +168,16 @@ with PdfPages(pdf_path) as pdf:
     ax2.legend()
     ax2.grid(True)
     
-    # Plot 3: Evaluation Metrics Distribution
-    ax3 = fig.add_subplot(gs[1, 1])
-    all_metrics = []
-    
-    # Calculate metrics for each AR and tile
-    training_time = (time.time() - start_time) / 60  # Convert to minutes
-    for key, results in all_training_results.items():
-        # Get the final predictions for this AR/tile
-        final_predictions = lstm(X_test_tiles[int(key[-1])]).detach().cpu().numpy()
-        true_values = y_test_tiles[int(key[-1])].cpu().numpy()
-        
-        # Calculate extended metrics
-        metrics = calculate_extended_metrics(lstm, true_values, final_predictions, training_time)
-        all_metrics.append(metrics)
-    
-    # Convert metrics to arrays for plotting
-    metric_names = ['MAE', 'RMSE', 'R2', 'RMSE@1', 'RMSE@5']
-    metric_values = [[m[name] for m in all_metrics] for name in metric_names]
-    
-    # Create box plot of metrics
-    bp = ax3.boxplot(metric_values, labels=metric_names)
-    ax3.set_title('Distribution of Evaluation Metrics')
-    ax3.grid(True)
-    
-    # Add mean values as text
-    mean_metrics = {name: np.mean([m[name] for m in all_metrics]) for name in metric_names}
-    param_count = all_metrics[0]['params']  # Same for all tiles
-    
-    # Plot 4: Extended Metrics Table
-    ax4 = fig.add_subplot(gs[2, :])
-    ax4.axis('off')
-    
-    # Create table data
-    table_data = [
-        ['Metric', 'Value'],
-        ['Parameters', f'{param_count/1e6:.1f}M'],
-        ['Training Time', f'{training_time:.1f} min'],
-        ['MAE', f'{mean_metrics["MAE"]:.3f}'],
-        ['RMSE', f'{mean_metrics["RMSE"]:.3f}'],
-        ['R²', f'{mean_metrics["R2"]:.3f}'],
-        ['RMSE@1', f'{mean_metrics["RMSE@1"]:.3f}'],
-        ['RMSE@5', f'{mean_metrics["RMSE@5"]:.3f}' if mean_metrics["RMSE@5"] is not None else 'N/A']
-    ]
-    
-    table = ax4.table(cellText=table_data, loc='center', cellLoc='center')
-    table.auto_set_font_size(False)
-    table.set_fontsize(9)
-    table.scale(1.2, 1.5)
-    
+    plt.tight_layout()
     plt.suptitle(f'Training Summary - LSTM\nParameters: TW={num_pred}, RoT={rid_of_top}, In={num_in}, Layers={num_layers}, Hidden={hidden_size}', 
                  fontsize=12)
-    plt.tight_layout()
     pdf.savefig(fig)
     plt.close()
 
+print(f"Loss curves saved at: {pdf_path}")
+
 # Save the model weights
-torch.save(lstm.state_dict(), model_path)
+# JONAS: CHANGED THIS TO MY LOCAL PATH
+torch.save(lstm.state_dict(),'/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/lstm/results/t{}_r{}_i{}_n{}_h{}_e{}_l{}_d{}.pth'.format(num_pred,rid_of_top,num_in,num_layers,hidden_size,n_epochs,learning_rate,dropout))
 end_time = time.time()
 print("Elapsed time: {} minutes".format((end_time - start_time)/60))
-print(f"Results saved at: {result_file_path}")
-print(f"Loss curves saved at: {pdf_path}")
-print(f"Model saved at: {model_path}")
-
-# Print final metrics in table format
-print("\nFinal Metrics:")
-print("-" * 40)
-print(f"{'Metric':<15} {'Value':<10}")
-print("-" * 40)
-for row in table_data[1:]:
-    print(f"{row[0]:<15} {row[1]:<10}")
-print("-" * 40)

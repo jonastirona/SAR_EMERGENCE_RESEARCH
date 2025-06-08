@@ -113,8 +113,8 @@ def evaluate_models_for_ar(test_AR, lstm_path, transformer_path):
     print(f"num_in: {num_in}")
     
     # Initialize LSTM with the correct architecture from the trained model
-    hidden_size = 64  # Original hidden size from checkpoint
-    num_layers = 3  # Original number of layers from checkpoint
+    hidden_size = 140  # From checkpoint filename t12_r4_i110_n5_h140_e300_l0.0012.pth
+    num_layers = 5  # From checkpoint filename t12_r4_i110_n5_h140_e300_l0.0012.pth
     
     lstm_model = LSTM(input_size, hidden_size, num_layers, num_pred).to(device)
     
@@ -328,7 +328,7 @@ def evaluate_models_for_ar(test_AR, lstm_path, transformer_path):
 
 if __name__ == "__main__":
     # Model paths
-    lstm_path = "/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/lstm/results/t12_r4_i110_n3_h64_e1000_l0.01.pth"
+    lstm_path = "/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/lstm/results/t12_r4_i110_n5_h140_e300_l0.0012.pth"
     transformer_path = "/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/transformer/results/st_transformer/t12_r4_i110_n2_h220_e500_l0.004099697696351005.pth"
     
     # ARs to evaluate
