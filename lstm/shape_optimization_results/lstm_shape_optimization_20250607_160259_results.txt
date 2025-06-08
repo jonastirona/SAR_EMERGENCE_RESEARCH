@@ -1,0 +1,408 @@
+Best trial value: 0.6082020395331913
+Best trial params:
+hidden_size: 287
+num_layers: 7
+learning_rate: 0.0004857109808285211
+dropout: 0.4434567430764027
+
+All trials:
+Trial 0:
+  Value: 0.4778695025377804
+  Params:
+    hidden_size: 457
+    num_layers: 2
+    learning_rate: 0.00011699811791072542
+    dropout: 0.3179352225425991
+
+Trial 1:
+  Value: 0.5555094473891788
+  Params:
+    hidden_size: 341
+    num_layers: 2
+    learning_rate: 0.0016317449262310821
+    dropout: 0.08923599047671638
+
+Trial 2:
+  Value: 0.4414257822972205
+  Params:
+    hidden_size: 202
+    num_layers: 5
+    learning_rate: 0.00021278349249257626
+    dropout: 0.11105472137751887
+
+Trial 3:
+  Value: 0.33857362398670776
+  Params:
+    hidden_size: 73
+    num_layers: 7
+    learning_rate: 7.107624129638567e-05
+    dropout: 0.29804989528016396
+
+Trial 4:
+  Value: 0.34651795191069446
+  Params:
+    hidden_size: 427
+    num_layers: 4
+    learning_rate: 4.595135332394764e-05
+    dropout: 0.014656695136303577
+
+Trial 5:
+  Value: 0.3331109186841382
+  Params:
+    hidden_size: 113
+    num_layers: 4
+    learning_rate: 4.3036406633305525e-05
+    dropout: 0.01220557299294378
+
+Trial 6:
+  Value: 0.5164078128006724
+  Params:
+    hidden_size: 444
+    num_layers: 5
+    learning_rate: 0.006449095860784536
+    dropout: 0.4029764733292778
+
+Trial 7:
+  Value: 0.3373151394642061
+  Params:
+    hidden_size: 511
+    num_layers: 5
+    learning_rate: 1.2852905664495718e-05
+    dropout: 0.16107563807968567
+
+Trial 8:
+  Value: 0.5502773750159476
+  Params:
+    hidden_size: 99
+    num_layers: 1
+    learning_rate: 0.007745614784348724
+    dropout: 0.38658010018367295
+
+Trial 9:
+  Value: 0.33051958386268876
+  Params:
+    hidden_size: 474
+    num_layers: 6
+    learning_rate: 1.4579772286546932e-05
+    dropout: 0.12097312022421308
+
+Trial 10:
+  Value: 0.5828946736123827
+  Params:
+    hidden_size: 334
+    num_layers: 2
+    learning_rate: 0.001241019539660233
+    dropout: 0.2054161308108889
+
+Trial 11:
+  Value: 0.5750166810221142
+  Params:
+    hidden_size: 326
+    num_layers: 2
+    learning_rate: 0.0012118905113935165
+    dropout: 0.20639302493199527
+
+Trial 12:
+  Value: 0.5817706510424613
+  Params:
+    hidden_size: 316
+    num_layers: 3
+    learning_rate: 0.0008616779444951763
+    dropout: 0.2275085209397701
+
+Trial 13:
+  Value: 0.5914739171663921
+  Params:
+    hidden_size: 255
+    num_layers: 3
+    learning_rate: 0.000751860050583446
+    dropout: 0.24552834521303726
+
+Trial 14:
+  Value: 0.5781679090526368
+  Params:
+    hidden_size: 229
+    num_layers: 3
+    learning_rate: 0.0006690346405745311
+    dropout: 0.30659051270872095
+
+Trial 15:
+  Value: 0.5521451489792929
+  Params:
+    hidden_size: 241
+    num_layers: 1
+    learning_rate: 0.0033721126695648892
+    dropout: 0.4995215501848158
+
+Trial 16:
+  Value: 0.6032748715745079
+  Params:
+    hidden_size: 388
+    num_layers: 8
+    learning_rate: 0.00044573321861019936
+    dropout: 0.18748184028271278
+
+Trial 17:
+  Value: 0.5937664416101244
+  Params:
+    hidden_size: 389
+    num_layers: 8
+    learning_rate: 0.0003786429806197635
+    dropout: 0.277259949576837
+
+Trial 18:
+  Value: 0.5915415359867944
+  Params:
+    hidden_size: 388
+    num_layers: 8
+    learning_rate: 0.00031335556523517455
+    dropout: 0.36027003968114363
+
+Trial 19:
+  Value: 0.5941571791966755
+  Params:
+    hidden_size: 382
+    num_layers: 8
+    learning_rate: 0.000186089153167908
+    dropout: 0.458992835086829
+
+Trial 20:
+  Value: 0.5813849613070488
+  Params:
+    hidden_size: 377
+    num_layers: 7
+    learning_rate: 0.0001633422081342777
+    dropout: 0.49402716227945
+
+Trial 21:
+  Value: 0.5928472571902805
+  Params:
+    hidden_size: 389
+    num_layers: 8
+    learning_rate: 0.0003332547969518036
+    dropout: 0.46435569774641916
+
+Trial 22:
+  Value: 0.6032902674542533
+  Params:
+    hidden_size: 416
+    num_layers: 7
+    learning_rate: 0.00036853082483929945
+    dropout: 0.43033564101593524
+
+Trial 23:
+  Value: 0.6082020395331913
+  Params:
+    hidden_size: 287
+    num_layers: 7
+    learning_rate: 0.0004857109808285211
+    dropout: 0.4434567430764027
+
+Trial 24:
+  Value: 0.582402792904112
+  Params:
+    hidden_size: 282
+    num_layers: 7
+    learning_rate: 0.002456332219265766
+    dropout: 0.4217611484148592
+
+Trial 25:
+  Value: 0.589079143272506
+  Params:
+    hidden_size: 174
+    num_layers: 6
+    learning_rate: 0.0004703382889402923
+    dropout: 0.3407109171341143
+
+Trial 26:
+  Value: 0.37619651022574135
+  Params:
+    hidden_size: 292
+    num_layers: 6
+    learning_rate: 9.438105047739645e-05
+    dropout: 0.4291142275445495
+
+Trial 27:
+  Value: 0.584847535358535
+  Params:
+    hidden_size: 423
+    num_layers: 7
+    learning_rate: 0.0005376300833142364
+    dropout: 0.17135860288700272
+
+Trial 28:
+  Value: 0.5883269069923294
+  Params:
+    hidden_size: 498
+    num_layers: 6
+    learning_rate: 0.00025772720076077245
+    dropout: 0.2743091955299641
+
+Trial 29:
+  Value: 0.559207204149829
+  Params:
+    hidden_size: 464
+    num_layers: 7
+    learning_rate: 0.00013279107903324362
+    dropout: 0.3476694167735618
+
+Trial 30:
+  Value: 0.5759496281544367
+  Params:
+    hidden_size: 351
+    num_layers: 8
+    learning_rate: 0.003546974831550081
+    dropout: 0.37809753527842527
+
+Trial 31:
+  Value: 0.5796204227540228
+  Params:
+    hidden_size: 412
+    num_layers: 8
+    learning_rate: 0.00017202005048655013
+    dropout: 0.452268587094411
+
+Trial 32:
+  Value: 0.4824950979401669
+  Params:
+    hidden_size: 356
+    num_layers: 7
+    learning_rate: 9.221688319734085e-05
+    dropout: 0.45767459731558735
+
+Trial 33:
+  Value: 0.5856428194377157
+  Params:
+    hidden_size: 298
+    num_layers: 8
+    learning_rate: 0.0002476756112078502
+    dropout: 0.4243815221241335
+
+Trial 34:
+  Value: 0.5745077219274308
+  Params:
+    hidden_size: 360
+    num_layers: 7
+    learning_rate: 0.0018634958845359872
+    dropout: 0.4731538481509791
+
+Trial 35:
+  Value: 0.3676704962220457
+  Params:
+    hidden_size: 275
+    num_layers: 8
+    learning_rate: 6.325635131161702e-05
+    dropout: 0.06322758266986897
+
+Trial 36:
+  Value: 0.593384901351399
+  Params:
+    hidden_size: 407
+    num_layers: 6
+    learning_rate: 0.0010403163955354415
+    dropout: 0.40711471537665483
+
+Trial 37:
+  Value: 0.5822366078694662
+  Params:
+    hidden_size: 206
+    num_layers: 7
+    learning_rate: 0.0005122459608433072
+    dropout: 0.3215519381399414
+
+Trial 38:
+  Value: 0.504759685570995
+  Params:
+    hidden_size: 163
+    num_layers: 8
+    learning_rate: 0.00020798013554036498
+    dropout: 0.137722858631201
+
+Trial 39:
+  Value: 0.33592526175909565
+  Params:
+    hidden_size: 429
+    num_layers: 5
+    learning_rate: 2.2288443109922294e-05
+    dropout: 0.053803670250620245
+
+Trial 40:
+  Value: 0.3454350117697484
+  Params:
+    hidden_size: 440
+    num_layers: 6
+    learning_rate: 3.549548556293718e-05
+    dropout: 0.3815531874601914
+
+Trial 41:
+  Value: 0.5973235623704063
+  Params:
+    hidden_size: 400
+    num_layers: 8
+    learning_rate: 0.00038055591953971665
+    dropout: 0.2812719536054046
+
+Trial 42:
+  Value: 0.5930173956685596
+  Params:
+    hidden_size: 482
+    num_layers: 8
+    learning_rate: 0.0004077907136174574
+    dropout: 0.4286742696370099
+
+Trial 43:
+  Value: 0.603991609149509
+  Params:
+    hidden_size: 450
+    num_layers: 7
+    learning_rate: 0.0006234554634447694
+    dropout: 0.18307689635667204
+
+Trial 44:
+  Value: 0.5911671406692929
+  Params:
+    hidden_size: 451
+    num_layers: 7
+    learning_rate: 0.0007357055079645332
+    dropout: 0.17060231204385715
+
+Trial 45:
+  Value: 0.5707693874835968
+  Params:
+    hidden_size: 313
+    num_layers: 6
+    learning_rate: 0.0015926399427285988
+    dropout: 0.2025202515219809
+
+Trial 46:
+  Value: 0.5947892543342378
+  Params:
+    hidden_size: 406
+    num_layers: 4
+    learning_rate: 0.0005876753611737046
+    dropout: 0.1374541740919053
+
+Trial 47:
+  Value: 0.5940575490395228
+  Params:
+    hidden_size: 470
+    num_layers: 7
+    learning_rate: 0.0009704850419477294
+    dropout: 0.23349018921809916
+
+Trial 48:
+  Value: 0.5949198441372976
+  Params:
+    hidden_size: 487
+    num_layers: 5
+    learning_rate: 0.0002832613377573385
+    dropout: 0.10016258094554534
+
+Trial 49:
+  Value: 0.5697571471333504
+  Params:
+    hidden_size: 340
+    num_layers: 7
+    learning_rate: 0.0003622480954843624
+    dropout: 0.27290778075643285
+

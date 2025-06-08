@@ -18,4 +18,4 @@ module load wulver
 source /mmfs1/project/mx6/jst26/sar-env/bin/activate
 
 cd /mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/evaluation/
-python eval_comparison.py
+python -u /mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/evaluation/eval_comparison.py
