@@ -77,28 +77,71 @@ def evaluate_models_for_ar(test_AR, lstm_path, transformer_path):
     mag_flux = np.load(f'/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/data/AR{test_AR}/mean_mag{test_AR}_flat.npz', allow_pickle=True)
     intensities = np.load(f'/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/data/AR{test_AR}/mean_int{test_AR}_flat.npz', allow_pickle=True)
 
-    power_maps23 = power_maps['arr_0'][rid_of_top*size:-rid_of_top*size, :]
-    power_maps34 = power_maps['arr_1'][rid_of_top*size:-rid_of_top*size, :]
-    power_maps45 = power_maps['arr_2'][rid_of_top*size:-rid_of_top*size, :]
-    power_maps56 = power_maps['arr_3'][rid_of_top*size:-rid_of_top*size, :]
+    power_maps23 = power_maps['arr_0']
+    power_maps34 = power_maps['arr_1']
+    power_maps45 = power_maps['arr_2']
+    power_maps56 = power_maps['arr_3']
     time = power_maps['arr_4']
-    mag_flux = mag_flux['arr_0'][rid_of_top*size:-rid_of_top*size, :]
-    intensities = intensities['arr_0'][rid_of_top*size:-rid_of_top*size, :]
+    mag_flux = mag_flux['arr_0']
+    intensities = intensities['arr_0']
 
-    mag_flux[np.isnan(mag_flux)] = 0
-    intensities[np.isnan(intensities)] = 0
-    stacked_maps = np.stack([power_maps23, power_maps34, power_maps45, power_maps56], axis=1)
-    stacked_maps[np.isnan(stacked_maps)] = 0
-    
-    # Normalize data
-    min_p, max_p = np.min(stacked_maps), np.max(stacked_maps)
-    min_m, max_m = np.min(mag_flux), np.max(mag_flux)
-    min_i, max_i = np.min(intensities), np.max(intensities)
-    stacked_maps = min_max_scaling(stacked_maps, min_p, max_p)
-    mag_flux = min_max_scaling(mag_flux, min_m, max_m)
-    intensities = min_max_scaling(intensities, min_i, max_i)
-    mag_flux = np.expand_dims(mag_flux, axis=1)
-    inputs = np.concatenate([stacked_maps, mag_flux], axis=1)
+    # Special handling for AR13165
+    if test_AR == 13165:
+        # Trim array to get rid of top and bottom 0 tiles
+        power_maps23 = power_maps23[rid_of_top*size:-rid_of_top*size, :]
+        power_maps34 = power_maps34[rid_of_top*size:-rid_of_top*size, :]
+        power_maps45 = power_maps45[rid_of_top*size:-rid_of_top*size, :]
+        power_maps56 = power_maps56[rid_of_top*size:-rid_of_top*size, :]
+        mag_flux = mag_flux[rid_of_top*size:-rid_of_top*size, :]
+        intensities = intensities[rid_of_top*size:-rid_of_top*size, :]
+        
+        # Handle NaN values
+        mag_flux[np.isnan(mag_flux)] = 0
+        intensities[np.isnan(intensities)] = 0
+        
+        # Stack inputs and normalize
+        stacked_maps = np.stack([power_maps23, power_maps34, power_maps45, power_maps56], axis=1)
+        stacked_maps[np.isnan(stacked_maps)] = 0
+        
+        # Normalize data
+        min_p = np.min(stacked_maps)
+        max_p = np.max(stacked_maps)
+        min_m = np.min(mag_flux)
+        max_m = np.max(mag_flux)
+        min_i = np.min(intensities)
+        max_i = np.max(intensities)
+        
+        stacked_maps = min_max_scaling(stacked_maps, min_p, max_p)
+        mag_flux = min_max_scaling(mag_flux, min_m, max_m)
+        intensities = min_max_scaling(intensities, min_i, max_i)
+        
+        # Reshape mag_flux and combine with stacked_maps
+        mag_flux = np.expand_dims(mag_flux, axis=1)
+        inputs = np.concatenate([stacked_maps, mag_flux], axis=1)
+    else:
+        # Original preprocessing for other ARs
+        power_maps23 = power_maps['arr_0'][rid_of_top*size:-rid_of_top*size, :]
+        power_maps34 = power_maps['arr_1'][rid_of_top*size:-rid_of_top*size, :]
+        power_maps45 = power_maps['arr_2'][rid_of_top*size:-rid_of_top*size, :]
+        power_maps56 = power_maps['arr_3'][rid_of_top*size:-rid_of_top*size, :]
+        mag_flux = mag_flux['arr_0'][rid_of_top*size:-rid_of_top*size, :]
+        intensities = intensities['arr_0'][rid_of_top*size:-rid_of_top*size, :]
+
+        # Handle NaN values
+        mag_flux[np.isnan(mag_flux)] = 0
+        intensities[np.isnan(intensities)] = 0
+        stacked_maps = np.stack([power_maps23, power_maps34, power_maps45, power_maps56], axis=1)
+        stacked_maps[np.isnan(stacked_maps)] = 0
+
+        # Normalize data
+        min_p, max_p = np.min(stacked_maps), np.max(stacked_maps)
+        min_m, max_m = np.min(mag_flux), np.max(mag_flux)
+        min_i, max_i = np.min(intensities), np.max(intensities)
+        stacked_maps = min_max_scaling(stacked_maps, min_p, max_p)
+        mag_flux = min_max_scaling(mag_flux, min_m, max_m)
+        intensities = min_max_scaling(intensities, min_i, max_i)
+        mag_flux = np.expand_dims(mag_flux, axis=1)
+        inputs = np.concatenate([stacked_maps, mag_flux], axis=1)
 
     # Initialize models
     input_size = 5  # Fixed input size (4 power maps + 1 magnetic flux)

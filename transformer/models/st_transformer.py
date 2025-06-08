@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 
 class SpatioTemporalTransformer(nn.Module):
-    def __init__(self, input_dim=5, seq_len=110, embed_dim=408, num_heads=8, ff_dim=2984, num_layers=7, output_dim=12, dropout=0.3973226820560444):
+    def __init__(self, input_dim=5, seq_len=110, embed_dim=220, num_heads=11, ff_dim=750, num_layers=2, output_dim=12, dropout=0.3973226820560444):
         super(SpatioTemporalTransformer, self).__init__()
         
         self.embedding = nn.Linear(input_dim, embed_dim)

@@ -51,18 +51,18 @@ flatten = True
 size = 9
 tiles = size**2 - 2*size*rid_of_top
 test_AR = 13165 # and the secondary will be 13165 and if I fix it, third: 13183
-intensity_files = glob.glob(os.path.join("/home/jonas/Documents/AR_PREDICTION_MODELS/data/AR{}/cont_intensity/".format(test_AR), "*.fits")) # get a list of all files with a .fits extension in the directory
+# intensity_files = glob.glob(os.path.join("/home/jonas/Documents/AR_PREDICTION_MODELS/data/AR{}/cont_intensity/".format(test_AR), "*.fits")) # get a list of all files with a .fits extension in the directory
 NOAA_first = datetime(2022, 12, 12, 0, 0, 0); NOAA_first_record = mdates.date2num(NOAA_first) # Convert to matplotlib date format
 NOAA_second = datetime(2022, 12, 14, 0, 0, 0); NOAA_second_record = mdates.date2num(NOAA_second) # Convert to matplotlib date format
-NOAA_first_int_map = find_closest_fits_frame_to_NOAA_record(intensity_files, NOAA_first)
-NOAA_second_int_map = find_closest_fits_frame_to_NOAA_record(intensity_files, NOAA_second)
+# NOAA_first_int_map = find_closest_fits_frame_to_NOAA_record(intensity_files, NOAA_first)
+#NOAA_second_int_map = find_closest_fits_frame_to_NOAA_record(intensity_files, NOAA_second)
 #NOAA_first_int_map = np.random.rand(512, 512)  # Random noise image
 #NOAA_second_int_map = np.random.rand(512, 512)  # Another random noise image
 
 #Preprocessing
-power_maps = np.load('/home/jonas/Documents/AR_PREDICTION_MODELS/data/AR{}/mean_tiles9/mean_pmdop{}_flat.npz'.format(test_AR,test_AR),allow_pickle=True) 
-mag_flux = np.load('/home/jonas/Documents/AR_PREDICTION_MODELS/data/AR{}/mean_tiles9/mean_mag{}_flat.npz'.format(test_AR,test_AR),allow_pickle=True)
-intensities = np.load('/home/jonas/Documents/AR_PREDICTION_MODELS/data/AR{}/mean_tiles9/mean_int{}_flat.npz'.format(test_AR,test_AR),allow_pickle=True) 
+power_maps = np.load('/home/jonas/Documents/SAR_EMERGENCE_RESEARCH/data/AR{}/mean_pmdop{}_flat.npz'.format(test_AR,test_AR),allow_pickle=True) 
+mag_flux = np.load('/home/jonas/Documents/SAR_EMERGENCE_RESEARCH/data/AR{}/mean_mag{}_flat.npz'.format(test_AR,test_AR),allow_pickle=True)
+intensities = np.load('/home/jonas/Documents/SAR_EMERGENCE_RESEARCH/data/AR{}/mean_int{}_flat.npz'.format(test_AR,test_AR),allow_pickle=True) 
 power_maps23 = power_maps['arr_0']
 power_maps34 = power_maps['arr_1']
 power_maps45 = power_maps['arr_2']
@@ -224,14 +224,14 @@ for i in range(7):
 plt.subplot(4, 2, 8)
 gs_last = gridspec.GridSpecFromSubplotSpec(1, 2, subplot_spec=main_gs[7], wspace=0.05) # Create a GridSpec for the last subplot area with 1 row and 2 columns
 ax_image1 = plt.subplot(gs_last[0, 0]) # Plot the first image
-ax_image1.imshow(NOAA_first_int_map, cmap='gray')
+# ax_image1.imshow(NOAA_first_int_map, cmap='gray')
 add_grid_lines(ax_image1)  # Add grid lines to the first image
 for tile_num in range(starting_tile, starting_tile + 7): highlight_tile(ax_image1, tile_num+10) # Loop to highlight tiles from starting_tile to starting_tile + 7
 ax_image1.set_xlabel('{}'.format(NOAA_first.strftime('%d/%m/%y %H:%M')))
 ax_image1.tick_params(axis='both', which='both', bottom=False, top=False, left=False, right=False, labelleft=False, labelbottom=True)     
 ax_image1.set_xticks([]); ax_image1.set_yticks([])
 ax_image2 = plt.subplot(gs_last[0, 1]) # Plot the second image
-ax_image2.imshow(NOAA_second_int_map, cmap='gray')
+# ax_image2.imshow(NOAA_second_int_map, cmap='gray')
 add_grid_lines(ax_image2)  # Add grid lines to the first image
 for tile_num in range(starting_tile, starting_tile + 7): highlight_tile(ax_image2, tile_num+10) # Loop to highlight tiles from starting_tile to starting_tile + 7
 ax_image1.set_title('Continuum Intensity', fontsize=10) 
