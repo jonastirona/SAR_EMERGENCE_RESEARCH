@@ -62,25 +62,24 @@ def objective(trial):
     num_pred = 12
     rid_of_top = 4
     num_in = 110
-    n_epochs = 300  # Increased epochs for better convergence
+    n_epochs = 300
     size = 9
     tiles = size**2 - 2*size*rid_of_top
     
     # Hyperparameters to optimize
-    # First select number of heads (must be a power of 2)
     num_heads = trial.suggest_int('num_heads', 2, 16, step=2)
     
-    # Then select hidden_size that's divisible by num_heads
-    hidden_size_choices = list(range(num_heads, 513, num_heads))  # Increased max hidden size
+    # select hidden_size that's divisible by num_heads
+    hidden_size_choices = list(range(num_heads, 513, num_heads))
     hidden_size = trial.suggest_int('hidden_size', hidden_size_choices[0], hidden_size_choices[-1], step=num_heads)
     
     # Other hyperparameters
-    num_layers = trial.suggest_int('num_layers', 1, 8)  # Increased max layers
-    ff_ratio = trial.suggest_float('ff_ratio', 2.0, 8.0)  # Increased FF ratio range
+    num_layers = trial.suggest_int('num_layers', 1, 8)
+    ff_ratio = trial.suggest_float('ff_ratio', 2.0, 8.0)
     ff_dim = int(hidden_size * ff_ratio)
-    learning_rate = trial.suggest_float('learning_rate', 1e-5, 1e-2, log=True)  # Extended LR range
+    learning_rate = trial.suggest_float('learning_rate', 1e-5, 1e-2, log=True)
     dropout = trial.suggest_float('dropout', 0.0, 0.5)
-    warmup_ratio = trial.suggest_float('warmup_ratio', 0.0, 0.2)  # 0-20% of total epochs for warmup
+    warmup_ratio = trial.suggest_float('warmup_ratio', 0.0, 0.2)
 
     # Log hyperparameters
     logging.info("Trial hyperparameters:")
@@ -93,7 +92,6 @@ def objective(trial):
     logging.info(f"  warmup_ratio: {warmup_ratio:.2f}")
     logging.info(f"  hidden_size divisible by num_heads: {hidden_size % num_heads == 0}")
 
-    # Use multiple ARs for better generalization
     optimization_ARs = [11130, 11149, 11158, 11162, 11199, 11327, 11344, 11387, 11393, 11416]
     all_val_losses = []
     
@@ -121,7 +119,6 @@ def objective(trial):
             criterion = nn.MSELoss()
             optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 
-            # Train on all available tiles
             ar_val_losses = []
             for tile in range(tiles):
                 logging.info(f"Training on tile {tile}")
@@ -192,7 +189,7 @@ def main():
         sampler=optuna.samplers.TPESampler(seed=42)
     )
     
-    n_trials = 50  # Number of trials to run
+    n_trials = 50
     logging.info(f"Will run {n_trials} trials")
     
     study.optimize(objective, n_trials=n_trials)
