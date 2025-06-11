@@ -129,9 +129,9 @@ def evaluate_models_for_ar(test_AR, lstm_path, transformer_path):
     trfm.load_state_dict(torch.load(transformer_path,map_location=device)); trfm.eval()
 
     # plotting
-    fig = plt.figure(figsize=(16,32))
-    fig.subplots_adjust(left=0.18, right=0.8, top=0.95, bottom=0.1)
-    gs0 = gridspec.GridSpec(7,1,figure=fig,hspace=.3)
+    fig = plt.figure(figsize=(16,48))
+    fig.subplots_adjust(left=0.15, right=0.85, top=0.95, bottom=0.1)
+    gs0 = gridspec.GridSpec(7,1,figure=fig,hspace=.2)
     fut = num_pred-1; thr= -0.01; st=4
 
     for i in range(7):
@@ -152,14 +152,14 @@ def evaluate_models_for_ar(test_AR, lstm_path, transformer_path):
         p_l = recalibrate(p_l, ii[tile_idx,last])
         p_t = recalibrate(p_t, ii[tile_idx,last])
 
+        # Calculate metrics for both models
+        lstm_metrics = calculate_short_long_metrics(true, p_l)
+        trfm_metrics = calculate_short_long_metrics(true, p_t)
+
         before = ii[tile_idx,last-before_plot:last]
         tcut = time_arr[last-before_plot:last+true.shape[0]]
         tnum = mdates.date2num(tcut)
         nanarr = np.full(before.shape, np.nan)
-
-        # Now print the window lengths
-        print(f"  Observed window: {len(tnum)} time steps")
-        print(f"  Prediction window: {len(true)} time steps")
 
         # Derivative plots: pad with NaNs for the "before_plot" segment so they align to the full time axis
         d_t = np.gradient(p_t)
@@ -170,7 +170,7 @@ def evaluate_models_for_ar(test_AR, lstm_path, transformer_path):
         d_t_full = np.concatenate([nan_pad, d_t])
         d_l_full = np.concatenate([nan_pad, d_l])
 
-        gs1 = gridspec.GridSpecFromSubplotSpec(4,1,subplot_spec=gs0[i],height_ratios=[10,2,2,2],hspace=0.5)
+        gs1 = gridspec.GridSpecFromSubplotSpec(5,1,subplot_spec=gs0[i],height_ratios=[18,4,4,4,4],hspace=0.3)
 
         # All subplots use tnum for x-axis
         ax0 = fig.add_subplot(gs1[0])
@@ -182,10 +182,13 @@ def evaluate_models_for_ar(test_AR, lstm_path, transformer_path):
         ax0.set_title(f'Tile {disp}', fontsize=12)
         ax0.set_ylabel('Normalized Intensity', fontsize=9, labelpad=20)
         ax0.set_ylim([-0.1,1.1]); ax0.grid(True)
-        ax0.legend(bbox_to_anchor=(1.02, 1), loc='upper left', borderaxespad=0, fontsize=9)
-        ax0.xaxis.set_major_locator(mdates.DayLocator())
-        ax0.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
-        ax0.tick_params(labelbottom=False)
+        ax0.set_yticks([0, 0.25, 0.5, 0.75, 1])
+        legend = ax0.legend(bbox_to_anchor=(1.033, .83, 0.223, 0.11), loc='upper left', borderaxespad=0, fontsize=10, framealpha=1, mode='expand')
+        legend.get_frame().set_boxstyle('square', pad=1)
+
+        
+        # Add metrics table
+        create_metrics_table(ax0, lstm_metrics, trfm_metrics)
 
         ax1 = fig.add_subplot(gs1[1], sharex=ax0)
         d_obs = np.gradient(smooth_with_numpy(np.concatenate((before,true))))
@@ -224,11 +227,20 @@ def evaluate_models_for_ar(test_AR, lstm_path, transformer_path):
                 ax3.plot(tnum[j:j+2], d_l_full[j:j+2], color='limegreen', linewidth=1)
         ax3.set_ylabel('dLSTM/dt', fontsize=7, labelpad=10)
         ax3.set_ylim([-0.05,0.05]); ax3.set_yticks([0]); ax3.grid(True)
-        ax3.xaxis.set_major_locator(mdates.DayLocator())
-        ax3.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
-        ax3.tick_params(labelbottom=True)
-        ax3.set_xlabel('Date', fontsize=12)
+        ax3.tick_params(labelbottom=False)
         ax3.set_xlim(tnum[0], tnum[-1])
+
+        # Error curve
+        ax4 = fig.add_subplot(gs1[4], sharex=ax0)
+        ax4.plot(tnum[before_plot:before_plot+len(true)], np.abs(true - p_l), 'b-')
+        ax4.plot(tnum[before_plot:before_plot+len(true)], np.abs(true - p_t), 'r-')
+        ax4.axvline(NOAA1, color='magenta', linestyle='--')
+        ax4.set_ylabel('|Error|', fontsize=8)
+        ax4.set_xlabel('Date', fontsize=10)
+        ax4.set_xlim(tnum[0], tnum[-1]); ax4.grid(True)
+        ax4.xaxis.set_major_locator(mdates.DayLocator())
+        ax4.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
+        ax4.tick_params(labelbottom=True)
 
     
     def extract_params(path):
@@ -319,6 +331,67 @@ def evaluate_models_for_ar(test_AR, lstm_path, transformer_path):
     plt.savefig(out, dpi=300, bbox_inches='tight')
     plt.close()
     print(f"Comparison plot saved to: {out}")
+
+def calculate_short_long_metrics(true, pred, split_idx=50):
+    """Calculate metrics for short-term (first 50 steps) and long-term (remaining steps) predictions."""
+    short_true = true[:split_idx]
+    short_pred = pred[:split_idx]
+    long_true = true[split_idx:]
+    long_pred = pred[split_idx:]
+    
+    def calc_metrics(y_true, y_pred):
+        mse = np.mean((y_true - y_pred) ** 2)
+        rmse = np.sqrt(mse)
+        r2 = 1 - np.sum((y_true - y_pred) ** 2) / np.sum((y_true - np.mean(y_true)) ** 2)
+        return mse, rmse, r2
+    
+    short_metrics = calc_metrics(short_true, short_pred)
+    long_metrics = calc_metrics(long_true, long_pred)
+    
+    return short_metrics, long_metrics
+
+def create_metrics_table(ax, lstm_metrics, trfm_metrics):
+    """Create a metrics table for a tile."""
+    short_lstm, long_lstm = lstm_metrics
+    short_trfm, long_trfm = trfm_metrics
+    
+    # Create table data with new layout
+    data = [
+        ['', 'first 50', 'remaining'],
+        ['LSTM', '', ''],
+        ['MSE', f'{short_lstm[0]:.4f}', f'{long_lstm[0]:.4f}'],
+        ['RMSE', f'{short_lstm[1]:.4f}', f'{long_lstm[1]:.4f}'],
+        ['R²', f'{short_lstm[2]:.4f}', f'{long_lstm[2]:.4f}'],
+        ['Transformer', '', ''],
+        ['MSE', f'{short_trfm[0]:.4f}', f'{long_trfm[0]:.4f}'],
+        ['RMSE', f'{short_trfm[1]:.4f}', f'{long_trfm[1]:.4f}'],
+        ['R²', f'{short_trfm[2]:.4f}', f'{long_trfm[2]:.4f}']
+    ]
+    
+    # Create table
+    table = ax.table(
+        cellText=data,
+        loc='upper left',
+        bbox=[1.02, -0.3, 0.25, 0.6],
+        cellLoc='center',
+        colLoc='center'
+    )
+    
+    # Style the table
+    table.auto_set_font_size(False)
+    table.set_fontsize(9)
+    
+    for pos in ['top', 'bottom', 'left', 'right']:
+        table.get_celld()[(0,0)].set_edgecolor('#CCCCCC')
+        table.get_celld()[(0,0)].set_linewidth(1)
+    
+    # Style cells
+    for (row, col), cell in table.get_celld().items():
+        cell.set_text_props(color='black')
+        cell.set_facecolor('white')
+        # Add borders to all cells
+        cell.set_edgecolor('#CCCCCC')
+        cell.set_linewidth(0.5)
 
 if __name__ == '__main__':
     lstm_path = "/home/jonas/Documents/SAR_EMERGENCE_RESEARCH/lstm/results/t12_r4_i110_n3_h64_e1000_l0.01.pth"
