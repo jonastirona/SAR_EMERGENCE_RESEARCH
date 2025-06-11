@@ -12,6 +12,7 @@ from matplotlib import gridspec
 from collections import OrderedDict
 import re
 import matplotlib.gridspec as gridspec
+from PIL import Image
 
 from transformer.functions import (
     lstm_ready,
@@ -129,8 +130,8 @@ def evaluate_models_for_ar(test_AR, lstm_path, transformer_path):
     trfm.load_state_dict(torch.load(transformer_path,map_location=device)); trfm.eval()
 
     # plotting
-    fig = plt.figure(figsize=(16,48))
-    fig.subplots_adjust(left=0.15, right=0.85, top=0.95, bottom=0.1)
+    fig = plt.figure(figsize=(16,46))
+    fig.subplots_adjust(left=0.15, right=0.85, top=0.97, bottom=0.1)
     gs0 = gridspec.GridSpec(7,1,figure=fig,hspace=.2)
     fut = num_pred-1; thr= -0.01; st=4
 
@@ -300,29 +301,50 @@ def evaluate_models_for_ar(test_AR, lstm_path, transformer_path):
 
     # Metrics
     metric_rows = [
-        [name, f"{mean_metric(lstm_metrics_list, name):.4f}", f"{mean_metric(trfm_metrics_list, name):.4f}"]
+        [name if name != 'R2' else 'R²', f"{mean_metric(lstm_metrics_list, name):.4f}", f"{mean_metric(trfm_metrics_list, name):.4f}"]
         for name in metric_names
     ]
 
-    table_ax = fig.add_axes([0.3, 0.01, 0.4, 0.07])
+        # --- Summary table at bottom ---
+
+    table_ax = fig.add_axes([0.15, -0.045, 0.65, 0.12])
     table_ax.axis('off')
 
-    # --- Combine parameter and metric rows ---
-    all_headers = param_headers
-    all_rows = param_rows + [["", "", ""]] + [["Metric", "LSTM", "Transformer"]] + metric_rows
+    # Add title for the summary table
+    table_ax.text(0.5, 1, 'Model Parameters and Overall Performance Metrics', 
+                 ha='center', va='center', fontsize=12)
 
-    # --- Create the table ---
-    the_table = table_ax.table(
-        cellText=all_rows,
-        colLabels=all_headers,
-        loc='center',
+    # Combine parameter rows and metric rows
+    table_data = param_rows \
+               + [['', '', '']] \
+               + [['Metric', 'LSTM', 'Transformer']] \
+               + metric_rows
+
+    # Create table with a muted header band
+    summary_table = table_ax.table(
+        cellText=table_data,
+        colLabels=param_headers,
+        colColours=['#e0e0e0'] * len(param_headers),
         cellLoc='center',
-        colLoc='center',
-        bbox=[0, 0, 1, 1]
+        loc='upper center'
     )
-    the_table.auto_set_font_size(False)
-    the_table.set_fontsize(7)
-    the_table.scale(1, 1.1)
+
+    # Styling
+    summary_table.auto_set_font_size(False)
+    summary_table.set_fontsize(10)
+    summary_table.scale(1, 1.3)
+
+    # Add grid lines, bold header, and alternating row shading
+    for (row, col), cell in summary_table.get_celld().items():
+        cell.set_edgecolor('gray')
+        cell.set_linewidth(0.5)
+        if row == 0:
+            cell.set_text_props(weight='bold')
+        elif row % 2 == 1:
+            cell.set_facecolor('#f9f9f9')
+        else:
+            cell.set_facecolor('white')
+
 
     plt.tight_layout(rect=[0,0,0.8,0.96]); plt.subplots_adjust(right=0.8)
     plt.suptitle(f'Model Comparison for AR {test_AR}', y=0.99)
@@ -330,6 +352,12 @@ def evaluate_models_for_ar(test_AR, lstm_path, transformer_path):
     os.makedirs(os.path.dirname(out), exist_ok=True)
     plt.savefig(out, dpi=300, bbox_inches='tight')
     plt.close()
+
+    # Crop 100 pixels from the bottom of the saved image
+    img = Image.open(out)
+    w, h = img.size
+    cropped = img.crop((0, 0, w, h - 500))
+    cropped.save(out)
     print(f"Comparison plot saved to: {out}")
 
 def calculate_short_long_metrics(true, pred, split_idx=50):
