@@ -81,7 +81,7 @@ def evaluate_models_for_ar(test_AR, lstm_path, transformer_path):
     NOAA2 = mdates.date2num(NOAA_second)
 
     # load & prepare data
-    base = f'/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/data/AR{test_AR}'
+    base = f'/home/jonas/Documents/SAR_EMERGENCE_RESEARCH/data/AR{test_AR}'
     power = np.load(os.path.join(base, f'mean_pmdop{test_AR}_flat.npz'), allow_pickle=True)
     mag   = np.load(os.path.join(base, f'mean_mag{test_AR}_flat.npz'),   allow_pickle=True)
     cont  = np.load(os.path.join(base, f'mean_int{test_AR}_flat.npz'),   allow_pickle=True)
@@ -139,7 +139,7 @@ def evaluate_models_for_ar(test_AR, lstm_path, transformer_path):
         disp = tile_idx + 10
         print(f"Tile {disp}")
 
-        X_test,y_test = lstm_ready(tile_idx, size, inputs, ii, num_in, num_pred)
+        X_test, y_test = lstm_ready(tile_idx, size, inputs, ii, num_in, num_pred)
         X_test = X_test.to(device)
         Xt = X_test.view(X_test.size(0), num_in, X_test.size(2))
 
@@ -157,13 +157,26 @@ def evaluate_models_for_ar(test_AR, lstm_path, transformer_path):
         tnum = mdates.date2num(tcut)
         nanarr = np.full(before.shape, np.nan)
 
-        gs1 = gridspec.GridSpecFromSubplotSpec(3,1,subplot_spec=gs0[i],height_ratios=[10,2,2],hspace=0.5)
+        # Now print the window lengths
+        print(f"  Observed window: {len(tnum)} time steps")
+        print(f"  Prediction window: {len(true)} time steps")
+
+        # Derivative plots: pad with NaNs for the "before_plot" segment so they align to the full time axis
+        d_t = np.gradient(p_t)
+        d_l = np.gradient(p_l)
+        # create NaN padding for the pre-prediction window
+        nan_pad = np.full(before_plot, np.nan)
+        # full-length derivative arrays
+        d_t_full = np.concatenate([nan_pad, d_t])
+        d_l_full = np.concatenate([nan_pad, d_l])
+
+        gs1 = gridspec.GridSpecFromSubplotSpec(4,1,subplot_spec=gs0[i],height_ratios=[10,2,2,2],hspace=0.5)
 
         # All subplots use tnum for x-axis
         ax0 = fig.add_subplot(gs1[0])
         ax0.plot(tnum, np.concatenate((before,true)), 'k-', label='Observed Intensity')
         ax0.plot(tnum, np.concatenate((nanarr,p_l)), 'b-', label='LSTM Prediction')
-        ax0.plot(tnum, np.concatenate((nanarr,p_t)), 'r--', label='Transformer Prediction')
+        ax0.plot(tnum, np.concatenate((nanarr,p_t)), 'r-', label='Transformer Prediction')
         ax0.axvline(NOAA1, color='magenta', linestyle='--', label='NOAA First Record')
         ax0.axvline(NOAA2, color='darkmagenta', linestyle='--', label='NOAA Second Record')
         ax0.set_title(f'Tile {disp}', fontsize=12)
@@ -174,34 +187,50 @@ def evaluate_models_for_ar(test_AR, lstm_path, transformer_path):
         ax0.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
         ax0.tick_params(labelbottom=False)
 
-        ax1 = fig.add_subplot(gs1[1])
+        ax1 = fig.add_subplot(gs1[1], sharex=ax0)
         d_obs = np.gradient(smooth_with_numpy(np.concatenate((before,true))))
+        # dObs/dt: plot full black, overlay limegreen for emergence
+        ax1.plot(tnum, d_obs, color='black', linewidth=1)
         ind_o = emergence_indication(d_obs, thr, st)
         for j in range(len(d_obs)-1):
-            c = 'g' if ind_o[j]==0 else 'r'
-            ax1.plot(tnum[j:j+2], d_obs[j:j+2], color=c)
+            if ind_o[j] != 0:
+                ax1.plot(tnum[j:j+2], d_obs[j:j+2], color='limegreen', linewidth=1)
         ax1.set_ylabel('dObs/dt', fontsize=7, labelpad=10)
         ax1.set_ylim([-0.05,0.05]); ax1.set_yticks([0]); ax1.grid(True)
         ax1.tick_params(labelbottom=False)
         ax1.xaxis.set_major_locator(mdates.DayLocator())
         ax1.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
 
-        ax2 = fig.add_subplot(gs1[2])
-        # LSTM derivative: solid blue
-        d_l = np.gradient(p_l); d_l = np.concatenate((np.zeros(before.shape),d_l))
-        ax2.plot(tnum, d_l, color='blue', linestyle='-', linewidth=1)
-        # Transformer derivative: red dotted
-        d_t = np.gradient(p_t); d_t = np.concatenate((np.zeros(before.shape),d_t))
-        ax2.plot(tnum, d_t, color='red', linestyle=':', linewidth=1)
-        ax2.set_ylabel('dPred/dt', fontsize=7, labelpad=10)
+        ax2 = fig.add_subplot(gs1[2], sharex=ax0)
+        # dTrans/dt: plot full red, overlay limegreen for emergence
+        ax2.plot(tnum, d_t_full, color='red', linewidth=1)
+        ind_t = emergence_indication(d_t_full, thr, st)
+        for j in range(len(d_t_full)-1):
+            if ind_t[j] != 0:
+                ax2.plot(tnum[j:j+2], d_t_full[j:j+2], color='limegreen', linewidth=1)
+        ax2.set_ylabel('dTrans/dt', fontsize=7, labelpad=10)
         ax2.set_ylim([-0.05,0.05]); ax2.set_yticks([0]); ax2.grid(True)
+        ax2.tick_params(labelbottom=False)
         ax2.xaxis.set_major_locator(mdates.DayLocator())
         ax2.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
-        ax2.tick_params(labelbottom=True)
-        ax2.set_xlabel('Date', fontsize=12)
         ax2.set_xlim(tnum[0], tnum[-1])
-        # No legend
 
+        ax3 = fig.add_subplot(gs1[3], sharex=ax0)
+        # dLSTM/dt: plot full blue, overlay limegreen for emergence
+        ax3.plot(tnum, d_l_full, color='blue', linewidth=1)
+        ind_l = emergence_indication(d_l_full, thr, st)
+        for j in range(len(d_l_full)-1):
+            if ind_l[j] != 0:
+                ax3.plot(tnum[j:j+2], d_l_full[j:j+2], color='limegreen', linewidth=1)
+        ax3.set_ylabel('dLSTM/dt', fontsize=7, labelpad=10)
+        ax3.set_ylim([-0.05,0.05]); ax3.set_yticks([0]); ax3.grid(True)
+        ax3.xaxis.set_major_locator(mdates.DayLocator())
+        ax3.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
+        ax3.tick_params(labelbottom=True)
+        ax3.set_xlabel('Date', fontsize=12)
+        ax3.set_xlim(tnum[0], tnum[-1])
+
+    
     def extract_params(path):
         fname = os.path.basename(path)
         pat = r't(\d+)_r(\d+)_i(\d+)_n(\d+)_h(\d+)_e(\d+)_l([0-9.]+)\.pth$'
@@ -285,13 +314,14 @@ def evaluate_models_for_ar(test_AR, lstm_path, transformer_path):
 
     plt.tight_layout(rect=[0,0,0.8,0.96]); plt.subplots_adjust(right=0.8)
     plt.suptitle(f'Model Comparison for AR {test_AR}', y=0.99)
-    out = f"/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/evaluation/results/AR{test_AR}_comparison.png"
+    out = f"/home/jonas/Documents/SAR_EMERGENCE_RESEARCH/evaluation/results/AR{test_AR}_comparison.png"
     os.makedirs(os.path.dirname(out), exist_ok=True)
     plt.savefig(out, dpi=300, bbox_inches='tight')
     plt.close()
+    print(f"Comparison plot saved to: {out}")
 
 if __name__ == '__main__':
-    lstm_path = "/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/lstm/results/t12_r4_i110_n3_h64_e1000_l0.01.pth"
-    transformer_path = "/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/transformer/results/st_transformer/t12_r4_i110_n3_h64_e400_l0.005.pth"
+    lstm_path = "/home/jonas/Documents/SAR_EMERGENCE_RESEARCH/lstm/results/t12_r4_i110_n3_h64_e1000_l0.01.pth"
+    transformer_path = "/home/jonas/Documents/SAR_EMERGENCE_RESEARCH/transformer/results/st_transformer/t12_r4_i110_n3_h64_e400_l0.005.pth"
     for ar in [11698,11726,13165,13179,13183]:
         evaluate_models_for_ar(ar, lstm_path, transformer_path)
