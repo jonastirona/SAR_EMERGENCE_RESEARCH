@@ -58,7 +58,11 @@ def get_output_folder(args):
         f"n{args.num_layers}_"
         f"h{args.hidden_size}_"
         f"e{EPOCHS}_"
-        f"l{args.learning_rate:.3f}"
+        f"l{args.learning_rate:.3f}_"
+        f"d{args.dropout:.2f}_"
+        f"w{args.warmup_ratio:.2f}_"
+        f"f{args.ff_ratio:.1f}_"
+        f"nh{args.num_heads}"
     )
     return os.path.join(args.output_dir, folder_name)
 
@@ -230,9 +234,9 @@ def evaluate_model(model, test_ar, device, output_folder, args):
     NOAA2 = mdates.date2num(NOAA_second)
     
     # Load test data from .npz files
-    power = np.load(f'data/AR{test_ar}/mean_pmdop{test_ar}_flat.npz', allow_pickle=True)
-    cont = np.load(f'data/AR{test_ar}/mean_int{test_ar}_flat.npz', allow_pickle=True)
-    mag = np.load(f'data/AR{test_ar}/mean_mag{test_ar}_flat.npz', allow_pickle=True)
+    power = np.load(f'/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/data/AR{test_ar}/mean_pmdop{test_ar}_flat.npz', allow_pickle=True)
+    cont = np.load(f'/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/data/AR{test_ar}/mean_int{test_ar}_flat.npz', allow_pickle=True)
+    mag = np.load(f'/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/data/AR{test_ar}/mean_mag{test_ar}_flat.npz', allow_pickle=True)
     
     # Extract arrays from .npz files
     pm23, pm34, pm45, pm56 = power['arr_0'], power['arr_1'], power['arr_2'], power['arr_3']
@@ -529,9 +533,9 @@ def main():
     all_intensities = []
     
     for ar in TRAIN_ARs:
-        power = np.load(f'data/AR{ar}/mean_pmdop{ar}_flat.npz', allow_pickle=True)
-        cont = np.load(f'data/AR{ar}/mean_int{ar}_flat.npz', allow_pickle=True)
-        mag = np.load(f'data/AR{ar}/mean_mag{ar}_flat.npz', allow_pickle=True)
+        power = np.load(f'/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/data/AR{ar}/mean_pmdop{ar}_flat.npz', allow_pickle=True)
+        cont = np.load(f'/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/data/AR{ar}/mean_int{ar}_flat.npz', allow_pickle=True)
+        mag = np.load(f'/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/data/AR{ar}/mean_mag{ar}_flat.npz', allow_pickle=True)
         
         # Extract arrays from .npz files
         pm23, pm34, pm45, pm56 = power['arr_0'], power['arr_1'], power['arr_2'], power['arr_3']
