@@ -27,12 +27,12 @@ warnings.filterwarnings('ignore')
 NUM_PRED = 12
 RID_OF_TOP = 4
 NUM_IN = 110
-EPOCHS = 400
+EPOCHS = 1
 SIZE = 9
 TILES = SIZE**2 - 2*SIZE*RID_OF_TOP
 
 # Training ARs
-TRAIN_ARs = [11130,11149,11158,11162,11199,11327,11344,11387,11393,11416,11422,11455,11619,11640,11660,11678,11682,11765,11768,11776,11916,11928,12036,12051,12085,12089,12144,12175,12203,12257,12331,12494,12659,12778,12864,12877,12900,12929,13004,13085,13098]
+TRAIN_ARs = [11130,11149,11158]#,11162,11199,11327,11344,11387,11393,11416,11422,11455,11619,11640,11660,11678,11682,11765,11768,11776,11916,11928,12036,12051,12085,12089,12144,12175,12203,12257,12331,12494,12659,12778,12864,12877,12900,12929,13004,13085,13098]
 
 # Test ARs
 TEST_ARs = [11698, 11726, 13165, 13179, 13183]
@@ -234,13 +234,13 @@ def evaluate_model(model, test_ar, device, output_folder, args):
     NOAA2 = mdates.date2num(NOAA_second)
     
     # Load test data from .npz files
-    power = np.load(f'/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/data/AR{test_ar}/mean_pmdop{test_ar}_flat.npz', allow_pickle=True)
-    cont = np.load(f'/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/data/AR{test_ar}/mean_int{test_ar}_flat.npz', allow_pickle=True)
-    mag = np.load(f'/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/data/AR{test_ar}/mean_mag{test_ar}_flat.npz', allow_pickle=True)
+    power = np.load(f'/home/jonas/Documents/SAR_EMERGENCE_RESEARCH/data/AR{test_ar}/mean_pmdop{test_ar}_flat.npz', allow_pickle=True)
+    cont = np.load(f'/home/jonas/Documents/SAR_EMERGENCE_RESEARCH/data/AR{test_ar}/mean_int{test_ar}_flat.npz', allow_pickle=True)
+    mag = np.load(f'/home/jonas/Documents/SAR_EMERGENCE_RESEARCH/data/AR{test_ar}/mean_mag{test_ar}_flat.npz', allow_pickle=True)
     
     # Extract arrays from .npz files
     pm23, pm34, pm45, pm56 = power['arr_0'], power['arr_1'], power['arr_2'], power['arr_3']
-    time_arr = power['arr_4']
+    time_arr = power['arr_4']   
     ii = cont['arr_0']
     mf = mag['arr_0']
     
@@ -391,13 +391,13 @@ def evaluate_model(model, test_ar, device, output_folder, args):
                 f'Rid of Top: {RID_OF_TOP} | Size: {SIZE} | Tiles: {TILES}',
                 ha='center', fontsize=10)
     
-    # Add summary table at the bottom
-    table_ax = fig.add_axes([0.15, -0.045, 0.65, 0.12])
-    table_ax.axis('off')
+    # Add summary tables at the bottom
+    metrics_ax = fig.add_axes([0.15, -0.045, 0.3, 0.12])
+    metrics_ax.axis('off')
     
-    # Add title for the summary table
-    table_ax.text(0.5, 1, 'Model Parameters and Overall Performance Metrics', 
-                 ha='center', va='center', fontsize=12)
+    # Add title for the metrics table
+    metrics_ax.text(0.5, 1, 'Overall Performance Metrics', 
+                   ha='center', va='center', fontsize=12)
     
     # Calculate mean metrics across all tiles
     def mean_metric(metrics_list, idx):
@@ -410,18 +410,6 @@ def evaluate_model(model, test_ar, device, output_folder, args):
                 vals.append(long_metrics[idx - len(short_metrics)])
         return np.mean(vals) if vals else 0.0
     
-    # Prepare parameter rows
-    param_headers = ["Parameter", "Value"]
-    param_rows = [
-        ["Time Window", str(NUM_PRED)],
-        ["Rid of Top", str(rid_of_top)],  # Use rid_of_top = 1 in the table
-        ["Input Len", str(num_in)],  # Use AR-specific input length
-        ["Layers", str(args.num_layers)],
-        ["Hidden", str(args.hidden_size)],
-        ["Epochs", str(EPOCHS)],
-        ["LR", f"{args.learning_rate:.3f}"],
-    ]
-    
     # Prepare metric rows
     metric_names = ['MSE', 'RMSE', 'MAE', 'R²']
     short_metrics = [
@@ -433,31 +421,77 @@ def evaluate_model(model, test_ar, device, output_folder, args):
         for i, name in enumerate(metric_names)
     ]
     
-    # Combine parameter rows and metric rows
-    table_data = param_rows \
-               + [['', '']] \
-               + [['Metric', 'Value']] \
-               + [['Short-term (first 50)', '']] \
-               + short_metrics \
-               + [['Long-term (remaining)', '']] \
-               + long_metrics
+    # Combine metric rows
+    metrics_data = [['Metric', 'Value']] \
+                + [['Short-term (first 50)', '']] \
+                + short_metrics \
+                + [['Long-term (remaining)', '']] \
+                + long_metrics
     
-    # Create table
-    summary_table = table_ax.table(
-        cellText=table_data,
-        colLabels=param_headers,
-        colColours=['#e0e0e0'] * len(param_headers),
+    # Create metrics table
+    metrics_table = metrics_ax.table(
+        cellText=metrics_data,
+        colLabels=['Metric', 'Value'],
+        colColours=['#e0e0e0'] * 2,
         cellLoc='center',
         loc='upper center'
     )
     
-    # Styling
-    summary_table.auto_set_font_size(False)
-    summary_table.set_fontsize(10)
-    summary_table.scale(1, 1.3)
+    # Styling for metrics table
+    metrics_table.auto_set_font_size(False)
+    metrics_table.set_fontsize(10)
+    metrics_table.scale(1, 1.3)
     
-    # Add grid lines, bold header, and alternating row shading
-    for (row, col), cell in summary_table.get_celld().items():
+    # Add grid lines, bold header, and alternating row shading for metrics table
+    for (row, col), cell in metrics_table.get_celld().items():
+        cell.set_edgecolor('gray')
+        cell.set_linewidth(0.5)
+        if row == 0:
+            cell.set_text_props(weight='bold')
+        elif row % 2 == 1:
+            cell.set_facecolor('#f9f9f9')
+        else:
+            cell.set_facecolor('white')
+    
+    # Parameters table
+    params_ax = fig.add_axes([0.5, -0.045, 0.3, 0.12])
+    params_ax.axis('off')
+    
+    # Add title for the parameters table
+    params_ax.text(0.5, 1, 'Model Parameters', 
+                  ha='center', va='center', fontsize=12)
+    
+    # Prepare parameter rows
+    param_data = [
+        ['Parameter', 'Value'],
+        ['Time Window', str(NUM_PRED)],
+        ['Rid of Top', str(rid_of_top)],  # Use rid_of_top = 1 in the table
+        ['Input Len', str(num_in)],  # Use AR-specific input length
+        ['Layers', str(args.num_layers)],
+        ['Hidden', str(args.hidden_size)],
+        ['Epochs', str(EPOCHS)],
+        ['LR', f"{args.learning_rate:.3f}"],
+        ['Heads', str(args.num_heads)],
+        ['FF Ratio', f"{args.ff_ratio:.2f}"],
+        ['Dropout', f"{args.dropout:.2f}"]
+    ]
+    
+    # Create parameters table
+    params_table = params_ax.table(
+        cellText=param_data,
+        colLabels=['Parameter', 'Value'],
+        colColours=['#e0e0e0'] * 2,
+        cellLoc='center',
+        loc='upper center'
+    )
+    
+    # Styling for parameters table
+    params_table.auto_set_font_size(False)
+    params_table.set_fontsize(10)
+    params_table.scale(1, 1.3)
+    
+    # Add grid lines, bold header, and alternating row shading for parameters table
+    for (row, col), cell in params_table.get_celld().items():
         cell.set_edgecolor('gray')
         cell.set_linewidth(0.5)
         if row == 0:
@@ -533,9 +567,9 @@ def main():
     all_intensities = []
     
     for ar in TRAIN_ARs:
-        power = np.load(f'/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/data/AR{ar}/mean_pmdop{ar}_flat.npz', allow_pickle=True)
-        cont = np.load(f'/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/data/AR{ar}/mean_int{ar}_flat.npz', allow_pickle=True)
-        mag = np.load(f'/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/data/AR{ar}/mean_mag{ar}_flat.npz', allow_pickle=True)
+        power = np.load(f'/home/jonas/Documents/SAR_EMERGENCE_RESEARCH/data/AR{ar}/mean_pmdop{ar}_flat.npz', allow_pickle=True)
+        cont = np.load(f'/home/jonas/Documents/SAR_EMERGENCE_RESEARCH/data/AR{ar}/mean_int{ar}_flat.npz', allow_pickle=True)
+        mag = np.load(f'/home/jonas/Documents/SAR_EMERGENCE_RESEARCH/data/AR{ar}/mean_mag{ar}_flat.npz', allow_pickle=True)
         
         # Extract arrays from .npz files
         pm23, pm34, pm45, pm56 = power['arr_0'], power['arr_1'], power['arr_2'], power['arr_3']

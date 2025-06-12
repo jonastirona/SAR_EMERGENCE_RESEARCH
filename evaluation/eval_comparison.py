@@ -305,37 +305,32 @@ def evaluate_models_for_ar(test_AR, lstm_path, transformer_path):
         for name in metric_names
     ]
 
-        # --- Summary table at bottom ---
+    # --- Summary tables at bottom ---
+    metrics_ax = fig.add_axes([0.15, -0.045, 0.3, 0.12])
+    metrics_ax.axis('off')
 
-    table_ax = fig.add_axes([0.15, -0.045, 0.65, 0.12])
-    table_ax.axis('off')
+    # Add title for the metrics table
+    metrics_ax.text(0.5, 1, 'Overall Performance Metrics', 
+                   ha='center', va='center', fontsize=12)
 
-    # Add title for the summary table
-    table_ax.text(0.5, 1, 'Model Parameters and Overall Performance Metrics', 
-                 ha='center', va='center', fontsize=12)
+    # Create metrics table
+    metrics_data = [['Metric', 'LSTM', 'Transformer']] + metric_rows
 
-    # Combine parameter rows and metric rows
-    table_data = param_rows \
-               + [['', '', '']] \
-               + [['Metric', 'LSTM', 'Transformer']] \
-               + metric_rows
-
-    # Create table with a muted header band
-    summary_table = table_ax.table(
-        cellText=table_data,
-        colLabels=param_headers,
-        colColours=['#e0e0e0'] * len(param_headers),
+    metrics_table = metrics_ax.table(
+        cellText=metrics_data,
+        colLabels=['Metric', 'LSTM', 'Transformer'],
+        colColours=['#e0e0e0'] * 3,
         cellLoc='center',
         loc='upper center'
     )
 
-    # Styling
-    summary_table.auto_set_font_size(False)
-    summary_table.set_fontsize(10)
-    summary_table.scale(1, 1.3)
+    # Styling for metrics table
+    metrics_table.auto_set_font_size(False)
+    metrics_table.set_fontsize(10)
+    metrics_table.scale(1, 1.3)
 
-    # Add grid lines, bold header, and alternating row shading
-    for (row, col), cell in summary_table.get_celld().items():
+    # Add grid lines, bold header, and alternating row shading for metrics table
+    for (row, col), cell in metrics_table.get_celld().items():
         cell.set_edgecolor('gray')
         cell.set_linewidth(0.5)
         if row == 0:
@@ -345,6 +340,38 @@ def evaluate_models_for_ar(test_AR, lstm_path, transformer_path):
         else:
             cell.set_facecolor('white')
 
+    # Parameters table
+    params_ax = fig.add_axes([0.5, -0.045, 0.3, 0.12])
+    params_ax.axis('off')
+
+    # Add title for the parameters table
+    params_ax.text(0.5, 1, 'Model Parameters', 
+                  ha='center', va='center', fontsize=12)
+
+    # Create parameters table
+    params_table = params_ax.table(
+        cellText=param_rows,
+        colLabels=param_headers,
+        colColours=['#e0e0e0'] * 3,
+        cellLoc='center',
+        loc='upper center'
+    )
+
+    # Styling for parameters table
+    params_table.auto_set_font_size(False)
+    params_table.set_fontsize(10)
+    params_table.scale(1, 1.3)
+
+    # Add grid lines, bold header, and alternating row shading for parameters table
+    for (row, col), cell in params_table.get_celld().items():
+        cell.set_edgecolor('gray')
+        cell.set_linewidth(0.5)
+        if row == 0:
+            cell.set_text_props(weight='bold')
+        elif row % 2 == 1:
+            cell.set_facecolor('#f9f9f9')
+        else:
+            cell.set_facecolor('white')
 
     plt.tight_layout(rect=[0,0,0.8,0.96]); plt.subplots_adjust(right=0.8)
     plt.suptitle(f'Model Comparison for AR {test_AR}', y=0.99)
