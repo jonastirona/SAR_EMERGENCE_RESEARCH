@@ -27,9 +27,18 @@ FF_RATIO=4.0
 NUM_HEADS=4
 DROPOUT=0.1
 
+# Calculate total combinations
+total_combinations=25  # 5 hidden sizes × 5 layer counts
+current_combination=0
+
 # Grid search over hidden size and number of layers
 for hidden in 32 48 64 96 128; do
     for layers in 2 3 4 5 6; do
+        current_combination=$((current_combination + 1))
+        echo "Running combination $current_combination of $total_combinations"
+        echo "Parameters: hidden_size=$hidden, num_layers=$layers"
+        echo "----------------------------------------"
+        
         python -u train_and_eval_transformer.py \
             --dropout $DROPOUT \
             --hidden_size $hidden \

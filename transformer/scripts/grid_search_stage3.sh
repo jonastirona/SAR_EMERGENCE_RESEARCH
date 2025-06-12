@@ -27,9 +27,18 @@ HIDDEN_SIZE=64       # From Stage 2
 NUM_LAYERS=2         # From Stage 2
 DROPOUT=0.1
 
+# Calculate total combinations
+total_combinations=25  # 5 ff ratios × 5 head counts
+current_combination=0
+
 # Grid search over feed-forward ratio and number of heads
 for ff in 2 4 6 8 10; do
     for heads in 2 4 8 16 32; do
+        current_combination=$((current_combination + 1))
+        echo "Running combination $current_combination of $total_combinations"
+        echo "Parameters: ff_ratio=$ff, num_heads=$heads"
+        echo "----------------------------------------"
+        
         python -u train_and_eval_transformer.py \
             --dropout $DROPOUT \
             --hidden_size $HIDDEN_SIZE \

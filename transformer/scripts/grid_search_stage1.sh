@@ -27,9 +27,18 @@ FF_RATIO=4.0
 NUM_HEADS=4
 DROPOUT=0.1
 
+# Calculate total combinations
+total_combinations=25  # 5 learning rates × 5 warmup ratios
+current_combination=0
+
 # Grid search over learning rate and warmup ratio
 for lr in 0.0001 0.0005 0.001 0.005 0.01; do
     for warmup in 0.01 0.05 0.1 0.2 0.3; do
+        current_combination=$((current_combination + 1))
+        echo "Running combination $current_combination of $total_combinations"
+        echo "Parameters: lr=$lr, warmup=$warmup"
+        echo "----------------------------------------"
+        
         python -u train_and_eval_transformer.py \
             --dropout $DROPOUT \
             --hidden_size $HIDDEN_SIZE \

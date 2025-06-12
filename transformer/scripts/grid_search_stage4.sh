@@ -28,8 +28,17 @@ NUM_LAYERS=2         # From Stage 2
 FF_RATIO=4.0         # From Stage 3
 NUM_HEADS=4          # From Stage 3
 
+# Calculate total combinations
+total_combinations=5  # 5 dropout rates
+current_combination=0
+
 # Grid search over dropout rates
 for dropout in 0.05 0.10 0.15 0.20 0.30; do
+    current_combination=$((current_combination + 1))
+    echo "Running combination $current_combination of $total_combinations"
+    echo "Parameters: dropout=$dropout"
+    echo "----------------------------------------"
+    
     python -u train_and_eval_transformer.py \
         --dropout $dropout \
         --hidden_size $HIDDEN_SIZE \
