@@ -12,7 +12,6 @@
 #SBATCH --output=%x_%j.out
 #SBATCH --error=%x_%j.err
 #SBATCH --mail-type=ALL
-#SBATCH --mail-user=jst26@njit.edu
 
 module load wulver
 source /mmfs1/project/mx6/jst26/sar-env/bin/activate
@@ -25,8 +24,8 @@ LEARNING_RATE=0.001  # From Stage 1
 WARMUP_RATIO=0.1     # From Stage 1
 HIDDEN_SIZE=64       # From Stage 2
 NUM_LAYERS=2         # From Stage 2
-FF_RATIO=4.0         # From Stage 3
-NUM_HEADS=4          # From Stage 3
+FF_RATIO=2.0         # From Stage 3
+NUM_HEADS=8          # From Stage 3
 
 # Calculate total combinations
 total_combinations=5  # 5 dropout rates
