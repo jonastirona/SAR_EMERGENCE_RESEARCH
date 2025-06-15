@@ -19,28 +19,211 @@ from torch.nn.parallel import DistributedDataParallel
 import os
 from models.st_transformer import SpatioTemporalTransformer
 from matplotlib.backends.backend_pdf import PdfPages
+import logging
+import traceback
+
+# Set up logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+logger = logging.getLogger(__name__)
+
+def validate_parameters(num_pred, rid_of_top, num_in, num_layers, hidden_size, n_epochs, 
+                       learning_rate, model_name, embed_dim, num_heads, ff_dim, dropout):
+    """Validate that all parameters are within expected ranges."""
+    try:
+        assert 1 <= num_pred <= 24, f"num_pred should be between 1 and 24, got {num_pred}"
+        assert 0 <= rid_of_top <= 4, f"rid_of_top should be between 0 and 4, got {rid_of_top}"
+        assert 10 <= num_in <= 200, f"num_in should be between 10 and 200, got {num_in}"
+        assert 1 <= num_layers <= 6, f"num_layers should be between 1 and 6, got {num_layers}"
+        assert 32 <= hidden_size <= 512, f"hidden_size should be between 32 and 512, got {hidden_size}"
+        assert 1 <= n_epochs <= 1000, f"n_epochs should be between 1 and 1000, got {n_epochs}"
+        assert 0.0001 <= learning_rate <= 0.1, f"learning_rate should be between 0.0001 and 0.1, got {learning_rate}"
+        assert model_name in ['LSTM', 'st_transformer'], f"model_name should be 'LSTM' or 'st_transformer', got {model_name}"
+        assert 32 <= embed_dim <= 512, f"embed_dim should be between 32 and 512, got {embed_dim}"
+        assert 1 <= num_heads <= 16, f"num_heads should be between 1 and 16, got {num_heads}"
+        assert embed_dim % num_heads == 0, f"embed_dim ({embed_dim}) must be divisible by num_heads ({num_heads})"
+        assert 64 <= ff_dim <= 1024, f"ff_dim should be between 64 and 1024, got {ff_dim}"
+        assert 0 <= dropout <= 0.5, f"dropout should be between 0 and 0.5, got {dropout}"
+        return True
+    except AssertionError as e:
+        logger.error(f"Parameter validation failed: {str(e)}")
+        return False
+
+def main():
+    try:
+        start_time = time.time()
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        logger.info('Runs on: {}'.format(device))
+        logger.info("Using {} GPUs!".format(torch.cuda.device_count()))
+
+        # Check if correct number of arguments is provided
+        if len(sys.argv) != 13:
+            logger.error(f"Expected 13 arguments, got {len(sys.argv)}")
+            logger.error("Usage: python train_w_stats.py num_pred rid_of_top num_in num_layers hidden_size n_epochs learning_rate embed_dim num_heads ff_dim dropout save_dir")
+            sys.exit(1)
+
+        # Parse command line arguments
+        num_pred = int(sys.argv[1])
+        rid_of_top = 4
+        num_in = int(sys.argv[3])
+        num_layers = int(sys.argv[4])
+        hidden_size = int(sys.argv[5])
+        n_epochs = int(sys.argv[6])
+        learning_rate = float(sys.argv[7])
+        embed_dim = int(sys.argv[8])
+        num_heads = int(sys.argv[9])
+        ff_dim = int(sys.argv[10])
+        dropout = float(sys.argv[11])
+        save_dir = sys.argv[12]
+
+        # Set default model name
+        model_name = 'st_transformer'
+
+        # Validate parameters
+        if not validate_parameters(num_pred, rid_of_top, num_in, num_layers, hidden_size, n_epochs,
+                                 learning_rate, model_name, embed_dim, num_heads, ff_dim, dropout):
+            sys.exit(1)
+
+        logger.info("Starting training with parameters:")
+        logger.info(f"num_pred: {num_pred}")
+        logger.info(f"rid_of_top: {rid_of_top}")
+        logger.info(f"num_in: {num_in}")
+        logger.info(f"num_layers: {num_layers}")
+        logger.info(f"hidden_size: {hidden_size}")
+        logger.info(f"n_epochs: {n_epochs}")
+        logger.info(f"learning_rate: {learning_rate}")
+        logger.info(f"model_name: {model_name}")
+        logger.info(f"embed_dim: {embed_dim}")
+        logger.info(f"num_heads: {num_heads}")
+        logger.info(f"ff_dim: {ff_dim}")
+        logger.info(f"dropout: {dropout}")
+        logger.info(f"save_dir: {save_dir}")
+
+        # Define test AR and size
+        test_AR = 13179
+        size = 9  # Define size here
+        remaining_rows = size - 2*rid_of_top  # Now rid_of_top is defined
+        tiles = remaining_rows * size
+        logger.info(f"Using test AR: {test_AR}")
+        logger.info(f"Size: {size}")
+        logger.info(f"Remaining rows: {remaining_rows}")
+        logger.info(f"Total tiles: {tiles}")
+
+        # Load data
+        logger.info("Loading data...")
+        power_maps = np.load('/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/data/AR{}/mean_pmdop{}_flat.npz'.format(test_AR, test_AR), allow_pickle=True)['arr_0']
+        mag_flux = np.load('/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/data/AR{}/mean_mag{}_flat.npz'.format(test_AR, test_AR), allow_pickle=True)['arr_0']
+        intensities = np.load('/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/data/AR{}/mean_int{}_flat.npz'.format(test_AR, test_AR), allow_pickle=True)['arr_0']
+        logger.info(f"Power maps shape: {power_maps.shape}")
+        logger.info(f"Intensities shape: {intensities.shape}")
+
+        # Prepare data for a specific tile (e.g., tile 0)
+        logger.info("Preparing data for training...")
+        X, y = lstm_ready(0, size, power_maps, intensities, num_in, num_pred)  # Pass size here
+        logger.info(f"X shape before reshape: {X.shape}")
+        logger.info(f"y shape: {y.shape}")
+
+        # Reshape X to match transformer input format (batch, seq_len, features)
+        X = X.unsqueeze(-1)  # Add feature dimension
+        logger.info(f"X shape after reshape: {X.shape}")
+
+        # Split data into train and test sets
+        train_size = int(0.8 * len(X))
+        X_train, X_test = X[:train_size], X[train_size:]
+        y_train, y_test = y[:train_size], y[train_size:]
+        logger.info(f"Train set size: {len(X_train)}")
+        logger.info(f"Test set size: {len(X_test)}")
+
+        # Initialize model
+        logger.info("Initializing model...")
+        if model_name == 'LSTM':
+            model = LSTM(input_size=1, hidden_size=hidden_size, num_layers=num_layers, output_length=num_pred)
+        elif model_name == 'st_transformer':
+            model = SpatioTemporalTransformer(
+                input_dim=1,  # Single feature dimension
+                embed_dim=embed_dim,
+                num_heads=num_heads,
+                num_layers=num_layers,
+                ff_dim=ff_dim,
+                dropout=dropout,
+                output_dim=num_pred
+            )
+        else:
+            logger.error(f"Unknown model name: {model_name}")
+            sys.exit(1)
+
+        logger.info(f"Model architecture: {model}")
+        logger.info(f"Input shape: {X.shape}")
+        logger.info(f"Output shape: {y.shape}")
+
+        # Initialize optimizer and loss function
+        optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+        loss_fn = nn.MSELoss()
+
+        # Training loop
+        logger.info("Starting training loop...")
+        results = training_loop_w_stats(n_epochs, model, optimizer, loss_fn, X_train, y_train, X_test, y_test)
+        logger.info("Training completed")
+
+        # Calculate metrics
+        logger.info("Calculating metrics...")
+        model.eval()
+        with torch.no_grad():
+            y_pred = model(X_test)
+            metrics = calculate_extended_metrics(model, y_test.numpy(), y_pred.numpy())
+            logger.info(f"Final metrics: {metrics}")
+
+        # Save results
+        logger.info("Saving results...")
+        os.makedirs(save_dir, exist_ok=True)
+        np.save(os.path.join(save_dir, 'results.npy'), results)
+        np.save(os.path.join(save_dir, 'metrics.npy'), metrics)
+        logger.info("Results saved successfully")
+
+        end_time = time.time()
+        logger.info("Elapsed time: {} minutes".format((end_time - start_time)/60))
+
+    except Exception as e:
+        logger.error(f"An error occurred: {str(e)}")
+        logger.error("Traceback:")
+        logger.error(traceback.format_exc())
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()
 
 start_time = time.time()
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu') # Define the device (either 'cuda' for GPU or 'cpu' for CPU)
 print('Runs on: {}'.format(device))
 print("Using", torch.cuda.device_count(), "GPUs!")
 
-# Check if the correct number of arguments is provided
-if len(sys.argv) != 9:
-    print("Usage: script.py num_ARs n_epochs learning_rate rid_of_top hidden_size")
+# Check if correct number of arguments is provided
+if len(sys.argv) != 13:
+    logger.error(f"Expected 13 arguments, got {len(sys.argv)}")
+    logger.error("Usage: python train_w_stats.py num_pred rid_of_top num_in num_layers hidden_size n_epochs learning_rate embed_dim num_heads ff_dim dropout save_dir")
     sys.exit(1)
-try: # Extract arguments and convert them to the appropriate types  #python3 train_w_stats.py 12 4 120 3 64 500 0.01
-    num_pred = int(sys.argv[1]); print("Time Windows:", num_pred)
-    rid_of_top = int(sys.argv[2]); print("Rid of Top:", rid_of_top)
-    num_in = int(sys.argv[3]); print("Number of Inputs:", num_in)
-    num_layers = int(sys.argv[4]); print("Number of Layers:", num_layers)
-    hidden_size = int(sys.argv[5]); print("Hidden Size:", hidden_size)
-    n_epochs = int(sys.argv[6]); print("Number of Epochs:", n_epochs)
-    learning_rate = float(sys.argv[7]); print("Learning Rate:", learning_rate)
-    model_name = str(sys.argv[8]).lower(); print("model:", model_name)  # Convert to lowercase to avoid case sensitivity issues
-except ValueError as e:
-    print("Error: Please ensure that all arguments are numbers.")
-    sys.exit(1)
+
+# Parse command line arguments
+num_pred = int(sys.argv[1])
+rid_of_top = 4
+num_in = int(sys.argv[3])
+num_layers = int(sys.argv[4])
+hidden_size = int(sys.argv[5])
+n_epochs = int(sys.argv[6])
+learning_rate = float(sys.argv[7])
+embed_dim = int(sys.argv[8])
+num_heads = int(sys.argv[9])
+ff_dim = int(sys.argv[10])
+dropout = float(sys.argv[11])
+save_dir = sys.argv[12]
+
+# Set default model name
+model_name = 'st_transformer'
 
 # Now you can use these variables in your script
 ARs = [11130,11149,11158,11162,11199,11327,11344,11387,11393,11416,11422,11455,11619,11640,11660,11678,11682,11765,11768,11776,11916,11928,12036,12051,12085,12089,12144,12175,12203,12257,12331,12494,12659,12778,12864,12877,12900,12929,13004,13085,13098]
@@ -105,16 +288,15 @@ if model_name == 'lstm':
     model = LSTM(input_size, hidden_size, num_layers, num_pred).to(device)
 elif model_name == 'st_transformer':
     # Initialize transformer with optimized parameters
-    ff_dim = int(hidden_size * 3.41)  # ff_ratio from Optuna
     model = SpatioTemporalTransformer(
         input_dim=input_size,
         seq_len=num_in,
-        embed_dim=hidden_size,
-        num_heads=10,  # From Optuna
+        embed_dim=embed_dim,
+        num_heads=num_heads,
         ff_dim=ff_dim,
         num_layers=num_layers,
         output_dim=num_pred,
-        dropout=0.16292645173701356  # From Optuna
+        dropout=dropout
     ).to(device)
 
 #if torch.cuda.device_count() > 1: lstm = torch.nn.DataParallel(lstm)
@@ -122,9 +304,12 @@ loss_fn = torch.nn.MSELoss()  #torch.nn.L1Loss() #   # mean-squared error for re
 #optimiser = torch.optim.Adam(lstm.parameters(), lr=learning_rate)
 
 # Define paths for results
-base_path = './results'
+base_path = save_dir
 base_path = os.path.join(base_path, model_name)
-model_name_str = 't{}_r{}_i{}_n{}_h{}_e{}_l{}'.format(num_pred,rid_of_top,num_in,num_layers,hidden_size,n_epochs,learning_rate)
+model_name_str = 't{}_r{}_i{}_n{}_h{}_e{}_l{}_ed{}_nh{}_ff{}_d{}'.format(
+    num_pred, rid_of_top, num_in, num_layers, hidden_size, n_epochs, learning_rate,
+    embed_dim, num_heads, ff_dim, dropout
+)
 result_file_path = os.path.join(base_path, f"{model_name_str}_training_stats.txt")
 pdf_path = os.path.join(base_path, f"{model_name_str}_loss_curves.pdf")
 model_path = os.path.join(base_path, f"{model_name_str}.pth")

@@ -131,14 +131,36 @@ def plot_frame_difference_metric(frame_diffs,cor_file):
 def min_max_scaling(arr, min_val, max_val):
     return (arr - min_val) / (max_val - min_val)
 
-def lstm_ready(tile,size,power_maps,intensities,num_in,num_pred):#,min_p,max_p,min_i,max_i):
-    # Read AR and create lstm ready data
-    final_maps = np.transpose(power_maps, axes=(2, 1, 0))
-    final_ints = np.transpose(intensities, axes=(1,0))
-    X_trans = final_maps[:,:,tile]
-    y_trans = final_ints[:,tile]
-    X_ss, y_mm = split_sequences(X_trans, y_trans, num_in,num_pred)
-    return torch.Tensor(X_ss), torch.Tensor(y_mm)
+def lstm_ready(tile, size, power_maps, intensities, num_in, num_pred):
+    """Prepare data for a specific tile.
+    
+    Args:
+        tile: Tile index
+        size: Size of the grid
+        power_maps: Power maps data of shape (tiles, features, time)
+        intensities: Intensity data of shape (tiles, time)
+        num_in: Number of input time steps
+        num_pred: Number of prediction time steps
+        
+    Returns:
+        X: Input tensor of shape (batch, seq_len, input_dim)
+        y: Target tensor of shape (batch, output_dim)
+    """
+    # Get data for specific tile
+    X_trans = power_maps[tile]  # (features, time)
+    y_trans = intensities[tile]  # (time,)
+    
+    # Transpose to get time as first dimension
+    X_trans = X_trans.T  # (time, features)
+    
+    # Split into sequences
+    X_ss, y_mm = split_sequences(X_trans, y_trans, num_in, num_pred)
+    
+    # Convert to tensors
+    X = torch.Tensor(X_ss)  # (batch, seq_len, input_dim)
+    y = torch.Tensor(y_mm)  # (batch, output_dim)
+    
+    return X, y
 
 def training_loop(n_epochs, lstm, optimiser, loss_fn, X_train, y_train, X_test, y_test):
     scheduler = StepLR(optimiser, step_size=n_epochs//10, gamma=0.9)
@@ -269,16 +291,35 @@ class LSTM(nn.Module):
 
 # split a multivariate sequence past, future samples (X and y)
 def split_sequences(input_sequences, output_sequences, n_steps_in, n_steps_out):
-    X, y = list(), list() # instantiate X and y
+    """Split sequences into input/output pairs.
+    
+    Args:
+        input_sequences: Input data of shape (time, features)
+        output_sequences: Output data of shape (time,)
+        n_steps_in: Number of input time steps
+        n_steps_out: Number of output time steps
+        
+    Returns:
+        X: Input sequences of shape (batch, seq_len, input_dim)
+        y: Output sequences of shape (batch, output_dim)
+    """
+    X, y = list(), list()
     for i in range(len(input_sequences)):
-        # find the end of the input, output sequence
+        # Find the end of the input sequence
         end_ix = i + n_steps_in
         out_end_ix = end_ix + n_steps_out - 1
-        # check if we are beyond the dataset
-        if out_end_ix > len(input_sequences): break
-        # gather input and output of the pattern
-        seq_x, seq_y = input_sequences[i:end_ix], output_sequences[end_ix-1:out_end_ix]
-        X.append(seq_x), y.append(seq_y)
+        
+        # Check if we are beyond the dataset
+        if out_end_ix > len(input_sequences):
+            break
+            
+        # Gather input and output parts of the pattern
+        seq_x = input_sequences[i:end_ix]  # (n_steps_in, features)
+        seq_y = output_sequences[end_ix-1:out_end_ix]  # (n_steps_out,)
+        
+        X.append(seq_x)
+        y.append(seq_y)
+        
     return np.array(X), np.array(y)
 
 

@@ -27,12 +27,12 @@ warnings.filterwarnings('ignore')
 NUM_PRED = 12
 RID_OF_TOP = 4
 NUM_IN = 110
-EPOCHS = 1
+EPOCHS = 400
 SIZE = 9
 TILES = SIZE**2 - 2*SIZE*RID_OF_TOP
 
 # Training ARs
-TRAIN_ARs = [11130,11149,11158]#,11162,11199,11327,11344,11387,11393,11416,11422,11455,11619,11640,11660,11678,11682,11765,11768,11776,11916,11928,12036,12051,12085,12089,12144,12175,12203,12257,12331,12494,12659,12778,12864,12877,12900,12929,13004,13085,13098]
+TRAIN_ARs = [11130,11149,11158,11162,11199,11327,11344,11387,11393,11416,11422,11455,11619,11640,11660,11678,11682,11765,11768,11776,11916,11928,12036,12051,12085,12089,12144,12175,12203,12257,12331,12494,12659,12778,12864,12877,12900,12929,13004,13085,13098]
 
 # Test ARs
 TEST_ARs = [11698, 11726, 13165, 13179, 13183]
@@ -234,13 +234,13 @@ def evaluate_model(model, test_ar, device, output_folder, args):
     NOAA2 = mdates.date2num(NOAA_second)
     
     # Load test data from .npz files
-    power = np.load(f'/home/jonas/Documents/SAR_EMERGENCE_RESEARCH/data/AR{test_ar}/mean_pmdop{test_ar}_flat.npz', allow_pickle=True)
-    cont = np.load(f'/home/jonas/Documents/SAR_EMERGENCE_RESEARCH/data/AR{test_ar}/mean_int{test_ar}_flat.npz', allow_pickle=True)
-    mag = np.load(f'/home/jonas/Documents/SAR_EMERGENCE_RESEARCH/data/AR{test_ar}/mean_mag{test_ar}_flat.npz', allow_pickle=True)
+    power = np.load(f'/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/data/AR{test_ar}/mean_pmdop{test_ar}_flat.npz', allow_pickle=True)
+    cont = np.load(f'/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/data/AR{test_ar}/mean_int{test_ar}_flat.npz', allow_pickle=True)
+    mag = np.load(f'/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/data/AR{test_ar}/mean_mag{test_ar}_flat.npz', allow_pickle=True)
     
     # Extract arrays from .npz files
     pm23, pm34, pm45, pm56 = power['arr_0'], power['arr_1'], power['arr_2'], power['arr_3']
-    time_arr = power['arr_4']   
+    time_arr = power['arr_4']
     ii = cont['arr_0']
     mf = mag['arr_0']
     
@@ -250,8 +250,13 @@ def evaluate_model(model, test_ar, device, output_folder, args):
     ii = ii[sl,:]
     mf = mf[sl,:]
     
+    # Handle NaN values
+    mf[np.isnan(mf)] = 0
+    ii[np.isnan(ii)] = 0
+    
     # Stack power maps and normalize
     stacked = np.stack([pm23, pm34, pm45, pm56], axis=1)
+    stacked[np.isnan(stacked)] = 0  # Handle NaN values in power maps
     mp, Mp = stacked.min(), stacked.max()
     stacked = (stacked - mp) / (Mp - mp)
     
@@ -275,17 +280,17 @@ def evaluate_model(model, test_ar, device, output_folder, args):
     # Collect metrics for all tiles
     all_metrics = []
     
+    # Update model's sequence length and positional encoding once for this AR
+    model.seq_len = num_in
+    model.positional_encoding = model._generate_positional_encoding(num_in, args.hidden_size)
+    
     for i in range(7):
         tile_idx = starting_tile + i
         disp = tile_idx + 10
         print(f"Tile {disp}")
         
-        X_test, y_test = lstm_ready(tile_idx, inputs.shape[1], inputs, ii, num_in, NUM_PRED)
+        X_test, y_test = lstm_ready(tile_idx, SIZE, inputs, ii, num_in, NUM_PRED)
         X_test = X_test.to(device)
-        
-        # Update model's sequence length for this AR
-        model.seq_len = num_in
-        model.positional_encoding = model._generate_positional_encoding(num_in, args.hidden_size)
         
         with torch.no_grad():
             pred = model(X_test)[:, fut].cpu().numpy()
@@ -306,20 +311,10 @@ def evaluate_model(model, test_ar, device, output_folder, args):
         tnum = mdates.date2num(tcut)
         nanarr = np.full(before.shape, np.nan)
         
-        # Calculate derivatives
-        d_true = np.gradient(smooth_with_numpy(np.concatenate((before, true))))
+        # Calculate derivatives for the full sequence
+        full_true = np.concatenate((before, true))
+        d_true = np.gradient(smooth_with_numpy(full_true))
         d_pred = np.gradient(pred)
-        
-        # Create NaN padding for derivatives
-        nan_pad = np.full(before_plot, np.nan)
-        d_true_full = np.concatenate([nan_pad, d_true])
-        d_pred_full = np.concatenate([nan_pad, d_pred])
-        
-        # Ensure all arrays have the same length
-        min_len = min(len(tnum), len(d_true_full), len(d_pred_full))
-        tnum = tnum[:min_len]
-        d_true_full = d_true_full[:min_len]
-        d_pred_full = d_pred_full[:min_len]
         
         # Create subplots
         gs1 = gridspec.GridSpecFromSubplotSpec(4, 1, subplot_spec=gs0[i], height_ratios=[18, 4, 4, 4], hspace=0.3)
@@ -344,12 +339,11 @@ def evaluate_model(model, test_ar, device, output_folder, args):
         
         # Observed derivative plot
         ax1 = fig.add_subplot(gs1[1], sharex=ax0)
-        # dObs/dt: plot full black, overlay limegreen for emergence
-        ax1.plot(tnum, d_true_full, color='black', linewidth=1)
-        ind_o = emergence_indication(d_true_full, thr, st)
-        for j in range(len(d_true_full)-1):
+        ax1.plot(tnum, d_true, color='black', linewidth=1)
+        ind_o = emergence_indication(d_true, thr, st)
+        for j in range(len(d_true)-1):
             if ind_o[j] != 0:
-                ax1.plot(tnum[j:j+2], d_true_full[j:j+2], color='limegreen', linewidth=1)
+                ax1.plot(tnum[j:j+2], d_true[j:j+2], color='limegreen', linewidth=1)
         ax1.set_ylabel('dObs/dt', fontsize=7, labelpad=10)
         ax1.set_ylim([-0.05, 0.05])
         ax1.set_yticks([0])
@@ -358,7 +352,10 @@ def evaluate_model(model, test_ar, device, output_folder, args):
         
         # Predicted derivative plot
         ax2 = fig.add_subplot(gs1[2], sharex=ax0)
-        # dPred/dt: plot full red, overlay limegreen for emergence
+        # create NaN padding for the pre-prediction window
+        nan_pad = np.full(before_plot, np.nan)
+        # full-length derivative array
+        d_pred_full = np.concatenate([nan_pad, d_pred])
         ax2.plot(tnum, d_pred_full, color='red', linewidth=1)
         ind_p = emergence_indication(d_pred_full, thr, st)
         for j in range(len(d_pred_full)-1):
@@ -528,6 +525,14 @@ def main():
     os.makedirs(output_folder, exist_ok=True)
     print(f'\nOutput will be saved to: {output_folder}')
     
+    # Set device and check CUDA availability
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print(f'Using device: {device}')
+    if torch.cuda.is_available():
+        print(f'CUDA Device: {torch.cuda.get_device_name(0)}')
+        print(f'CUDA Version: {torch.version.cuda}')
+        print(f'GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f} GB')
+    
     # Save hyperparameters including fixed parameters
     hyperparameters = {
         **vars(args),  # Command line arguments
@@ -538,16 +543,15 @@ def main():
         'size': SIZE,
         'tiles': TILES,
         'train_ars': TRAIN_ARs,
-        'test_ars': TEST_ARs
+        'test_ars': TEST_ARs,
+        'device': str(device),
+        'cuda_available': torch.cuda.is_available(),
+        'cuda_version': torch.version.cuda if torch.cuda.is_available() else None
     }
     
     # Save hyperparameters to JSON
     with open(os.path.join(output_folder, 'hyperparameters.json'), 'w') as f:
         json.dump(hyperparameters, f, indent=4)
-    
-    # Set device
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print(f'Using device: {device}')
     
     # Initialize model with max sequence length
     model = SpatioTemporalTransformer(
@@ -561,110 +565,146 @@ def main():
         dropout=args.dropout
     ).to(device)
     
-    # Load all ARs upfront
-    print('Loading data and splitting into tiles for {} ARs'.format(len(TRAIN_ARs)))
-    all_inputs = []
-    all_intensities = []
-    
-    for ar in TRAIN_ARs:
-        power = np.load(f'/home/jonas/Documents/SAR_EMERGENCE_RESEARCH/data/AR{ar}/mean_pmdop{ar}_flat.npz', allow_pickle=True)
-        cont = np.load(f'/home/jonas/Documents/SAR_EMERGENCE_RESEARCH/data/AR{ar}/mean_int{ar}_flat.npz', allow_pickle=True)
-        mag = np.load(f'/home/jonas/Documents/SAR_EMERGENCE_RESEARCH/data/AR{ar}/mean_mag{ar}_flat.npz', allow_pickle=True)
-        
-        # Extract arrays from .npz files
-        pm23, pm34, pm45, pm56 = power['arr_0'], power['arr_1'], power['arr_2'], power['arr_3']
-        ii = cont['arr_0']
-        mf = mag['arr_0']
-        
-        # Remove top and bottom rows
-        sl = slice(RID_OF_TOP*SIZE, -RID_OF_TOP*SIZE)
-        pm23, pm34, pm45, pm56 = pm23[sl,:], pm34[sl,:], pm45[sl,:], pm56[sl,:]
-        ii = ii[sl,:]
-        mf = mf[sl,:]
-        
-        # Stack power maps and normalize
-        stacked = np.stack([pm23, pm34, pm45, pm56], axis=1)
-        mp, Mp = stacked.min(), stacked.max()
-        stacked = min_max_scaling(stacked, mp, Mp)
-        
-        # Normalize intensities and magnetic flux
-        mi, Mi = ii.min(), ii.max()
-        mm, Mm = mf.min(), mf.max()
-        ii = min_max_scaling(ii, mi, Mi)
-        mf = min_max_scaling(mf, mm, Mm)
-        
-        # Prepare inputs with magnetic flux as fifth channel
-        inputs = np.concatenate([stacked, np.expand_dims(mf, 1)], axis=1)
-        
-        # Append all ARs
-        all_inputs.append(inputs)
-        all_intensities.append(ii)
-    
-    # Stack all ARs
-    all_inputs = np.stack(all_inputs, axis=-1)
-    all_intensities = np.stack(all_intensities, axis=-1)
-    input_size = np.shape(all_inputs)[1]
+    # Dictionary to store all results
+    all_training_results = {}
     
     # Train on each AR separately
     for ar_idx, ar in enumerate(TRAIN_ARs):
-        print(f'\nTraining on AR {ar} ({ar_idx + 1} of {len(TRAIN_ARs)})...')
+        print(f'\nProcessing AR {ar} ({ar_idx + 1} of {len(TRAIN_ARs)})...')
         
-        # Get data for this AR
-        power_maps = all_inputs[:,:,:,ar_idx]
-        intensities = all_intensities[:,:,ar_idx]
-        
-        # Prepare data for this AR
-        train_data = []
-        train_targets = []
-        
-        # Use all tiles except first for training
-        for tile in range(1, TILES):
-            X, y = lstm_ready(tile, input_size, power_maps, intensities, NUM_IN, NUM_PRED)
-            train_data.append(X)
-            train_targets.append(y)
-        
-        # Use first tile for validation
-        val_X, val_y = lstm_ready(0, input_size, power_maps, intensities, NUM_IN, NUM_PRED)
-        
-        train_data = torch.cat(train_data, dim=0)
-        train_targets = torch.cat(train_targets, dim=0)
-        
-        # Create data loaders for this AR
-        train_dataset = TensorDataset(train_data, train_targets)
-        val_dataset = TensorDataset(val_X, val_y)
-        
-        train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
-        val_loader = DataLoader(val_dataset, batch_size=32)
-        
-        # Initialize optimizer for this AR
-        optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
-        
-        # Train on this AR
-        train_losses, val_losses = training_loop_w_stats(
-            model=model,
-            train_loader=train_loader,
-            val_loader=val_loader,
-            optimizer=optimizer,
-            num_epochs=EPOCHS,
-            device=device,
-            output_folder=output_folder,
-            warmup_ratio=args.warmup_ratio,
-            args=args
-        )
+        try:
+            # Load data for this AR
+            power = np.load(f'/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/data/AR{ar}/mean_pmdop{ar}_flat.npz', allow_pickle=True)
+            cont = np.load(f'/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/data/AR{ar}/mean_int{ar}_flat.npz', allow_pickle=True)
+            mag = np.load(f'/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/data/AR{ar}/mean_mag{ar}_flat.npz', allow_pickle=True)
+            
+            # Extract arrays from .npz files
+            pm23, pm34, pm45, pm56 = power['arr_0'], power['arr_1'], power['arr_2'], power['arr_3']
+            ii = cont['arr_0']
+            mf = mag['arr_0']
+            
+            # Remove top and bottom rows
+            sl = slice(RID_OF_TOP*SIZE, -RID_OF_TOP*SIZE)
+            pm23, pm34, pm45, pm56 = pm23[sl,:], pm34[sl,:], pm45[sl,:], pm56[sl,:]
+            ii = ii[sl,:]
+            mf = mf[sl,:]
+            
+            # Handle NaN values
+            mf[np.isnan(mf)] = 0
+            ii[np.isnan(ii)] = 0
+            
+            # Stack power maps and normalize
+            stacked = np.stack([pm23, pm34, pm45, pm56], axis=1)
+            stacked[np.isnan(stacked)] = 0  # Handle NaN values in power maps
+            mp, Mp = stacked.min(), stacked.max()
+            stacked = (stacked - mp) / (Mp - mp)
+            
+            # Normalize intensities and magnetic flux
+            mi, Mi = ii.min(), ii.max()
+            mm, Mm = mf.min(), mf.max()
+            ii = min_max_scaling(ii, mi, Mi)
+            mf = min_max_scaling(mf, mm, Mm)
+            
+            # Prepare inputs with magnetic flux as fifth channel
+            power_maps = np.concatenate([stacked, np.expand_dims(mf, 1)], axis=1)
+            intensities = ii
+            
+            # Generate valid tile indices
+            valid_tiles = []
+            for tile in range(TILES):
+                valid_tiles.append(tile)
+            
+            # Prepare data from all tiles
+            X_trains = []
+            y_trains = []
+            
+            # Collect data from all tiles
+            for tile in valid_tiles:
+                X_tile, y_tile = lstm_ready(tile, SIZE, power_maps, intensities, NUM_IN, NUM_PRED)
+                X_trains.append(X_tile)
+                y_trains.append(y_tile)
+            
+            # Concatenate all tile data
+            X_train = torch.cat(X_trains, dim=0)
+            y_train = torch.cat(y_trains, dim=0)
+            
+            # Reshape data for transformer
+            X_train = torch.reshape(X_train, (X_train.shape[0], NUM_IN, X_train.shape[2]))
+            
+            # Move data to GPU
+            X_train = X_train.to(device)
+            y_train = y_train.to(device)
+            
+            # For validation, use all tiles with different splits
+            X_test_tiles = []
+            y_test_tiles = []
+            for tile in valid_tiles:
+                X_test, y_test = lstm_ready(tile, SIZE, power_maps, intensities, NUM_IN, NUM_PRED)
+                X_test = torch.reshape(X_test, (X_test.shape[0], NUM_IN, X_test.shape[2]))
+                X_test_tiles.append(X_test.to(device))
+                y_test_tiles.append(y_test.to(device))
+            
+            # Create data loaders
+            train_dataset = TensorDataset(X_train, y_train)
+            train_loader = DataLoader(train_dataset, batch_size=16, shuffle=True)
+            
+            # Initialize optimizer for this AR
+            optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
+            
+            print(f'Training on AR{ar} - All Tiles')
+            
+            # Train on all tiles together
+            train_losses, val_losses = training_loop_w_stats(
+                model=model,
+                train_loader=train_loader,
+                val_loader=None,  # We'll use X_test_tiles for validation
+                optimizer=optimizer,
+                num_epochs=EPOCHS,
+                device=device,
+                output_folder=output_folder,
+                warmup_ratio=args.warmup_ratio,
+                args=args,
+                X_test_tiles=X_test_tiles,
+                y_test_tiles=y_test_tiles
+            )
+            
+            # Store results for this AR
+            all_training_results[f'AR{ar}'] = list(zip(range(EPOCHS), train_losses, val_losses))
+            
+        except Exception as e:
+            print(f"Error processing AR {ar}: {str(e)}")
+            continue
     
-    # Evaluate on test ARs
-    print('\nStarting evaluation...')
-    all_metrics = []
-    for test_idx, test_ar in enumerate(TEST_ARs):
-        print(f'Evaluating on {test_ar} ({test_idx + 1} of {len(TEST_ARs)})...')
-        metrics = evaluate_model(model, test_ar, device, output_folder, args)
-        all_metrics.append(metrics)
+    # Clear GPU memory
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
     
-    # Save all metrics to a single file
-    metrics_path = os.path.join(output_folder, 'all_metrics.json')
-    with open(metrics_path, 'w') as f:
-        json.dump(all_metrics, f, indent=4)
-    print(f'\nMetrics saved to: {metrics_path}')
+    try:
+        # Load the best model for evaluation
+        checkpoint = torch.load(os.path.join(output_folder, 'model.pth'))
+        model.load_state_dict(checkpoint['model_state_dict'])
+        print(f"Loaded model from epoch {checkpoint['epoch']} with validation loss {checkpoint['val_loss']:.4f}")
+        
+        # Evaluate on test ARs
+        print('\nStarting evaluation...')
+        all_metrics = []
+        for test_idx, test_ar in enumerate(TEST_ARs):
+            print(f'Evaluating on {test_ar} ({test_idx + 1} of {len(TEST_ARs)})...')
+            try:
+                metrics = evaluate_model(model, test_ar, device, output_folder, args)
+                all_metrics.append(metrics)
+            except Exception as e:
+                print(f"Error evaluating AR {test_ar}: {str(e)}")
+                continue
+        
+        # Save all metrics to a single file
+        metrics_path = os.path.join(output_folder, 'all_metrics.json')
+        with open(metrics_path, 'w') as f:
+            json.dump(all_metrics, f, indent=4)
+        print(f'\nMetrics saved to: {metrics_path}')
+        
+    except Exception as e:
+        print(f"Error during evaluation: {str(e)}")
     
     print('Training and evaluation complete!')
 
@@ -790,7 +830,7 @@ def plot_training_diagnostics(train_losses, val_losses, lr_history, output_folde
         pdf.savefig(fig)
         plt.close()
 
-def training_loop_w_stats(model, train_loader, val_loader, optimizer, num_epochs, device, output_folder, warmup_ratio=0.1, args=None):
+def training_loop_w_stats(model, train_loader, val_loader, optimizer, num_epochs, device, output_folder, warmup_ratio=0.1, args=None, X_test_tiles=None, y_test_tiles=None):
     """Training loop with warmup and cosine scheduling, reporting train/test losses."""
     train_losses = []
     val_losses = []
@@ -819,15 +859,27 @@ def training_loop_w_stats(model, train_loader, val_loader, optimizer, num_epochs
         # Training phase
         model.train()
         train_loss = 0
+        num_batches = 0
         for batch_idx, (data, target) in enumerate(train_loader):
             data, target = data.to(device), target.to(device)
             optimizer.zero_grad()
             output = model(data)
             loss = F.mse_loss(output, target)
+            
+            # Check for NaN loss
+            if torch.isnan(loss):
+                print(f"Warning: NaN loss detected at epoch {epoch}, batch {batch_idx}")
+                continue
+                
             loss.backward()
+            
+            # Add gradient clipping
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            
             optimizer.step()
             
             train_loss += loss.item()
+            num_batches += 1
             
             if batch_idx % 10 == 0:
                 print(f'Epoch: {epoch}, Batch: {batch_idx}, Loss: {loss.item():.4f}, LR: {optimizer.param_groups[0]["lr"]:.6f}')
@@ -841,27 +893,57 @@ def training_loop_w_stats(model, train_loader, val_loader, optimizer, num_epochs
         # Record learning rate
         lr_history.append(optimizer.param_groups[0]['lr'])
         
-        train_loss /= len(train_loader)
-        train_losses.append(train_loss)
+        # Calculate average training loss
+        if num_batches > 0:
+            train_loss /= num_batches
+            train_losses.append(train_loss)
+        else:
+            print(f"Warning: No valid batches in epoch {epoch}")
+            train_losses.append(float('nan'))
         
-        # Validation phase
+        # Validation phase - use all tiles
         model.eval()
         val_loss = 0
-        with torch.no_grad():
-            for data, target in val_loader:
-                data, target = data.to(device), target.to(device)
-                output = model(data)
-                val_loss += F.mse_loss(output, target).item()
+        num_val_batches = 0
         
-        val_loss /= len(val_loader)
-        val_losses.append(val_loss)
+        with torch.no_grad():
+            for tile_idx in range(len(X_test_tiles)):
+                try:
+                    val_X = X_test_tiles[tile_idx]
+                    val_y = y_test_tiles[tile_idx]
+                    
+                    output = model(val_X)
+                    loss = F.mse_loss(output, val_y)
+                    
+                    # Check for NaN loss
+                    if not torch.isnan(loss):
+                        val_loss += loss.item()
+                        num_val_batches += 1
+                        
+                except Exception as e:
+                    print(f"Error validating tile {tile_idx}: {str(e)}")
+                    continue
+        
+        # Calculate average validation loss
+        if num_val_batches > 0:
+            val_loss /= num_val_batches
+            val_losses.append(val_loss)
+        else:
+            print(f"Warning: No valid validation batches in epoch {epoch}")
+            val_losses.append(float('nan'))
         
         print(f'Epoch: {epoch}, Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}, LR: {optimizer.param_groups[0]["lr"]:.6f}')
         
         # Save best model
-        if val_loss < best_val_loss:
+        if not np.isnan(val_loss) and val_loss < best_val_loss:
             best_val_loss = val_loss
-            torch.save(model.state_dict(), os.path.join(output_folder, 'model.pth'))
+            torch.save({
+                'epoch': epoch,
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'train_loss': train_loss,
+                'val_loss': val_loss,
+            }, os.path.join(output_folder, 'model.pth'))
     
     # Create comprehensive training diagnostics
     plot_training_diagnostics(train_losses, val_losses, lr_history, output_folder, args)
