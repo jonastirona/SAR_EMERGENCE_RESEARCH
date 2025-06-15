@@ -41,6 +41,8 @@ ENV/
 
 # Logs
 *.log
+.err
+.out
 
 # OS-specific
 .DS_Store
