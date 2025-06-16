@@ -11,8 +11,6 @@
 #SBATCH --time=72:00:00
 #SBATCH --output=%x_%j.out
 #SBATCH --error=%x_%j.err
-#SBATCH --mail-type=ALL
-#SBATCH --mail-user=jst26@njit.edu
 
 # Exit on error
 set -e
@@ -23,19 +21,19 @@ source sar-env/bin/activate
 cd /project/mx6/jst26/SAR_EMERGENCE_RESEARCH/transformer/
 
 # Create base directory for random search
-BASE_DIR="results/random_search_2"
+BASE_DIR="results/random_search_3"
 mkdir -p "$BASE_DIR"
 
 # Number of trials to perform
-N_TRIALS=15
+N_TRIALS=40  # Updated for more exploration
 
 # Fixed parameters
 NUM_PRED=12        # Time window
 RID_OF_TOP=4       # Rid of top
 NUM_IN=110         # Input length
-N_EPOCHS=400       # Number of epochs
+N_EPOCHS=200       # Number of epochs
 
-# Function to generate random number in range
+# Function to generate random integer in range
 random_range() {
     local min=$1
     local max=$2
@@ -53,12 +51,9 @@ random_float() {
 generate_valid_embed_dim() {
     local num_heads=$1
     local min_dim=48
-    local max_dim=96
-    # Find the smallest multiple of (num_heads * 2) that's >= min_dim
+    local max_dim=128
     local min_multiple=$(( (min_dim + (num_heads * 2) - 1) / (num_heads * 2) * (num_heads * 2) ))
-    # Find the largest multiple of (num_heads * 2) that's <= max_dim
     local max_multiple=$(( max_dim / (num_heads * 2) * (num_heads * 2) ))
-    # Generate a random multiple of (num_heads * 2) in this range
     local range=$(( (max_multiple - min_multiple) / (num_heads * 2) + 1 ))
     echo $(( min_multiple + (RANDOM % range) * (num_heads * 2) ))
 }
@@ -69,16 +64,16 @@ run_training() {
     local trial_dir="${BASE_DIR}/trial_${trial_num}"
     mkdir -p "$trial_dir"
 
-    # Generate random parameters for model architecture
-    NUM_LAYERS=$(random_range 2 4)        # Number of layers
-    HIDDEN_SIZE=$(random_range 48 96)     # Hidden size
-    LEARNING_RATE=$(random_float 0.001 0.01)  # Learning rate
-    NUM_HEADS=$(random_range 4 12)        # Number of heads
-    EMBED_DIM=$(generate_valid_embed_dim $NUM_HEADS)  # Embedding dimension (divisible by num_heads)
-    FF_DIM=$(random_range 96 256)         # Feed-forward dimension
-    DROPOUT=$(random_float 0.05 0.2)      # Dropout
+    # Random architecture parameters (expanded ranges)
+    NUM_LAYERS=$(random_range 2 5)
+    HIDDEN_SIZE=$(random_range 48 128)
+    LEARNING_RATE=$(random_float 0.0005 0.01)
+    NUM_HEADS=$(random_range 4 12)
+    EMBED_DIM=$(generate_valid_embed_dim $NUM_HEADS)
+    FF_DIM=$(random_range 96 320)
+    DROPOUT=$(random_float 0.05 0.3)
 
-    # Save parameters to file
+    # Save parameters
     {
         echo "Parameters for trial ${trial_num}:"
         echo "Fixed Parameters:"
@@ -97,12 +92,10 @@ run_training() {
         echo "Dropout: ${DROPOUT}"
     } > "${trial_dir}/parameters.txt"
 
-    # Run training
-    echo "Starting trial ${trial_num} with parameters:"
+    echo "Starting trial ${trial_num}..."
     cat "${trial_dir}/parameters.txt"
     echo "----------------------------------------"
 
-    # Run training - let SLURM handle output
     python3 train_w_stats.py \
         "${NUM_PRED}" \
         "${RID_OF_TOP}" \
@@ -117,7 +110,6 @@ run_training() {
         "${DROPOUT}" \
         "${trial_dir}"
 
-    # Check if training completed successfully
     if [ $? -ne 0 ]; then
         echo "Error: Training failed for trial ${trial_num}"
         return 1
@@ -132,16 +124,13 @@ echo "Starting random search with ${N_TRIALS} trials"
 echo "Results will be saved in ${BASE_DIR}"
 echo "----------------------------------------"
 
-# Run all trials
 for i in $(seq 1 ${N_TRIALS}); do
     if ! run_training $i; then
         echo "Warning: Trial $i failed, continuing with next trial..."
     fi
 done
 
-echo "Random search completed. Results saved in ${BASE_DIR}"
-
-# Create summary file
+# Create summary
 echo "Creating summary of all trials..."
 {
     echo "Random Search Summary"
@@ -159,7 +148,6 @@ echo "Creating summary of all trials..."
     echo "--------------"
 } > "${BASE_DIR}/summary.txt"
 
-# Add parameters from each trial to summary
 for i in $(seq 1 ${N_TRIALS}); do
     if [ -f "${BASE_DIR}/trial_${i}/parameters.txt" ]; then
         {
@@ -170,4 +158,4 @@ for i in $(seq 1 ${N_TRIALS}); do
     fi
 done
 
-echo "Summary created at ${BASE_DIR}/summary.txt" 
+echo "Summary created at ${BASE_DIR}/summary.txt"
