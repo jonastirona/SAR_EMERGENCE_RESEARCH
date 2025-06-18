@@ -2,6 +2,9 @@
 evaluation/results/
 transformer/results/
 
+# WandB logs and artifacts
+wandb/
+
 # Python
 __pycache__/
 *.py[cod]

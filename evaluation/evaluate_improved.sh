@@ -57,20 +57,16 @@ find_model_path() {
     return 1
 }
 
-# Process random_search folder (trials 1-9, skipping 5,8,9)
-RANDOM_SEARCH_DIR="${BASE_DIR}/transformer/results/random_search"
-for trial in {1..9}; do
-    if [[ "$trial" =~ ^(5|8|9)$ ]]; then
-        continue
-    fi
-    
-    params_file="${RANDOM_SEARCH_DIR}/trial_${trial}/parameters.txt"
+# Process random_search_3 folder (trials 16-40)
+RANDOM_SEARCH_3_DIR="${BASE_DIR}/transformer/results/random_search_3"
+for trial in {16..40}; do
+    params_file="${RANDOM_SEARCH_3_DIR}/trial_${trial}/parameters.txt"
     if [ ! -f "$params_file" ]; then
         echo "Warning: Parameters file not found for trial $trial"
         continue
     fi
     
-    model_path=$(find_model_path "$RANDOM_SEARCH_DIR" "$trial")
+    model_path=$(find_model_path "$RANDOM_SEARCH_3_DIR" "$trial")
     if [ $? -ne 0 ]; then
         echo "Warning: Model file not found for trial $trial"
         continue
@@ -80,49 +76,10 @@ for trial in {1..9}; do
     read -r time_window num_in num_layers hidden_size learning_rate embed_dim num_heads ff_dim dropout <<< $(parse_parameters "$params_file")
     
     # Create output directory
-    output_dir="${BASE_DIR}/evaluation/results/random_search/trial_${trial}"
+    output_dir="${BASE_DIR}/evaluation/results/random_search_3/trial_${trial}"
     mkdir -p "$output_dir"
     
-    echo "Running trial $trial from random_search..."
-    python -u eval_comparison_improved.py \
-        --time_window "$time_window" \
-        --rid_of_top 1 \
-        --num_in "$num_in" \
-        --num_layers "$num_layers" \
-        --hidden_size "$hidden_size" \
-        --learning_rate "$learning_rate" \
-        --embed_dim "$embed_dim" \
-        --num_heads "$num_heads" \
-        --ff_dim "$ff_dim" \
-        --dropout "$dropout" \
-        --lstm_path "$LSTM_PATH" \
-        --transformer_path "$model_path" \
-        --output_dir "$output_dir"
-done
-
-# Process random_search_2 folder (trials 1-15)
-RANDOM_SEARCH_2_DIR="${BASE_DIR}/transformer/results/random_search_2"
-for trial in {1..15}; do
-    params_file="${RANDOM_SEARCH_2_DIR}/trial_${trial}/parameters.txt"
-    if [ ! -f "$params_file" ]; then
-        echo "Warning: Parameters file not found for trial $trial"
-        continue
-    fi
-    
-    model_path=$(find_model_path "$RANDOM_SEARCH_2_DIR" "$trial")
-    if [ $? -ne 0 ]; then
-        echo "Warning: Model file not found for trial $trial"
-        continue
-    fi
-    
-    # Parse parameters
-    read -r time_window num_in num_layers hidden_size learning_rate embed_dim num_heads ff_dim dropout <<< $(parse_parameters "$params_file")
-    
-    # Create output directory
-    output_dir="${BASE_DIR}/evaluation/results/random_search_2/trial_${trial}"
-    mkdir -p "$output_dir"
-    
-    echo "Running trial $trial from random_search_2..."
+    echo "Running trial $trial from random_search_3..."
     python -u eval_comparison_improved.py \
         --time_window "$time_window" \
         --rid_of_top 1 \
