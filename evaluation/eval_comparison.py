@@ -82,7 +82,7 @@ def evaluate_models_for_ar(test_AR, lstm_path, transformer_path):
     NOAA2 = mdates.date2num(NOAA_second)
 
     # load & prepare data
-    base = f'/home/jonas/Documents/SAR_EMERGENCE_RESEARCH/data/AR{test_AR}'
+    base = f'/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/data/AR{test_AR}'
     power = np.load(os.path.join(base, f'mean_pmdop{test_AR}_flat.npz'), allow_pickle=True)
     mag   = np.load(os.path.join(base, f'mean_mag{test_AR}_flat.npz'),   allow_pickle=True)
     cont  = np.load(os.path.join(base, f'mean_int{test_AR}_flat.npz'),   allow_pickle=True)
@@ -161,6 +161,15 @@ def evaluate_models_for_ar(test_AR, lstm_path, transformer_path):
         tcut = time_arr[last-before_plot:last+true.shape[0]]
         tnum = mdates.date2num(tcut)
         nanarr = np.full(before.shape, np.nan)
+
+        # Debug code to diagnose time axis misalignment
+        print(f"[DEBUG] AR {test_AR} tile {tile_idx}")
+        print(f"true.shape = {true.shape}")
+        print(f"before_plot = {before_plot}")
+        print(f"time_arr[last - before_plot] = {time_arr[last - before_plot]}")
+        print(f"time_arr[last + len(true) - 1] = {time_arr[last + len(true) - 1]}")
+        print(f"tnum[0] = {mdates.num2date(tnum[0])}")
+        print(f"tnum[-1] = {mdates.num2date(tnum[-1])}")
 
         # Derivative plots: pad with NaNs for the "before_plot" segment so they align to the full time axis
         d_t = np.gradient(p_t)
@@ -375,7 +384,7 @@ def evaluate_models_for_ar(test_AR, lstm_path, transformer_path):
 
     plt.tight_layout(rect=[0,0,0.8,0.96]); plt.subplots_adjust(right=0.8)
     plt.suptitle(f'Model Comparison for AR {test_AR}', y=0.99)
-    out = f"/home/jonas/Documents/SAR_EMERGENCE_RESEARCH/evaluation/results/AR{test_AR}_comparison.png"
+    out = f"/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/evaluation/results/AR{test_AR}_comparison.png"
     os.makedirs(os.path.dirname(out), exist_ok=True)
     plt.savefig(out, dpi=300, bbox_inches='tight')
     plt.close()
@@ -449,7 +458,7 @@ def create_metrics_table(ax, lstm_metrics, trfm_metrics):
         cell.set_linewidth(0.5)
 
 if __name__ == '__main__':
-    lstm_path = "/home/jonas/Documents/SAR_EMERGENCE_RESEARCH/lstm/results/t12_r4_i110_n3_h64_e1000_l0.01.pth"
-    transformer_path = "/home/jonas/Documents/SAR_EMERGENCE_RESEARCH/transformer/results/st_transformer/t12_r4_i110_n3_h64_e400_l0.005.pth"
+    lstm_path = "/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/lstm/results/t12_r4_i110_n3_h64_e1000_l0.01.pth"
+    transformer_path = "/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/transformer/results/st_transformer/t12_r4_i110_n3_h64_e400_l0.005.pth"
     for ar in [11698,11726,13165,13179,13183]:
         evaluate_models_for_ar(ar, lstm_path, transformer_path)

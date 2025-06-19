@@ -23,6 +23,9 @@ sys.path.append(project_root)
 from transformer.models.st_transformer import SpatioTemporalTransformer
 from transformer.functions import lstm_ready, smooth_with_numpy, emergence_indication, split_sequences
 
+# Import the new evaluation module
+from transformer.eval_wandb import evaluate_models_for_ar
+
 # Set up logging
 logging.basicConfig(
     level=logging.WARNING,  # Changed from INFO to WARNING
@@ -259,8 +262,6 @@ def calculate_tile_level_emergence_metrics(observed: np.ndarray, predicted: np.n
     Returns:
         Dictionary of aggregated metrics across all tiles
     """
-    print(f"Calculating tile-level emergence metrics for {len(np.unique(tile_indices))} unique tiles...")
-    
     # Get unique tiles
     unique_tiles = np.unique(tile_indices)
     
@@ -298,7 +299,6 @@ def calculate_tile_level_emergence_metrics(observed: np.ndarray, predicted: np.n
         
         # Skip tiles with insufficient data
         if len(tile_obs_flat) < 24:
-            print(f"  Skipping tile {tile_idx}: insufficient data ({len(tile_obs_flat)} points)")
             continue
             
         try:
@@ -320,11 +320,9 @@ def calculate_tile_level_emergence_metrics(observed: np.ndarray, predicted: np.n
                 valid_tiles += 1
                 
         except Exception as e:
-            print(f"  Error calculating metrics for tile {tile_idx}: {str(e)}")
             continue
     
     tile_metrics['num_valid_tiles'] = valid_tiles
-    print(f"  Successfully calculated metrics for {valid_tiles}/{len(unique_tiles)} tiles")
     
     # Aggregate metrics across tiles
     aggregated_metrics = {}
@@ -350,133 +348,6 @@ def calculate_tile_level_emergence_metrics(observed: np.ndarray, predicted: np.n
     aggregated_metrics['tile_success_rate'] = valid_tiles / len(unique_tiles) if len(unique_tiles) > 0 else 0.0
     
     return aggregated_metrics
-
-def get_ar_settings(test_AR, rid_of_top):
-    """Get AR-specific settings."""
-    if test_AR == 11698:
-        starting_tile = 46 - rid_of_top * 9
-        before_plot = 50
-        num_in = 96
-        NOAA_first = datetime(2013, 3, 15)
-        NOAA_second = datetime(2013, 3, 17)
-    elif test_AR == 11726:
-        starting_tile = 37 - rid_of_top * 9
-        before_plot = 50
-        num_in = 72
-        NOAA_first = datetime(2013, 4, 20)
-        NOAA_second = datetime(2013, 4, 22)
-    elif test_AR == 13165:
-        rid_of_top = 1
-        starting_tile = 28 - rid_of_top * 9
-        before_plot = 40
-        num_in = 96
-        NOAA_first = datetime(2022, 12, 12)
-        NOAA_second = datetime(2022, 12, 14)
-    elif test_AR == 13179:
-        starting_tile = 37 - rid_of_top * 9
-        before_plot = 40
-        num_in = 96
-        NOAA_first = datetime(2022, 12, 30)
-        NOAA_second = datetime(2023, 1, 1)
-    elif test_AR == 13183:
-        starting_tile = 37 - rid_of_top * 9
-        before_plot = 40
-        num_in = 96
-        NOAA_first = datetime(2023, 1, 6)
-        NOAA_second = datetime(2023, 1, 8)
-    else:
-        raise ValueError("Invalid test_AR value")
-    return starting_tile, before_plot, num_in, NOAA_first, NOAA_second
-
-def recalibrate(pred, last_obs):
-    """Recalibrate predictions to match the last observation."""
-    trend = pred - pred[0]
-    new_pred = trend + last_obs
-    return new_pred
-
-def evaluate_model_on_ar(model, test_AR, config, device):
-    """Evaluate a trained model on a specific AR and return predictions and metrics."""
-    size = 9
-    rid_of_top = config['rid_of_top']
-    
-    # Get AR settings
-    start_tile, before_plot, ar_num_in, NOAA_first, NOAA_second = get_ar_settings(test_AR, rid_of_top)
-    
-    # Update model's sequence length dynamically - like train_and_eval_transformer.py
-    model.seq_len = ar_num_in
-    model.positional_encoding = model._generate_positional_encoding(ar_num_in, config['embed_dim'])
-    
-    # Load AR data
-    base_path = f'/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/data/AR{test_AR}'
-    power = np.load(f'{base_path}/mean_pmdop{test_AR}_flat.npz', allow_pickle=True)
-    mag = np.load(f'{base_path}/mean_mag{test_AR}_flat.npz', allow_pickle=True)
-    cont = np.load(f'{base_path}/mean_int{test_AR}_flat.npz', allow_pickle=True)
-    
-    pm23, pm34, pm45, pm56, time_arr = (
-        power['arr_0'], power['arr_1'], power['arr_2'], power['arr_3'], power['arr_4']
-    )
-    mf = mag['arr_0']
-    ii = cont['arr_0']
-    
-    # Trim arrays
-    sl = slice(rid_of_top * size, -rid_of_top * size)
-    pm23, pm34, pm45, pm56 = pm23[sl,:], pm34[sl,:], pm45[sl,:], pm56[sl,:]
-    mf = mf[sl,:]
-    ii = ii[sl,:]
-    mf[np.isnan(mf)] = 0
-    ii[np.isnan(ii)] = 0
-    
-    # Normalize using local AR statistics - exactly like eval_comparison.py
-    # This creates more realistic, noisy data compared to global normalization
-    stacked = np.stack([pm23, pm34, pm45, pm56], axis=1)
-    mp, Mp = stacked.min(), stacked.max()
-    mm, Mm = mf.min(), mf.max()
-    mi, Mi = ii.min(), ii.max()
-    stacked = (stacked - mp) / (Mp - mp)
-    mf = (mf - mm) / (Mm - mm)
-    ii = (ii - mi) / (Mi - mi)
-    
-    # Create inputs - exactly like eval_comparison.py
-    inputs = np.concatenate([stacked, np.expand_dims(mf, 1)], axis=1)
-    
-    # Use the AR-specific num_in
-    num_pred = config['num_pred']
-    
-    # Evaluate on main tile
-    tile_idx = start_tile
-    X_test, y_test = lstm_ready_original(tile_idx, size, inputs, ii, ar_num_in, num_pred)
-    X_test = X_test.to(device)
-    
-    # Get predictions
-    model.eval()
-    with torch.no_grad():
-        predictions = model(X_test)[:, -1].cpu().numpy()  # Get last prediction
-    
-    true_values = y_test[:, -1].numpy()  # Get last true value
-    
-    # Recalibrate predictions
-    last_obs_idx = ii.shape[1] - true_values.shape[0] - 1
-    last_obs = ii[tile_idx, last_obs_idx]
-    predictions = recalibrate(predictions, last_obs)
-    
-    # Calculate full sequence metrics (no short/long split)
-    full_mse = np.mean((true_values - predictions) ** 2)
-    full_rmse = np.sqrt(full_mse)
-    full_mae = np.mean(np.abs(true_values - predictions))
-    full_r2 = 1 - np.sum((true_values - predictions) ** 2) / np.sum((true_values - np.mean(true_values)) ** 2)
-    
-    # Calculate emergence metrics
-    emergence_metrics = calculate_emergence_metrics(true_values, predictions)
-    
-    return {
-        'ar': test_AR,
-        'true_values': true_values,
-        'predictions': predictions,
-        'full_metrics': (full_mse, full_rmse, full_mae, full_r2),
-        'emergence_metrics': emergence_metrics,
-        'time_array': time_arr[last_obs_idx+1:last_obs_idx+1+len(true_values)] if len(time_arr) > last_obs_idx+len(true_values) else None,
-        'NOAA_dates': (NOAA_first, NOAA_second)
-    }
 
 def load_all_ars_data(ARs, rid_of_top, size, num_in, num_pred):
     all_inputs = []
@@ -562,285 +433,7 @@ def load_all_ars_data(ARs, rid_of_top, size, num_in, num_pred):
 # Global variable to store normalization statistics
 GLOBAL_NORM_STATS = None
 
-def create_derivative_plots(model, test_AR, config, device, num_layers) -> plt.Figure:
-    """Create comprehensive 7-tile evaluation plots for a specific AR using actual model predictions."""
-    try:
-        print(f"Creating detailed evaluation plots for AR {test_AR} with {num_layers} layers...")
-        
-        size = 9
-        # Force rid_of_top = 1 for evaluation, just like eval_comparison.py
-        rid_of_top = 1
-        num_in = config['num_in']  # Use model's trained sequence length (110)
-        num_pred = config['num_pred']
-        
-        # Get AR-specific settings (using forced rid_of_top=1)
-        start_tile, before_plot, ar_num_in, NOAA_first, NOAA_second = get_ar_settings(test_AR, rid_of_top)
-        NOAA1 = mdates.date2num(NOAA_first)
-        NOAA2 = mdates.date2num(NOAA_second)
-        
-        # Update model's sequence length dynamically - like train_and_eval_transformer.py
-        model.seq_len = ar_num_in
-        model.positional_encoding = model._generate_positional_encoding(ar_num_in, config['embed_dim'])
-        
-        # Load AR data
-        base_path = f'/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/data/AR{test_AR}'
-        power = np.load(f'{base_path}/mean_pmdop{test_AR}_flat.npz', allow_pickle=True)
-        mag = np.load(f'{base_path}/mean_mag{test_AR}_flat.npz', allow_pickle=True)
-        cont = np.load(f'{base_path}/mean_int{test_AR}_flat.npz', allow_pickle=True)
-        
-        pm23, pm34, pm45, pm56, time_arr = (
-            power['arr_0'], power['arr_1'], power['arr_2'], power['arr_3'], power['arr_4']
-        )
-        mf = mag['arr_0']
-        ii = cont['arr_0']
-        
-        # Trim arrays (using rid_of_top=1)
-        sl = slice(rid_of_top * size, -rid_of_top * size)
-        pm23, pm34, pm45, pm56 = pm23[sl,:], pm34[sl,:], pm45[sl,:], pm56[sl,:]
-        mf = mf[sl,:]
-        ii = ii[sl,:]
-        mf[np.isnan(mf)] = 0
-        ii[np.isnan(ii)] = 0
-        
-        # Normalize using local AR statistics - exactly like eval_comparison.py
-        # This creates more realistic, noisy data compared to global normalization
-        stacked = np.stack([pm23, pm34, pm45, pm56], axis=1)
-        mp, Mp = stacked.min(), stacked.max()
-        mm, Mm = mf.min(), mf.max()
-        mi, Mi = ii.min(), ii.max()
-        stacked = (stacked - mp) / (Mp - mp)
-        mf = (mf - mm) / (Mm - mm)
-        ii = (ii - mi) / (Mi - mi)
-        
-        # Create inputs - exactly like eval_comparison.py
-        inputs = np.concatenate([stacked, np.expand_dims(mf, 1)], axis=1)
-        
-        # Create figure with exact same styling as eval_comparison.py
-        fig = plt.figure(figsize=(16, 46))
-        fig.subplots_adjust(left=0.15, right=0.85, top=0.97, bottom=0.1)
-        gs0 = gridspec.GridSpec(7, 1, figure=fig, hspace=0.2)
-        
-        # Parameters from eval_comparison.py
-        fut = num_pred - 1  # Get last prediction
-        thr = -0.01  # Threshold for emergence detection
-        st = 4  # Sustained time (4 hours)
-        
-        for i in range(7):
-            tile_idx = start_tile + i
-            disp = tile_idx + 10
-            print(f"  Processing tile {disp}...")
-            
-            # Get model predictions for this tile - use AR-specific num_in like train_and_eval_transformer.py
-            X_test, y_test = lstm_ready_original(tile_idx, size, inputs, ii, ar_num_in, num_pred)
-            X_test = X_test.to(device)
-            
-            model.eval()
-            with torch.no_grad():
-                p_t = model(X_test)[:, fut].cpu().numpy()  # Get last prediction, same as eval_comparison
-            
-            true = y_test[:, fut].numpy()  # Get last true value, same as eval_comparison
-            
-            # Recalibrate predictions - same as eval_comparison
-            last = ii.shape[1] - true.shape[0] - 1
-            p_t = recalibrate(p_t, ii[tile_idx, last])
-            
-            # Calculate overall metrics
-            overall_mse = np.mean((true - p_t) ** 2)
-            overall_rmse = np.sqrt(overall_mse)
-            overall_mae = np.mean(np.abs(true - p_t))
-            overall_r2 = 1 - np.sum((true - p_t) ** 2) / np.sum((true - np.mean(true)) ** 2)
-            
-            # Calculate emergence window metrics
-            emergence_metrics = calculate_emergence_metrics(true, p_t)
-            
-            # Calculate emergence timing difference for metrics table
-            def find_emergence_start(data, threshold=-0.01, min_duration=4):
-                """Find the first emergence start time in hours."""
-                d_data = np.gradient(data)
-                consecutive_negative = 0
-                for i, val in enumerate(d_data):
-                    if val < threshold:
-                        consecutive_negative += 1
-                        if consecutive_negative >= min_duration:
-                            return i - min_duration + 1  # Return start of the 4-hour period
-                    else:
-                        consecutive_negative = 0
-                return None
-            
-            observed_emergence_start = find_emergence_start(true)
-            predicted_emergence_start = find_emergence_start(p_t)
-            
-            emergence_time_diff = None
-            if observed_emergence_start is not None and predicted_emergence_start is not None:
-                emergence_time_diff = abs(predicted_emergence_start - observed_emergence_start)
-            
-            # Prepare data for plotting - exact same as train_and_eval_transformer.py
-            before = ii[tile_idx, last-before_plot:last]
-            tcut = time_arr[last-before_plot:last+true.shape[0]]
-            tnum = mdates.date2num(tcut)
-            nanarr = np.full(before.shape, np.nan)
-            
-            # Calculate derivatives for the FULL sequence - like train_and_eval_transformer.py
-            full_true = np.concatenate((before, true))
-            d_obs = np.gradient(smooth_with_numpy(full_true))  # Full observed derivative
-            d_pred = np.gradient(p_t)  # Just prediction derivative
-            
-            # Find emergence window based on actual dObs/dt for THIS tile
-            ind_o = emergence_indication(d_obs, thr, st)
-            emergence_detected = np.any(ind_o != 0)
-            emergence_start_idx = None
-            emergence_end_idx = None
-            
-            if emergence_detected:
-                # Find the first and last emergence points in the full timeline
-                emergence_indices = np.where(ind_o != 0)[0]
-                if len(emergence_indices) > 0:
-                    emergence_start_idx = emergence_indices[0]
-                    emergence_end_idx = emergence_indices[-1]
-            
-            # Derivative plots: pad with NaNs for the "before_plot" segment - exact same as eval_comparison
-            # Create NaN padding for the pre-prediction window
-            nan_pad = np.full(before_plot, np.nan)
-            # Full-length derivative arrays
-            d_t_full = np.concatenate([nan_pad, d_pred])
-            
-            # Create subplots for this tile - exact same height ratios and spacing as eval_comparison
-            gs1 = gridspec.GridSpecFromSubplotSpec(4, 1, subplot_spec=gs0[i], 
-                                               height_ratios=[18, 4, 4, 4], hspace=0.3)
-            
-            # 1. Main intensity plot - exact same styling as eval_comparison
-            ax0 = fig.add_subplot(gs1[0])
-            ax0.plot(tnum, np.concatenate((before, true)), 'k-', label='Observed Intensity')
-            ax0.plot(tnum, np.concatenate((nanarr, p_t)), 'r-', label='Transformer Prediction')
-            ax0.axvline(NOAA1, color='magenta', linestyle='--', label='NOAA First Record')
-            ax0.axvline(NOAA2, color='darkmagenta', linestyle='--', label='NOAA Second Record')
-            
-            # Add emergence window shading based on actual dObs/dt emergence for this tile
-            if emergence_detected and emergence_start_idx is not None and emergence_end_idx is not None:
-                # Convert indices to time values
-                window_start_time = tnum[emergence_start_idx]
-                window_end_time = tnum[min(emergence_end_idx, len(tnum) - 1)]
-                ax0.axvspan(window_start_time, window_end_time, alpha=0.2, color='yellow', 
-                           label='Emergence Window')
-            
-            ax0.set_title(f'Tile {disp}', fontsize=12)
-            ax0.set_ylabel('Normalized Intensity', fontsize=9, labelpad=20)
-            ax0.set_ylim([-0.1, 1.1])
-            ax0.grid(True)
-            ax0.set_yticks([0, 0.25, 0.5, 0.75, 1])
-            # Hide x-axis labels for main plot - dates only on bottom
-            ax0.tick_params(labelbottom=False)
-            legend = ax0.legend(bbox_to_anchor=(1.033, .83, 0.223, 0.11), loc='upper left', 
-                              borderaxespad=0, fontsize=10, framealpha=1, mode='expand')
-            legend.get_frame().set_boxstyle('square', pad=1)
-            
-            # Add metrics table - overall and emergence metrics only
-            def create_transformer_metrics_table(ax, overall_metrics, emergence_metrics, timing_diff):
-                # Create table data with overall and emergence metrics only
-                data = [
-                    ['Metric', 'Value'],
-                    ['Overall', ''],
-                    ['MSE', f'{overall_metrics[0]:.4f}'],
-                    ['RMSE', f'{overall_metrics[1]:.4f}'],
-                    ['MAE', f'{overall_metrics[2]:.4f}'],
-                    ['R²', f'{overall_metrics[3]:.4f}'],
-                    ['', ''],
-                    ['Emergence', ''],  # Shortened from "Emergence Window" to fit
-                    ['RMSE', f'{emergence_metrics["emergence_rmse"]:.4f}'],
-                    ['MAE', f'{emergence_metrics["emergence_mae"]:.4f}'],
-                    ['R²', f'{emergence_metrics["emergence_r2"]:.4f}']
-                ]
-                
-                # Add timing difference if available
-                if timing_diff is not None:
-                    data.append(['Time Diff', f'{timing_diff:.1f}h'])
-                else:
-                    data.append(['Time Diff', 'N/A'])
-                
-                # Create table - positioned lower like requested
-                table = ax.table(
-                    cellText=data,
-                    loc='upper left',
-                    bbox=[1.02, -0.5, 0.22, 0.75],  # Slightly taller for extra row
-                    cellLoc='center',
-                    colLoc='center'
-                )
-                
-                # Style the table exactly like eval_comparison
-                table.auto_set_font_size(False)
-                table.set_fontsize(9)
-                
-                # Style cells
-                for (row, col), cell in table.get_celld().items():
-                    cell.set_text_props(color='black')
-                    cell.set_facecolor('white')
-                    cell.set_edgecolor('#CCCCCC')
-                    cell.set_linewidth(0.5)
-            
-            create_transformer_metrics_table(ax0, (overall_mse, overall_rmse, overall_mae, overall_r2), emergence_metrics, emergence_time_diff)
-            
-            # 2. Observed derivative with emergence detection - exact same as eval_comparison
-            ax1 = fig.add_subplot(gs1[1], sharex=ax0)
-            # dObs/dt: plot full black, overlay limegreen for emergence
-            ax1.plot(tnum, d_obs, color='black', linewidth=1)
-            for j in range(len(d_obs)-1):
-                if ind_o[j] != 0:
-                    ax1.plot(tnum[j:j+2], d_obs[j:j+2], color='limegreen', linewidth=1)
-            ax1.set_ylabel('dObs/dt', fontsize=7, labelpad=10)
-            ax1.set_ylim([-0.05, 0.05])
-            ax1.set_yticks([0])
-            ax1.grid(True)
-            ax1.tick_params(labelbottom=False)  # Hide x-axis labels
-            ax1.xaxis.set_major_locator(mdates.DayLocator())
-            ax1.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
-            
-            # 3. Predicted derivative with emergence detection - exact same as eval_comparison
-            ax2 = fig.add_subplot(gs1[2], sharex=ax0)
-            # dTrans/dt: plot full red, overlay limegreen for emergence
-            ax2.plot(tnum, d_t_full, color='red', linewidth=1)
-            ind_t = emergence_indication(d_t_full, thr, st)
-            for j in range(len(d_t_full)-1):
-                if ind_t[j] != 0:
-                    ax2.plot(tnum[j:j+2], d_t_full[j:j+2], color='limegreen', linewidth=1)
-            ax2.set_ylabel('dTrans/dt', fontsize=7, labelpad=10)
-            ax2.set_ylim([-0.05, 0.05])
-            ax2.set_yticks([0])
-            ax2.grid(True)
-            ax2.tick_params(labelbottom=False)  # Hide x-axis labels
-            ax2.xaxis.set_major_locator(mdates.DayLocator())
-            ax2.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
-            ax2.set_xlim(tnum[0], tnum[-1])
-            
-            # 4. Error curve - exact same as eval_comparison - ONLY subplot with dates shown
-            ax3 = fig.add_subplot(gs1[3], sharex=ax0)
-            ax3.plot(tnum[before_plot:before_plot+len(true)], np.abs(true - p_t), 'r-')
-            ax3.axvline(NOAA1, color='magenta', linestyle='--')
-            ax3.set_ylabel('|Error|', fontsize=8)
-            ax3.set_xlabel('Date', fontsize=10)
-            ax3.set_xlim(tnum[0], tnum[-1])
-            ax3.grid(True)
-            ax3.xaxis.set_major_locator(mdates.DayLocator())
-            ax3.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
-            ax3.tick_params(labelbottom=True)  # Show x-axis labels only here
-        
-        plt.tight_layout(rect=[0, 0, 0.8, 0.96])
-        plt.subplots_adjust(right=0.8)
-        plt.suptitle(f'Model Comparison for AR {test_AR}', y=0.99)
-        return fig
-        
-    except Exception as e:
-        print(f"Error creating detailed plots for AR {test_AR}: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        
-        # Return a simple error plot
-        fig, ax = plt.subplots(1, 1, figsize=(8, 6))
-        ax.text(0.5, 0.5, f'Error evaluating AR {test_AR}:\n{str(e)}', 
-                ha='center', va='center', transform=ax.transAxes, fontsize=12)
-        ax.set_title(f'AR {test_AR} Evaluation Error')
-        return fig
-
-def run_single_experiment(config: Dict[str, Any], device: torch.device, num_layers: int) -> Dict[str, float]:
+def run_single_experiment(config: Dict[str, Any], device: torch.device, num_layers: int, global_step_offset: int = 0) -> Dict[str, float]:
     """Run a single experiment with the given configuration."""
     print(f"Training model with {num_layers} layers...")
     
@@ -1004,8 +597,11 @@ def run_single_experiment(config: Dict[str, Any], device: torch.device, num_laye
             test_losses.append(epoch_test_loss)
             test_emergence_rmses.append(test_emergence_metrics['emergence_rmse'])
             
-            # Log per-epoch metrics including new ones with layer prefix
-            wandb.log({
+            # Calculate unique global step for this trial and epoch
+            global_step = global_step_offset + epoch
+            
+            # Log per-epoch metrics with layer prefix and unique global step
+            metrics_to_log = {
                 f'layers_{num_layers}/train_loss': epoch_train_loss,
                 f'layers_{num_layers}/test_loss': epoch_test_loss,
                 f'layers_{num_layers}/test_emergence_rmse': test_emergence_metrics['emergence_rmse'],
@@ -1016,8 +612,27 @@ def run_single_experiment(config: Dict[str, Any], device: torch.device, num_laye
                 f'layers_{num_layers}/test_overall_mse': test_emergence_metrics.get('overall_mse', float('nan')),
                 f'layers_{num_layers}/test_overall_mae': test_emergence_metrics.get('overall_mae', float('nan')),
                 f'layers_{num_layers}/test_overall_r2': test_emergence_metrics.get('overall_r2', float('nan')),
-                f'layers_{num_layers}/learning_rate': optimizer.param_groups[0]['lr']
-            }, step=epoch + (num_layers - 1) * config['n_epochs'])
+                f'layers_{num_layers}/learning_rate': optimizer.param_groups[0]['lr'],
+                f'layers_{num_layers}/epoch': epoch,
+                # Also log without layer prefix for easy cross-trial comparison
+                'train_loss': epoch_train_loss,
+                'test_loss': epoch_test_loss,
+                'test_emergence_rmse': test_emergence_metrics['emergence_rmse'],
+                'test_emergence_mse': test_emergence_metrics.get('emergence_mse', float('nan')),
+                'test_emergence_mae': test_emergence_metrics.get('emergence_mae', float('nan')),
+                'test_emergence_r2': test_emergence_metrics.get('emergence_r2', float('nan')),
+                'test_overall_rmse': test_emergence_metrics.get('overall_rmse', float('nan')),
+                'test_overall_mse': test_emergence_metrics.get('overall_mse', float('nan')),
+                'test_overall_mae': test_emergence_metrics.get('overall_mae', float('nan')),
+                'test_overall_r2': test_emergence_metrics.get('overall_r2', float('nan')),
+                'learning_rate': optimizer.param_groups[0]['lr'],
+                'epoch': epoch,
+                'num_layers': num_layers,  # Add layer info for filtering
+                'trial_id': f'layers_{num_layers}'  # Add trial identifier
+            }
+            
+            # Log with unique global step to avoid conflicts
+            wandb.log(metrics_to_log, step=global_step)
             
             if not np.isnan(epoch_test_loss) and epoch_test_loss < best_test_loss:
                 best_test_loss = epoch_test_loss
@@ -1237,14 +852,14 @@ def main():
     
     # Fixed configuration for all experiments
     config = {
-        'num_pred': 24,
+        'num_pred': 12,
         'num_in': 110,
         'embed_dim': 64,
         'num_heads': 8,
         'ff_dim': 128,
         'dropout': 0.1,
         'learning_rate': 0.001,
-        'n_epochs': 10,
+        'n_epochs': 100,
         'time_window': 12,
         'rid_of_top': 4
     }
@@ -1254,7 +869,7 @@ def main():
         project="sar-emergence",
         entity="jonastirona-new-jersey-institute-of-technology",
         config=config,
-        name="SAR_Transformer_LayerSearch_1to5_110seq_24pred_EmergenceAnalysis",
+        name="Layer Search",
         notes="Comprehensive grid search comparing transformer performance across 1-5 layers with AR emergence evaluation"
     )
     
@@ -1263,52 +878,146 @@ def main():
     all_results = {}
     
     layer_range = range(1, 6)  # 1 to 5 layers
+    global_step_counter = 0  # Track global step across all trials
+    
     for num_layers in layer_range:
         print(f"\n{'='*50}")
         print(f"TRIAL {num_layers}/5: Testing {num_layers} layer(s)")
         print(f"{'='*50}")
         
-        # Run experiment
-        results = run_single_experiment(config, device, num_layers)
+        # Run experiment with global step offset
+        results = run_single_experiment(config, device, num_layers, global_step_counter)
         all_results[num_layers] = results
         
-        # Create individual plots for each AR using the best trained model
+        # Update global step counter for next trial (assuming 10 epochs per trial)
+        global_step_counter += config['n_epochs']
+        
+        # Log trial completion
+        wandb.log({
+            f'trial_completion/layers_{num_layers}': 1.0,
+            'completed_trials': num_layers,
+            'total_trials': len(layer_range)
+        }, step=global_step_counter - 1)
+        
+        # Create individual AR evaluation plots using the new eval_wandb module
+        print(f"Generating AR comparison plots with LSTM benchmark...")
+        
+        # We need to save the model temporarily to use with the evaluation function
+        temp_model_path = f"/tmp/transformer_{num_layers}layers.pth"
+        torch.save(results['best_model_state'], temp_model_path)
+        
+        # LSTM model path (assuming it exists)
+        lstm_path = "/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/lstm/results/t12_r4_i110_n3_h64_e1000_l0.01.pth"
+        
+        transformer_params = {
+            'embed_dim': config['embed_dim'],
+            'num_heads': config['num_heads'],
+            'ff_dim': config['ff_dim'],
+            'num_layers': num_layers,
+            'dropout': config['dropout'],
+            'rid_of_top': config['rid_of_top'],
+            'num_pred': config['num_pred'],
+            'time_window': config['time_window'],
+            'num_in': config['num_in'],
+            'hidden_size': config['embed_dim'],  # Use embed_dim as hidden_size
+            'learning_rate': config['learning_rate']
+        }
+        
+        # Test ARs to evaluate
         test_ars = [11698, 11726, 13165, 13179, 13183]
-        print(f"Generating plots for test ARs...")
-        
-        # Load the best model state for evaluation
-        eval_model = SpatioTemporalTransformer(
-            input_dim=5,
-            seq_len=config['num_in'],
-            embed_dim=config['embed_dim'],
-            num_heads=config['num_heads'],
-            num_layers=num_layers,
-            ff_dim=config['ff_dim'],
-            dropout=config['dropout'],
-            output_dim=config['num_pred']
-        ).to(device)
-        
-        if results['best_model_state'] is not None:
-            eval_model.load_state_dict(results['best_model_state'])
+        successful_ars = []
+        failed_ars = []
         
         for ar in test_ars:
-            print(f"  Evaluating AR {ar} with {num_layers} layers...")
-            fig = create_derivative_plots(
-                eval_model,
-                ar,
-                config,
-                device,
-                num_layers
-            )
-            wandb.log({f'layers_{num_layers}/ar_{ar}_plots': wandb.Image(fig)})
-            plt.close(fig)
-            print(f"  Completed AR {ar} evaluation.")
+            try:
+                # Create a temporary output directory for this evaluation
+                temp_output_dir = f"/tmp/ar_eval_{num_layers}layers"
+                os.makedirs(temp_output_dir, exist_ok=True)
+                evaluate_models_for_ar(ar, lstm_path, temp_model_path, transformer_params, temp_output_dir)
+                
+                # Upload the generated plot to wandb
+                plot_path = os.path.join(temp_output_dir, f"AR{ar}_comparison.png")
+                if os.path.exists(plot_path):
+                    # Load the image and log to wandb
+                    wandb.log({f'layers_{num_layers}/AR_{ar}_comparison': wandb.Image(plot_path)})
+                    successful_ars.append(ar)
+                else:
+                    failed_ars.append(ar)
+                    
+            except Exception as e:
+                failed_ars.append(ar)
+                print(f"  ✗ Error evaluating AR {ar}: {str(e)}")
+                continue
+        
+        # Clean up temporary file
+        if os.path.exists(temp_model_path):
+            os.remove(temp_model_path)
+            
+        print(f"Completed AR evaluations for {num_layers} layers: {len(successful_ars)}/{len(test_ars)} successful")
     
     # Create comprehensive comparison plots
     print(f"\n{'='*50}")
     print("Creating comprehensive comparison plots...")
     print(f"{'='*50}")
     create_cross_trial_comparison_plots(all_results, config)
+    
+    # Log comprehensive summary of all trials
+    print("Logging comprehensive trial summary...")
+    
+    # Create a summary table with all trial results
+    trial_summary_data = []
+    for layers in sorted(all_results.keys()):
+        results = all_results[layers]
+        trial_data = {
+            'num_layers': layers,
+            'train_loss_final': results['train_losses'][-1] if results['train_losses'] else float('nan'),
+            'test_loss_final': results['test_losses'][-1] if results['test_losses'] else float('nan'),
+            'test_overall_rmse': results.get('overall_rmse', float('nan')),
+            'test_overall_r2': results.get('overall_r2', float('nan')),
+            'test_overall_mse': results.get('overall_mse', float('nan')),
+            'test_overall_mae': results.get('overall_mae', float('nan')),
+            'test_emergence_rmse': results.get('emergence_rmse', float('nan')),
+            'test_emergence_r2': results.get('emergence_r2', float('nan')),
+            'test_emergence_mse': results.get('emergence_mse', float('nan')),
+            'test_emergence_mae': results.get('emergence_mae', float('nan')),
+            'emergence_time_diff': results.get('emergence_time_diff', float('nan')),
+            'emergence_window_size': results.get('emergence_window_size', float('nan')),
+            'num_valid_tiles': results.get('num_valid_tiles', 0),
+            'tile_success_rate': results.get('tile_success_rate', 0.0)
+        }
+        trial_summary_data.append(trial_data)
+        
+        # Also log individual trial summary metrics with final step
+        final_step = global_step_counter + layers * 10  # Ensure unique final steps
+        wandb.log({
+            f'final_results/layers_{layers}_train_loss': trial_data['train_loss_final'],
+            f'final_results/layers_{layers}_test_loss': trial_data['test_loss_final'],
+            f'final_results/layers_{layers}_test_overall_rmse': trial_data['test_overall_rmse'],
+            f'final_results/layers_{layers}_test_overall_r2': trial_data['test_overall_r2'],
+            f'final_results/layers_{layers}_test_overall_mse': trial_data['test_overall_mse'],
+            f'final_results/layers_{layers}_test_overall_mae': trial_data['test_overall_mae'],
+            f'final_results/layers_{layers}_test_emergence_rmse': trial_data['test_emergence_rmse'],
+            f'final_results/layers_{layers}_test_emergence_r2': trial_data['test_emergence_r2'],
+            f'final_results/layers_{layers}_test_emergence_mse': trial_data['test_emergence_mse'],
+            f'final_results/layers_{layers}_test_emergence_mae': trial_data['test_emergence_mae'],
+            f'final_results/layers_{layers}_emergence_time_diff': trial_data['emergence_time_diff']
+        }, step=final_step)
+    
+    # Log the comprehensive trial summary table
+    trial_summary_df = pd.DataFrame(trial_summary_data)
+    wandb.log({"comprehensive_trial_summary": wandb.Table(dataframe=trial_summary_df)})
+    
+    # Log summary statistics
+    summary_stats = {
+        'total_trials_completed': len(all_results),
+        'best_overall_rmse_layers': min(all_results.keys(), key=lambda x: all_results[x].get('overall_rmse', float('inf'))),
+        'best_emergence_rmse_layers': min(all_results.keys(), key=lambda x: all_results[x].get('emergence_rmse', float('inf'))),
+        'best_timing_accuracy_layers': min(all_results.keys(), key=lambda x: all_results[x].get('emergence_time_diff', float('inf'))),
+        'all_trials_rmse_range': max([r.get('overall_rmse', 0) for r in all_results.values()]) - min([r.get('overall_rmse', 0) for r in all_results.values()]),
+        'avg_emergence_rmse': np.mean([r.get('emergence_rmse', 0) for r in all_results.values()]),
+        'avg_overall_rmse': np.mean([r.get('overall_rmse', 0) for r in all_results.values()])
+    }
+    wandb.log(summary_stats)
     
     # Find and log best configurations
     best_overall = min(all_results.keys(), key=lambda x: all_results[x]['overall_rmse'])
@@ -1344,16 +1053,6 @@ def main():
     # Finish wandb run
     wandb.finish()
 
-def lstm_ready_original(tile, size, power_maps, intensities, num_in, num_pred):
-    """Original lstm_ready function without padding - like train_and_eval_transformer.py."""
-    # Transpose to match expected format
-    final_maps = np.transpose(power_maps, axes=(2, 1, 0))
-    final_ints = np.transpose(intensities, axes=(1, 0))
-    X_trans = final_maps[:, :, tile]
-    y_trans = final_ints[:, tile]
-    X_ss, y_mm = split_sequences(X_trans, y_trans, num_in, num_pred)
-    return torch.Tensor(X_ss), torch.Tensor(y_mm)
-
 def lstm_ready(tile, size, power_maps, intensities, num_in, num_pred, model_seq_len=None):
     """Modified lstm_ready that adapts to available data length.
     
@@ -1386,8 +1085,6 @@ def lstm_ready(tile, size, power_maps, intensities, num_in, num_pred, model_seq_
     
     # Use the smaller of requested num_in or what's available
     effective_num_in = min(num_in, max_possible_num_in)
-    
-    print(f"  Tile {tile}: Using seq_len={effective_num_in} (requested={num_in}, available={available_time_steps})")
     
     # Split into sequences using effective sequence length
     X_ss, y_mm = split_sequences(X_trans, y_trans, effective_num_in, num_pred)
