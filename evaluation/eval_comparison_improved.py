@@ -75,7 +75,7 @@ def evaluate_models_for_ar(test_AR, lstm_path, transformer_path, transformer_par
         int(x) if i!=6 else float(x)
         for i,x in enumerate(re.findall(pat, lstm_path)[0])
     )
-    rid_of_top = transformer_params['rid_of_top']
+    rid_of_top = 1
 
     # AR settings
     start_tile, before_plot, num_in, NOAA_first, NOAA_second = get_ar_settings(test_AR, rid_of_top)
@@ -119,6 +119,7 @@ def evaluate_models_for_ar(test_AR, lstm_path, transformer_path, transformer_par
     lstm.load_state_dict(new_sd); lstm.eval()
 
     # Initialize transformer model with correct parameters
+    use_pre_mlp_norm = transformer_params['has_pre_mlp_norm'] == 'true'
     trfm = SpatioTemporalTransformer(
         input_dim=inputs.shape[1],
         seq_len=num_in,
@@ -127,7 +128,8 @@ def evaluate_models_for_ar(test_AR, lstm_path, transformer_path, transformer_par
         ff_dim=transformer_params['ff_dim'],
         num_layers=transformer_params['num_layers'],
         output_dim=12,
-        dropout=transformer_params['dropout']
+        dropout=transformer_params['dropout'],
+        use_pre_mlp_norm=use_pre_mlp_norm
     ).to(device)
     trfm.load_state_dict(torch.load(transformer_path,map_location=device)); trfm.eval()
 
@@ -293,7 +295,7 @@ def evaluate_models_for_ar(test_AR, lstm_path, transformer_path, transformer_par
     param_headers = ["Parameter", "LSTM", "Transformer"]
     param_rows = [
         ["Time Window", lstm_params['Time Window'], transformer_params['time_window']],
-        ["Rid of Top", lstm_params['Rid of Top'], transformer_params['rid_of_top']],
+        ["Rid of Top", "1", "1"],
         ["Input Len", lstm_params['Input Len'], num_in],  # Use AR-specific num_in
         ["Layers", lstm_params['Layers'], transformer_params['num_layers']],
         ["Hidden", lstm_params['Hidden'], transformer_params['hidden_size']],
@@ -455,7 +457,6 @@ def parse_args():
     
     # Fixed parameters
     parser.add_argument('--time_window', type=int, default=12, help='Time window for predictions')
-    parser.add_argument('--rid_of_top', type=int, default=1, help='Number of top rows to remove')
     parser.add_argument('--num_in', type=int, default=110, help='Input sequence length')
     
     # Transformer model parameters
@@ -466,6 +467,7 @@ def parse_args():
     parser.add_argument('--num_heads', type=int, required=True, help='Number of attention heads')
     parser.add_argument('--ff_dim', type=int, required=True, help='Feed-forward dimension')
     parser.add_argument('--dropout', type=float, required=True, help='Dropout rate')
+    parser.add_argument('--has_pre_mlp_norm', type=str, required=True, help='Whether model has pre-MLP normalization layer (true/false)')
     
     # Model paths
     parser.add_argument('--lstm_path', type=str, required=True, help='Path to LSTM model checkpoint')
@@ -482,7 +484,6 @@ if __name__ == '__main__':
     # Create transformer parameters dictionary
     transformer_params = {
         'time_window': args.time_window,
-        'rid_of_top': args.rid_of_top,
         'num_in': args.num_in,
         'num_layers': args.num_layers,
         'hidden_size': args.hidden_size,
@@ -490,7 +491,8 @@ if __name__ == '__main__':
         'embed_dim': args.embed_dim,
         'num_heads': args.num_heads,
         'ff_dim': args.ff_dim,
-        'dropout': args.dropout
+        'dropout': args.dropout,
+        'has_pre_mlp_norm': args.has_pre_mlp_norm
     }
     
     # Create output directory if it doesn't exist

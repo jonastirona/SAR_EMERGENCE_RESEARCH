@@ -125,7 +125,8 @@ def evaluate_models_for_ar(test_AR, lstm_path, transformer_path):
         ff_dim=128,
         num_layers=2,
         output_dim=12,
-        dropout=0.1
+        dropout=0.1,
+        use_pre_mlp_norm=True
     ).to(device)
     trfm.load_state_dict(torch.load(transformer_path,map_location=device)); trfm.eval()
 
@@ -459,6 +460,6 @@ def create_metrics_table(ax, lstm_metrics, trfm_metrics):
 
 if __name__ == '__main__':
     lstm_path = "/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/lstm/results/t12_r4_i110_n3_h64_e1000_l0.01.pth"
-    transformer_path = "/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/transformer/results/st_transformer/t12_r4_i110_n3_h64_e400_l0.005.pth"
+    transformer_path = "/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/transformer/original_results/st_transformer/t12_r4_i110_n3_h64_e400_l0.005.pth"
     for ar in [11698,11726,13165,13179,13183]:
         evaluate_models_for_ar(ar, lstm_path, transformer_path)

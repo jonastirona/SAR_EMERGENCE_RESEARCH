@@ -240,7 +240,7 @@ def calculate_emergence_metrics(observed: np.ndarray, predicted: np.ndarray,
             pred_emergence_start = None
             current_negative_duration = 0
     
-    emergence_time_diff = abs(obs_emergence_start - pred_emergence_start) if pred_emergence_start is not None else None
+    emergence_time_diff = (pred_emergence_start - obs_emergence_start) if pred_emergence_start is not None else None
     
     # Calculate overall metrics
     overall_rmse = np.sqrt(np.mean((observed - predicted)**2))
@@ -463,10 +463,10 @@ def run_single_experiment(config: Dict[str, Any], device: torch.device, num_laye
         seq_len=config['num_in'],
         embed_dim=config['embed_dim'],
         num_heads=config['num_heads'],
-        num_layers=num_layers,
         ff_dim=config['ff_dim'],
+        num_layers=num_layers,
+        output_dim=config['num_pred'],
         dropout=config['dropout'],
-        output_dim=config['num_pred']
     ).to(device)
     
     # ARs list (copied from train_w_stats.py)
@@ -522,7 +522,8 @@ def run_single_experiment(config: Dict[str, Any], device: torch.device, num_laye
     
     # Training setup
     optimizer = torch.optim.Adam(model.parameters(), lr=config['learning_rate'])
-    scheduler = CosineWarmupScheduler(optimizer, warmup_epochs=5, max_epochs=config['n_epochs'])
+    warmup_epochs = int(0.1 * config['n_epochs'])  # Always 10% of total epochs
+    scheduler = CosineWarmupScheduler(optimizer, warmup_epochs=warmup_epochs, max_epochs=config['n_epochs'])
     loss_fn = nn.MSELoss()
     
     # Initialize tracking variables
@@ -772,7 +773,7 @@ def create_cross_trial_comparison_plots(all_results: Dict[int, Dict], config: Di
     
     # 3. Emergence Timing Accuracy - single plot
     fig3, ax3 = plt.subplots(1, 1, figsize=(10, 6))
-    fig3.suptitle('Emergence Timing Accuracy Across Transformer Layers', fontsize=16, y=0.95)
+    fig3.suptitle('Emergence Timing Difference Across Transformer Layers', fontsize=16, y=0.95)
     
     time_errors = [all_results[layers]['emergence_time_diff'] for layers in layer_counts]
     bars = ax3.bar(layer_counts, time_errors, color='#ff6b6b', alpha=0.8, width=0.6)
@@ -780,12 +781,19 @@ def create_cross_trial_comparison_plots(all_results: Dict[int, Dict], config: Di
     # Add value labels on bars
     for bar, value in zip(bars, time_errors):
         height = bar.get_height()
-        ax3.text(bar.get_x() + bar.get_width()/2., height + max(time_errors)*0.02,
-                f'{value:.1f}h', ha='center', va='bottom', fontsize=11, fontweight='bold')
+        # Position text above positive bars, below negative bars
+        if height >= 0:
+            y_pos = height + max(abs(min(time_errors)), max(time_errors)) * 0.02
+            va = 'bottom'
+        else:
+            y_pos = height - max(abs(min(time_errors)), max(time_errors)) * 0.02
+            va = 'top'
+        ax3.text(bar.get_x() + bar.get_width()/2., y_pos,
+                f'{value:+.1f}h', ha='center', va=va, fontsize=11, fontweight='bold')
     
     ax3.set_xlabel('Number of Transformer Layers', fontsize=12)
-    ax3.set_ylabel('Time Error (hours)', fontsize=12)
-    ax3.set_title('|predicted_time - observed_time|', fontsize=14, pad=15)
+    ax3.set_ylabel('Time Difference (hours)', fontsize=12)
+    ax3.set_title('predicted_time - observed_time', fontsize=14, pad=15)
     ax3.set_xticks(layer_counts)
     ax3.grid(True, alpha=0.3)
     
@@ -880,7 +888,7 @@ def main():
         'ff_dim': 128,
         'dropout': 0.1,
         'learning_rate': 0.001,
-        'n_epochs': 100,
+        'n_epochs': 200,
         'time_window': 12,
         'rid_of_top': 4
     }
@@ -910,7 +918,7 @@ def main():
         results = run_single_experiment(config, device, num_layers, global_step_counter)
         all_results[num_layers] = results
         
-        # Update global step counter for next trial (assuming 10 epochs per trial)
+        # Update global step counter for next trial (assuming 200 epochs per trial)
         global_step_counter += config['n_epochs']
         
         # Log trial completion
@@ -1009,7 +1017,7 @@ def main():
         trial_summary_data.append(trial_data)
         
         # Also log individual trial summary metrics with final step
-        final_step = global_step_counter + layers * 10  # Ensure unique final steps
+        final_step = global_step_counter + layers * 200  # Ensure unique final steps
         wandb.log({
             f'final_results/layers_{layers}_train_loss': trial_data['train_loss_final'],
             f'final_results/layers_{layers}_test_loss': trial_data['test_loss_final'],

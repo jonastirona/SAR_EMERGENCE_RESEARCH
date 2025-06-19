@@ -22,7 +22,8 @@ from transformer.functions import (
     smooth_with_numpy,
     recalibrate,
     LSTM,
-    calculate_extended_metrics
+    calculate_extended_metrics,
+    split_sequences
 )
 from transformer.models.st_transformer import SpatioTemporalTransformer
 
@@ -88,7 +89,7 @@ def find_first_emergence_window(signal, threshold=-0.01, min_duration=4):
 
 
 def calculate_emergence_metrics(true, pred_lstm, pred_transformer, time_arr, threshold=-0.01, min_duration=4):
-    """Calculate emergence-based metrics including timing differences."""
+    """Calculate emergence-based metrics including timing differences and window-specific metrics."""
     
     # Calculate derivatives
     d_obs = np.gradient(smooth_with_numpy(true))
@@ -100,7 +101,7 @@ def calculate_emergence_metrics(true, pred_lstm, pred_transformer, time_arr, thr
     lstm_start, lstm_end = find_first_emergence_window(d_lstm, threshold, min_duration)
     transformer_start, transformer_end = find_first_emergence_window(d_transformer, threshold, min_duration)
     
-    # Calculate basic metrics (MAE, RMSE, R²)
+    # Calculate basic metrics (MAE, RMSE, R²) for overall series
     def calc_basic_metrics(y_true, y_pred):
         mae = np.mean(np.abs(y_true - y_pred))
         mse = np.mean((y_true - y_pred) ** 2)
@@ -108,8 +109,23 @@ def calculate_emergence_metrics(true, pred_lstm, pred_transformer, time_arr, thr
         r2 = 1 - np.sum((y_true - y_pred) ** 2) / np.sum((y_true - np.mean(y_true)) ** 2)
         return mae, rmse, r2
     
+    # Overall metrics
     lstm_mae, lstm_rmse, lstm_r2 = calc_basic_metrics(true, pred_lstm)
     transformer_mae, transformer_rmse, transformer_r2 = calc_basic_metrics(true, pred_transformer)
+    
+    # Calculate emergence window specific metrics if window exists
+    lstm_emerg_mae, lstm_emerg_rmse, lstm_emerg_r2 = None, None, None
+    transformer_emerg_mae, transformer_emerg_rmse, transformer_emerg_r2 = None, None, None
+    
+    if obs_start is not None and obs_end is not None:
+        # Use observed emergence window for both models
+        window_true = true[obs_start:obs_end]
+        window_lstm = pred_lstm[obs_start:obs_end]
+        window_transformer = pred_transformer[obs_start:obs_end]
+        
+        if len(window_true) > 0:
+            lstm_emerg_mae, lstm_emerg_rmse, lstm_emerg_r2 = calc_basic_metrics(window_true, window_lstm)
+            transformer_emerg_mae, transformer_emerg_rmse, transformer_emerg_r2 = calc_basic_metrics(window_true, window_transformer)
     
     # Calculate emergence timing differences (in hours)
     lstm_timing_diff = None
@@ -126,6 +142,9 @@ def calculate_emergence_metrics(true, pred_lstm, pred_transformer, time_arr, thr
             'MAE': lstm_mae,
             'RMSE': lstm_rmse,
             'R2': lstm_r2,
+            'emerg_MAE': lstm_emerg_mae,
+            'emerg_RMSE': lstm_emerg_rmse,
+            'emerg_R2': lstm_emerg_r2,
             'emergence_timing_diff': lstm_timing_diff,
             'emergence_window': (lstm_start, lstm_end) if lstm_start is not None else None
         },
@@ -133,6 +152,9 @@ def calculate_emergence_metrics(true, pred_lstm, pred_transformer, time_arr, thr
             'MAE': transformer_mae,
             'RMSE': transformer_rmse,
             'R2': transformer_r2,
+            'emerg_MAE': transformer_emerg_mae,
+            'emerg_RMSE': transformer_emerg_rmse,
+            'emerg_R2': transformer_emerg_r2,
             'emergence_timing_diff': transformer_timing_diff,
             'emergence_window': (transformer_start, transformer_end) if transformer_start is not None else None
         },
@@ -143,34 +165,60 @@ def calculate_emergence_metrics(true, pred_lstm, pred_transformer, time_arr, thr
 
 
 def create_emergence_metrics_table(ax, metrics):
-    """Create an emergence-based metrics table for a tile."""
+    """Create an emergence-based metrics table for a tile with both overall and window-specific metrics."""
     
     lstm_metrics = metrics['lstm']
     transformer_metrics = metrics['transformer']
+    obs_metrics = metrics['observed']
+    
+    # Check if emergence window exists
+    has_emergence_window = obs_metrics['emergence_window'] is not None
     
     # Create table data
-    data = [
-        ['Metric', 'LSTM', 'Transformer'],
-        ['MAE', f'{lstm_metrics["MAE"]:.4f}', f'{transformer_metrics["MAE"]:.4f}'],
-        ['RMSE', f'{lstm_metrics["RMSE"]:.4f}', f'{transformer_metrics["RMSE"]:.4f}'],
-        ['R²', f'{lstm_metrics["R2"]:.4f}', f'{transformer_metrics["R2"]:.4f}'],
-        ['Δ Emergence (hrs)', 
-         f'{lstm_metrics["emergence_timing_diff"]:+.0f}' if lstm_metrics["emergence_timing_diff"] is not None else 'N/A',
-         f'{transformer_metrics["emergence_timing_diff"]:+.0f}' if transformer_metrics["emergence_timing_diff"] is not None else 'N/A']
-    ]
+    data = [['Metric', 'LSTM', 'Transformer']]
+    
+    # Overall metrics
+    data.extend([
+        ['Overall MAE', f'{lstm_metrics["MAE"]:.4f}', f'{transformer_metrics["MAE"]:.4f}'],
+        ['Overall RMSE', f'{lstm_metrics["RMSE"]:.4f}', f'{transformer_metrics["RMSE"]:.4f}'],
+        ['Overall R²', f'{lstm_metrics["R2"]:.4f}', f'{transformer_metrics["R2"]:.4f}']
+    ])
+    
+    # Emergence window metrics (if window exists)
+    if has_emergence_window:
+        data.extend([
+            ['Window MAE', 
+             f'{lstm_metrics["emerg_MAE"]:.4f}' if lstm_metrics["emerg_MAE"] is not None else 'N/A',
+             f'{transformer_metrics["emerg_MAE"]:.4f}' if transformer_metrics["emerg_MAE"] is not None else 'N/A'],
+            ['Window RMSE', 
+             f'{lstm_metrics["emerg_RMSE"]:.4f}' if lstm_metrics["emerg_RMSE"] is not None else 'N/A',
+             f'{transformer_metrics["emerg_RMSE"]:.4f}' if transformer_metrics["emerg_RMSE"] is not None else 'N/A'],
+            ['Window R²', 
+             f'{lstm_metrics["emerg_R2"]:.4f}' if lstm_metrics["emerg_R2"] is not None else 'N/A',
+             f'{transformer_metrics["emerg_R2"]:.4f}' if transformer_metrics["emerg_R2"] is not None else 'N/A']
+        ])
+    
+    # Timing difference
+    data.append(['Δ Emergence (hrs)', 
+                f'{lstm_metrics["emergence_timing_diff"]:+.0f}' if lstm_metrics["emergence_timing_diff"] is not None else 'N/A',
+                f'{transformer_metrics["emergence_timing_diff"]:+.0f}' if transformer_metrics["emergence_timing_diff"] is not None else 'N/A'])
+    
+    # Adjust table position based on whether emergence window exists
+    table_height = 0.8 if has_emergence_window else 0.6
+    table_y_position = -0.6 if has_emergence_window else -0.4
     
     # Create table
     table = ax.table(
         cellText=data,
         loc='upper left',
-        bbox=[1.02, -0.4, 0.25, 0.6],
+        bbox=[1.02, table_y_position, 0.25, table_height],
         cellLoc='center',
         colLoc='center'
     )
     
     # Style the table
     table.auto_set_font_size(False)
-    table.set_fontsize(9)
+    table.set_fontsize(8)
     
     # Style cells
     for (row, col), cell in table.get_celld().items():
@@ -179,17 +227,82 @@ def create_emergence_metrics_table(ax, metrics):
         # Add borders to all cells
         cell.set_edgecolor('#CCCCCC')
         cell.set_linewidth(0.5)
+        
         # Bold header row
         if row == 0:
             cell.set_text_props(weight='bold')
-        elif row % 2 == 1:
-            cell.set_facecolor('#f9f9f9')
+            cell.set_facecolor('#e0e0e0')
+        # Alternate row colors for overall metrics
+        elif row <= 3:  # Overall metrics rows
+            if row % 2 == 0:
+                cell.set_facecolor('#f9f9f9')
+        # Different color for emergence window metrics
+        elif has_emergence_window and row <= 6:  # Window metrics rows
+            if row % 2 == 1:
+                cell.set_facecolor('#fff2cc')  # Light yellow for window metrics
+            else:
+                cell.set_facecolor('#ffe599')  # Slightly darker yellow
+        # Timing difference row
+        else:
+            cell.set_facecolor('#d9ead3')  # Light green for timing
         
-        # Make only the "Timing Diff (hrs)" label smaller (row 4, col 0)
-        if row == 4 and col == 0:  # Only the label, not the values
+        # Make timing difference label smaller
+        if 'Δ Emergence' in str(cell.get_text().get_text()) and col == 0:
             cell.set_text_props(fontsize=6)
         else:
-            cell.set_text_props(fontsize=9)
+            cell.set_text_props(fontsize=8)
+
+
+def lstm_ready(tile, size, power_maps, intensities, num_in, num_pred, model_seq_len=None):
+    """Modified lstm_ready that adapts to available data length.
+    
+    If num_in is larger than available data, use the maximum possible sequence length.
+    This ensures we can always generate some sequences for evaluation.
+    
+    Args:
+        tile: Tile index
+        size: Grid size
+        power_maps: Power maps data
+        intensities: Intensity data
+        num_in: Requested input sequence length (AR-specific)
+        num_pred: Number of prediction steps
+        model_seq_len: Expected sequence length by the model (for padding)
+    """
+    # Get data for specific tile
+    X_trans = power_maps[tile]  # (features, time)
+    y_trans = intensities[tile]  # (time,)
+    
+    # Transpose to get time as first dimension
+    X_trans = X_trans.T  # (time, features)
+    
+    available_time_steps = len(X_trans)
+    
+    # Calculate maximum possible num_in given the data and required num_pred
+    max_possible_num_in = available_time_steps - num_pred
+    
+    if max_possible_num_in <= 0:
+        raise ValueError(f"Not enough data for tile {tile}. Available: {available_time_steps}, Need at least: {num_pred + 1}")
+    
+    # Use the smaller of requested num_in or what's available
+    effective_num_in = min(num_in, max_possible_num_in)
+    
+    # Split into sequences using effective sequence length
+    X_ss, y_mm = split_sequences(X_trans, y_trans, effective_num_in, num_pred)
+    
+    # If model expects a different sequence length, pad accordingly
+    target_seq_len = model_seq_len if model_seq_len is not None else effective_num_in
+    if effective_num_in < target_seq_len and len(X_ss) > 0:
+        padding_length = target_seq_len - effective_num_in
+        # Pad with zeros at the beginning (older time steps)
+        padding_shape = (len(X_ss), padding_length, X_ss.shape[2])
+        padding = np.zeros(padding_shape)
+        X_ss = np.concatenate([padding, X_ss], axis=1)
+    
+    # Convert to tensors
+    X = torch.Tensor(X_ss)  # (batch, seq_len, input_dim)
+    y = torch.Tensor(y_mm)  # (batch, output_dim)
+    
+    return X, y
 
 
 def evaluate_models_for_ar(test_AR, lstm_path, transformer_path, transformer_params, output_dir):
@@ -298,7 +411,7 @@ def evaluate_models_for_ar(test_AR, lstm_path, transformer_path, transformer_par
             disp = tile_idx + 10
             print(f"Tile {disp}")
 
-            X_test, y_test = lstm_ready(tile_idx, size, inputs, ii, num_in, num_pred)
+            X_test, y_test = lstm_ready(tile_idx, size, inputs, ii, num_in, num_pred, model_seq_len=num_in)
             X_test = X_test.to(device)
             Xt = X_test.view(X_test.size(0), num_in, X_test.size(2))
 
@@ -491,8 +604,8 @@ def evaluate_models_for_ar(test_AR, lstm_path, transformer_path, transformer_par
         ]
 
         # Metrics rows with emergence metrics
-        metric_names = ['MAE', 'RMSE', 'R2', 'emergence_timing_diff']
-        metric_labels = ['MAE', 'RMSE', 'R²', 'Δ Emergence(hrs)']
+        metric_names = ['MAE', 'RMSE', 'R2', 'emerg_MAE', 'emerg_RMSE', 'emerg_R2', 'emergence_timing_diff']
+        metric_labels = ['Overall MAE', 'Overall RMSE', 'Overall R²', 'Window MAE', 'Window RMSE', 'Window R²', 'Δ Emergence(hrs)']
         
         metric_rows = []
         for name, label in zip(metric_names, metric_labels):
