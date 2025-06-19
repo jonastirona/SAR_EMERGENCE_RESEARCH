@@ -14,6 +14,7 @@ from torch.utils.data import DataLoader, TensorDataset
 from sklearn.metrics import r2_score
 import matplotlib.dates as mdates
 import matplotlib.gridspec as gridspec
+import math
 
 # Add project root to Python path
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -33,6 +34,25 @@ logging.basicConfig(
     handlers=[logging.StreamHandler(sys.stdout)]
 )
 logger = logging.getLogger(__name__)
+
+class CosineWarmupScheduler(torch.optim.lr_scheduler._LRScheduler):
+    """Cosine annealing scheduler with linear warmup"""
+    def __init__(self, optimizer, warmup_epochs, max_epochs, eta_min=1e-6, last_epoch=-1):
+        self.warmup_epochs = warmup_epochs
+        self.max_epochs = max_epochs
+        self.eta_min = eta_min
+        super().__init__(optimizer, last_epoch)
+
+    def get_lr(self):
+        if self.last_epoch < self.warmup_epochs:
+            # Linear warmup
+            return [base_lr * (self.last_epoch + 1) / self.warmup_epochs 
+                    for base_lr in self.base_lrs]
+        else:
+            # Cosine annealing after warmup
+            progress = (self.last_epoch - self.warmup_epochs) / (self.max_epochs - self.warmup_epochs)
+            return [self.eta_min + (base_lr - self.eta_min) * 0.5 * (1 + math.cos(math.pi * progress))
+                    for base_lr in self.base_lrs]
 
 def calculate_r2(y_true: np.ndarray, y_pred: np.ndarray) -> float:
     """Calculate R² score."""
@@ -502,7 +522,7 @@ def run_single_experiment(config: Dict[str, Any], device: torch.device, num_laye
     
     # Training setup
     optimizer = torch.optim.Adam(model.parameters(), lr=config['learning_rate'])
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5)
+    scheduler = CosineWarmupScheduler(optimizer, warmup_epochs=5, max_epochs=config['n_epochs'])
     loss_fn = nn.MSELoss()
     
     # Initialize tracking variables
@@ -641,9 +661,10 @@ def run_single_experiment(config: Dict[str, Any], device: torch.device, num_laye
                 best_model_state = model.state_dict()
                 best_tile_indices = tile_indices_test
         
-        scheduler.step(epoch_test_loss)
+        scheduler.step()
         if (epoch + 1) % 10 == 0 or epoch == 0:
-            print(f"  Epoch {epoch + 1}/{config['n_epochs']} - Train Loss: {epoch_train_loss:.5f}, Test Loss: {epoch_test_loss:.5f}")
+            current_lr = optimizer.param_groups[0]['lr']
+            print(f"  Epoch {epoch + 1}/{config['n_epochs']} - Train Loss: {epoch_train_loss:.5f}, Test Loss: {epoch_test_loss:.5f}, LR: {current_lr:.2e}")
     
     # Calculate final tile-level emergence metrics on best model
     final_metrics = calculate_tile_level_emergence_metrics(
