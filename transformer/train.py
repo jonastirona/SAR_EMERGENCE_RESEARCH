@@ -15,6 +15,7 @@ from sklearn.metrics import r2_score
 import matplotlib.dates as mdates
 import matplotlib.gridspec as gridspec
 import math
+from dotenv import load_dotenv
 
 # Add project root to Python path
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -25,7 +26,7 @@ from transformer.models.st_transformer import SpatioTemporalTransformer
 from transformer.functions import lstm_ready, smooth_with_numpy, emergence_indication, split_sequences
 
 # Import the new evaluation module
-from transformer.eval_wandb import evaluate_models_for_ar
+from transformer.eval import evaluate_models_for_ar
 
 # Set up logging
 logging.basicConfig(
@@ -447,7 +448,7 @@ def load_all_ars_data(ARs, rid_of_top, size, num_in, num_pred):
 # Global variable to store normalization statistics
 GLOBAL_NORM_STATS = None
 
-def run_single_experiment(config: Dict[str, Any], device: torch.device, learning_rate: float, global_step_offset: int = 0) -> Dict[str, float]:
+def run_single_experiment(config: Dict[str, Any], device: torch.device, learning_rate: float, global_step_offset: int = 0, batch_size: int = 128) -> Dict[str, float]:
     """Run a single experiment with the given configuration."""
     print(f"Training model with learning rate {learning_rate}...")
     
@@ -554,9 +555,6 @@ def run_single_experiment(config: Dict[str, Any], device: torch.device, learning
     print(f"Test samples: {len(X_test)}")
     
     # Create DataLoaders with CPU data
-    batch_size = min(64, len(X_train) // 10)  # Adaptive batch size
-    print(f"Batch size: {batch_size}")
-    
     train_dataset = TensorDataset(X_train, y_train)
     test_dataset = TensorDataset(X_test, y_test)
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=0, pin_memory=False)
@@ -1322,19 +1320,19 @@ Overall MSE:
         f'lr_{lr_str}/overall_mse_std_across_epochs': overall_stats['std'],
     })
 
+# Load environment variables from .env file
+load_dotenv('/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/.env')
+
+wandb_api_key = os.environ.get('WANDB_API_KEY')
+wandb_entity = os.environ.get('WANDB_ENTITY')
+wandb_project = os.environ.get('WANDB_PROJECT')
+
 def main():
-    print("Starting comprehensive learning rate comparison experiment...")
-    
-    # Read API key from .env file
-    with open('/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/.env', 'r') as f:
-        for line in f:
-            if line.startswith('WANDB_API_KEY='):
-                api_key = line.strip().split('=')[1]
-                break
-    
+    print("Starting comprehensive batch size comparison experiment...")
+
     # Login to wandb first
-    wandb.login(key=api_key)
-    
+    wandb.login(key=wandb_api_key)
+
     # Fixed configuration for all experiments
     config = {
         'num_pred': 12,
@@ -1342,65 +1340,67 @@ def main():
         'embed_dim': 64,
         'ff_dim': 128,
         'num_layers': 3,  # Fixed to 3 layers
-        'dropout': 0.1, # play around, try 0.1-0.5
+        'dropout': 0.3,   # Set dropout to 0.3
         'n_epochs': 300,
         'time_window': 12,
         'rid_of_top': 4,
-        # learning_rate will be varied in the experiment
+        'learning_rate': 0.001,  # Set learning rate to 0.001
+        # batch_size will be varied in the experiment
     }
-    
+
     # Create models directory for saving best models
-    # Save to results directory with search-specific subfolder
     project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
     results_dir = os.path.join(project_root, 'transformer', 'results')
-    search_type = "lr_search"  # This is a learning rate search experiment
+    search_type = "batch_size_search"  # This is a batch size search experiment
     models_dir = os.path.join(results_dir, search_type)
     os.makedirs(models_dir, exist_ok=True)
     print(f"Models will be saved to: {models_dir}")
-    
-    # Initialize wandb run
+
+    # Batch sizes to test
+    batch_sizes = [64, 128, 256, 512]
+
+    # Initialize wandb run (one run for the sweep, each trial will be a group)
     wandb.init(
-        project="sar-emergence",
-        entity="jonastirona-new-jersey-institute-of-technology",
+        project=wandb_project,
+        entity=wandb_entity,
         config=config,
-        name="dropout 0.1 LR search",
-        notes="Comprehensive grid search comparing transformer performance across smaller learning rates (0.0001, 0.0005, 0.001, 0.005, 0.01) with constant learning rate schedule, fixed attention head count (4) and 3 layers"
+        name="batch size search",
+        notes="Grid search comparing transformer performance across batch sizes (64, 128, 256, 512) with constant learning rate (0.001), dropout (0.3), fixed attention head count (4), and 3 layers"
     )
-    
-    # Run experiments for different learning rates
+
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     all_results = {}
-    
-    learning_rates = [0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1]  # Much smaller learning rates
+
     global_step_counter = 0  # Track global step across all trials
-    
-    for lr in learning_rates:
+
+    for batch_size in batch_sizes:
         print(f"\n{'='*50}")
-        print(f"TRIAL {learning_rates.index(lr) + 1}/5: Testing learning rate {lr}")
+        print(f"TRIAL {batch_sizes.index(batch_size) + 1}/{len(batch_sizes)}: Testing batch size {batch_size}")
         print(f"{'='*50}")
-        
+
         try:
             # Run experiment with global step offset
-            results = run_single_experiment(config, device, lr, global_step_counter)
-            all_results[lr] = results
-            
+            results = run_single_experiment(config, device, config['learning_rate'], global_step_counter, batch_size)
+            all_results[batch_size] = results
+
             # Create per-trial MSE statistics visualization
-            print(f"Creating MSE statistics for LR {lr}...")
-            create_per_trial_mse_statistics(results, lr)
-            
+            print(f"Creating MSE statistics for batch size {batch_size}...")
+            create_per_trial_mse_statistics(results, batch_size)
+
             # Save the best model locally
-            model_filename = f"transformer_t{config['time_window']}_r{config['rid_of_top']}_i{config['num_in']}_n{config['num_layers']}_h{config['embed_dim']}_e{config['n_epochs']}_l{lr:.5f}_d{config['dropout']:.1f}.pth"
+            model_filename = f"transformer_t{config['time_window']}_r{config['rid_of_top']}_i{config['num_in']}_n{config['num_layers']}_h{config['embed_dim']}_e{config['n_epochs']}_bs{batch_size}_l{config['learning_rate']:.5f}_d{config['dropout']:.1f}.pth"
             model_path = os.path.join(models_dir, model_filename)
             torch.save(results['best_model_state'], model_path)
             print(f"Best model saved to: {model_path}")
-            
+
             # Save model to wandb as artifact
             model_artifact = wandb.Artifact(
-                name=f"transformer_t{config['time_window']}_r{config['rid_of_top']}_i{config['num_in']}_n{config['num_layers']}_h{config['embed_dim']}_e{config['n_epochs']}_l{lr:.5f}_d{config['dropout']:.1f}".replace('.', '_'),
+                name=f"transformer_t{config['time_window']}_r{config['rid_of_top']}_i{config['num_in']}_n{config['num_layers']}_h{config['embed_dim']}_e{config['n_epochs']}_bs{batch_size}_l{config['learning_rate']:.5f}_d{config['dropout']:.1f}".replace('.', '_'),
                 type="model",
-                description=f"Best transformer model for learning rate {lr} after {config['n_epochs']} epochs",
+                description=f"Best transformer model for batch size {batch_size} after {config['n_epochs']} epochs",
                 metadata={
-                    "learning_rate": lr,
+                    "batch_size": batch_size,
+                    "learning_rate": config['learning_rate'],
                     "epochs": config['n_epochs'],
                     "embed_dim": config['embed_dim'],
                     "num_heads": 4,
@@ -1418,113 +1418,38 @@ def main():
             model_artifact.add_file(model_path, name=model_filename)
             wandb.log_artifact(model_artifact)
             print(f"Model uploaded to wandb as artifact: {model_artifact.name}")
-            
+
             # Update global step counter for next trial (assuming 300 epochs per trial)
             global_step_counter += config['n_epochs']
-            
+
             # Log trial completion
             wandb.log({
-                f'trial_completion/lr_{lr:.3f}': 1.0,
-                'completed_trials': learning_rates.index(lr) + 1,
-                'total_trials': len(learning_rates),
+                f'trial_completion/bs_{batch_size}': 1.0,
+                'completed_trials': batch_sizes.index(batch_size) + 1,
+                'total_trials': len(batch_sizes),
                 'model_saved_path': model_path
             }, step=global_step_counter - 1)
-            
-            print(f"✓ Trial {learning_rates.index(lr) + 1}/5 completed successfully for learning rate {lr}")
-            
+
+            print(f"✓ Trial {batch_sizes.index(batch_size) + 1}/{len(batch_sizes)} completed successfully for batch size {batch_size}")
+
         except Exception as e:
-            print(f"✗ ERROR in Trial {learning_rates.index(lr) + 1}/5 for learning rate {lr}:")
+            print(f"✗ ERROR in Trial {batch_sizes.index(batch_size) + 1}/{len(batch_sizes)} for batch size {batch_size}:")
             print(f"  Exception: {str(e)}")
             import traceback
             traceback.print_exc()
-            
+
             # Log the failure
             wandb.log({
-                f'trial_completion/lr_{lr:.3f}': 0.0,
-                'completed_trials': learning_rates.index(lr) + 1,
-                'total_trials': len(learning_rates),
+                f'trial_completion/bs_{batch_size}': 0.0,
+                'completed_trials': batch_sizes.index(batch_size) + 1,
+                'total_trials': len(batch_sizes),
                 'trial_failed': True,
                 'error_message': str(e)
             }, step=global_step_counter + config['n_epochs'] - 1)
-            
+
             global_step_counter += config['n_epochs']
             continue
-        
-        # Create individual AR evaluation plots using the new eval_wandb module
-        print(f"Generating AR comparison plots with LSTM benchmark...")
-        
-        # LSTM model path (assuming it exists)
-        lstm_path = "/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/lstm/results/t12_r4_i110_n3_h64_e1000_l0.01.pth"
-        
-        transformer_params = {
-            'embed_dim': config['embed_dim'],
-            'num_heads': 4,  # Fixed attention head count
-            'ff_dim': config['ff_dim'],
-            'num_layers': config['num_layers'],  # Fixed to 3 layers
-            'dropout': config['dropout'],
-            'rid_of_top': config['rid_of_top'],
-            'num_pred': config['num_pred'],
-            'time_window': config['time_window'],
-            'num_in': config['num_in'],
-            'hidden_size': config['embed_dim'],  # Use embed_dim as hidden_size
-            'learning_rate': lr
-        }
-        
-        # Test ARs to evaluate
-        test_ars = [11698, 11726, 13165, 13179, 13183]
-        successful_ars = []
-        failed_ars = []
-        
-        lr_str = f"{lr:.4f}"
-        
-        for ar in test_ars:
-            try:
-                # Create a temporary output directory for this evaluation
-                temp_output_dir = f"/tmp/ar_eval_lr{lr:.3f}"
-                os.makedirs(temp_output_dir, exist_ok=True)
-                plot_path = evaluate_models_for_ar(ar, lstm_path, model_path, transformer_params, temp_output_dir)
-                
-                # Upload the generated plot to wandb
-                if plot_path and os.path.exists(plot_path):
-                    wandb.log({f'lr_{lr_str}/AR_{ar}_comparison': wandb.Image(plot_path)})
-                    successful_ars.append(ar)
-                else:
-                    failed_ars.append(ar)
-                    
-            except Exception as e:
-                failed_ars.append(ar)
-                print(f"  ✗ Error evaluating AR {ar}: {str(e)}")
-                continue
-        
-        print(f"Completed AR evaluations for learning rate {lr}: {len(successful_ars)}/{len(test_ars)} successful")
-        
-        # Create artifact with all evaluation plots for this learning rate
-        if successful_ars:
-            eval_plots_artifact = wandb.Artifact(
-                name=f"evaluation_plots_lr_{lr:.3f}".replace('.', '_'),
-                type="evaluation_plots",
-                description=f"AR comparison plots for learning rate {lr}",
-                metadata={
-                    "learning_rate": lr,
-                    "successful_ars": successful_ars,
-                    "failed_ars": failed_ars,
-                    "total_ars_attempted": len(test_ars),
-                    "success_rate": len(successful_ars) / len(test_ars)
-                }
-            )
-            
-            # Add successful evaluation plots to artifact
-            for ar in successful_ars:
-                plot_filename = f"AR{ar}_comparison.png"
-                plot_path = f"/tmp/ar_eval_lr{lr:.3f}/{plot_filename}"
-                if os.path.exists(plot_path):
-                    eval_plots_artifact.add_file(plot_path, name=plot_filename)
-            
-            wandb.log_artifact(eval_plots_artifact)
-            print(f"Evaluation plots artifact created: {eval_plots_artifact.name}")
-        
-        print(f"✓ Trial {learning_rates.index(lr) + 1}/5 fully completed including AR evaluations")
-    
+
     # Create comprehensive comparison plots
     print(f"\n{'='*50}")
     print("Creating comprehensive comparison plots...")
@@ -1540,10 +1465,10 @@ def main():
     
     # Create a summary table with all trial results
     trial_summary_data = []
-    for lr in sorted(all_results.keys()):
-        results = all_results[lr]
+    for batch_size in sorted(all_results.keys()):
+        results = all_results[batch_size]
         trial_data = {
-            'learning_rate': lr,
+            'batch_size': batch_size,
             'train_loss_final': results['train_losses'][-1] if results['train_losses'] else float('nan'),
             'test_loss_final': results['test_losses'][-1] if results['test_losses'] else float('nan'),
             'test_overall_rmse': results.get('overall_rmse', float('nan')),
@@ -1562,19 +1487,19 @@ def main():
         trial_summary_data.append(trial_data)
         
         # Also log individual trial summary metrics with final step
-        final_step = (learning_rates.index(lr) + 1) * config['n_epochs'] - 1  # Correct step for each trial
+        final_step = (batch_sizes.index(batch_size) + 1) * config['n_epochs'] - 1  # Correct step for each trial
         wandb.log({
-            f'final_results/lr_{lr:.4f}_train_loss': trial_data['train_loss_final'],
-            f'final_results/lr_{lr:.4f}_test_loss': trial_data['test_loss_final'],
-            f'final_results/lr_{lr:.4f}_test_overall_rmse': trial_data['test_overall_rmse'],
-            f'final_results/lr_{lr:.4f}_test_overall_r2': trial_data['test_overall_r2'],
-            f'final_results/lr_{lr:.4f}_test_overall_mse': trial_data['test_overall_mse'],
-            f'final_results/lr_{lr:.4f}_test_overall_mae': trial_data['test_overall_mae'],
-            f'final_results/lr_{lr:.4f}_test_emergence_rmse': trial_data['test_emergence_rmse'],
-            f'final_results/lr_{lr:.4f}_test_emergence_r2': trial_data['test_emergence_r2'],
-            f'final_results/lr_{lr:.4f}_test_emergence_mse': trial_data['test_emergence_mse'],
-            f'final_results/lr_{lr:.4f}_test_emergence_mae': trial_data['test_emergence_mae'],
-            f'final_results/lr_{lr:.4f}_emergence_time_diff': trial_data['emergence_time_diff']
+            f'final_results/bs_{batch_size}_train_loss': trial_data['train_loss_final'],
+            f'final_results/bs_{batch_size}_test_loss': trial_data['test_loss_final'],
+            f'final_results/bs_{batch_size}_test_overall_rmse': trial_data['test_overall_rmse'],
+            f'final_results/bs_{batch_size}_test_overall_r2': trial_data['test_overall_r2'],
+            f'final_results/bs_{batch_size}_test_overall_mse': trial_data['test_overall_mse'],
+            f'final_results/bs_{batch_size}_test_overall_mae': trial_data['test_overall_mae'],
+            f'final_results/bs_{batch_size}_test_emergence_rmse': trial_data['test_emergence_rmse'],
+            f'final_results/bs_{batch_size}_test_emergence_r2': trial_data['test_emergence_r2'],
+            f'final_results/bs_{batch_size}_test_emergence_mse': trial_data['test_emergence_mse'],
+            f'final_results/bs_{batch_size}_test_emergence_mae': trial_data['test_emergence_mae'],
+            f'final_results/bs_{batch_size}_emergence_time_diff': trial_data['emergence_time_diff']
         }, step=final_step)
     
     # Log the comprehensive trial summary table
@@ -1584,29 +1509,29 @@ def main():
     # Create summary artifact with all models
     print("Creating wandb artifact with all models...")
     all_models_artifact = wandb.Artifact(
-        name="lr_search_all_models",
+        name="batch_size_search_all_models",
         type="model_collection",
-        description=f"All transformer models from learning rate search experiment with {len(learning_rates)} learning rates",
+        description=f"All transformer models from batch size search experiment with {len(batch_sizes)} batch sizes",
         metadata={
-            "experiment_type": "learning_rate_search",
-            "learning_rates": learning_rates,
+            "experiment_type": "batch_size_search",
+            "batch_sizes": batch_sizes,
             "n_epochs": config['n_epochs'],
             "embed_dim": config['embed_dim'],
             "num_heads": 4,
             "ff_dim": config['ff_dim'],
             "num_layers": config['num_layers'],
             "dropout": config['dropout'],
-            "best_overall_lr": min(all_results.keys(), key=lambda x: all_results[x].get('overall_rmse', float('inf'))),
-            "best_emergence_lr": min(all_results.keys(), key=lambda x: all_results[x].get('emergence_rmse', float('inf'))),
-            "best_timing_lr": min(all_results.keys(), key=lambda x: all_results[x].get('emergence_time_diff', float('inf'))),
+            "best_overall_bs": min(all_results.keys(), key=lambda x: all_results[x].get('overall_rmse', float('inf'))),
+            "best_emergence_bs": min(all_results.keys(), key=lambda x: all_results[x].get('emergence_rmse', float('inf'))),
+            "best_timing_bs": min(all_results.keys(), key=lambda x: all_results[x].get('emergence_time_diff', float('inf'))),
             "total_models": len(all_results)
         }
     )
     
     # Add all model files to the collection artifact
-    for lr in learning_rates:
-        if lr in all_results:  # Only add if training was successful
-            model_filename = f"transformer_t{config['time_window']}_r{config['rid_of_top']}_i{config['num_in']}_n{config['num_layers']}_h{config['embed_dim']}_e{config['n_epochs']}_l{lr:.5f}_d{config['dropout']:.1f}.pth"
+    for batch_size in batch_sizes:
+        if batch_size in all_results:  # Only add if training was successful
+            model_filename = f"transformer_t{config['time_window']}_r{config['rid_of_top']}_i{config['num_in']}_n{config['num_layers']}_h{config['embed_dim']}_e{config['n_epochs']}_bs{batch_size}_l{config['learning_rate']:.5f}_d{config['dropout']:.1f}.pth"
             model_path = os.path.join(models_dir, model_filename)
             if os.path.exists(model_path):
                 all_models_artifact.add_file(model_path, name=model_filename)
@@ -1617,9 +1542,9 @@ def main():
     # Log summary statistics
     summary_stats = {
         'total_trials_completed': len(all_results),
-        'best_overall_rmse_lr': min(all_results.keys(), key=lambda x: all_results[x].get('overall_rmse', float('inf'))),
-        'best_emergence_rmse_lr': min(all_results.keys(), key=lambda x: all_results[x].get('emergence_rmse', float('inf'))),
-        'best_timing_accuracy_lr': min(all_results.keys(), key=lambda x: all_results[x].get('emergence_time_diff', float('inf'))),
+        'best_overall_rmse_bs': min(all_results.keys(), key=lambda x: all_results[x].get('overall_rmse', float('inf'))),
+        'best_emergence_rmse_bs': min(all_results.keys(), key=lambda x: all_results[x].get('emergence_rmse', float('inf'))),
+        'best_timing_accuracy_bs': min(all_results.keys(), key=lambda x: all_results[x].get('emergence_time_diff', float('inf'))),
         'all_trials_rmse_range': max([r.get('overall_rmse', 0) for r in all_results.values()]) - min([r.get('overall_rmse', 0) for r in all_results.values()]),
         'avg_emergence_rmse': np.mean([r.get('emergence_rmse', 0) for r in all_results.values()]),
         'avg_overall_rmse': np.mean([r.get('overall_rmse', 0) for r in all_results.values()])
@@ -1633,9 +1558,9 @@ def main():
     
     # Log best configurations as simple text values
     wandb.log({
-        'best_overall_lr': best_overall,
-        'best_emergence_lr': best_emergence,
-        'best_timing_lr': best_time_error,
+        'best_overall_bs': best_overall,
+        'best_emergence_bs': best_emergence,
+        'best_timing_bs': best_time_error,
         'best_overall_rmse': all_results[best_overall]['overall_rmse'],
         'best_emergence_rmse': all_results[best_emergence]['emergence_rmse'],
         'best_time_error': all_results[best_time_error]['emergence_time_diff']
@@ -1644,17 +1569,17 @@ def main():
     # Also log as summary text for easy viewing
     summary_text = f"""
     BEST CONFIGURATIONS:
-    - Overall Performance: LR={best_overall} (RMSE: {all_results[best_overall]['overall_rmse']:.4f})
-    - Emergence Prediction: LR={best_emergence} (RMSE: {all_results[best_emergence]['emergence_rmse']:.4f})  
-    - Timing Accuracy: LR={best_time_error} (Error: {all_results[best_time_error]['emergence_time_diff']:.2f} hrs)
+    - Overall Performance: BS={best_overall} (RMSE: {all_results[best_overall]['overall_rmse']:.4f})
+    - Emergence Prediction: BS={best_emergence} (RMSE: {all_results[best_emergence]['emergence_rmse']:.4f})  
+    - Timing Accuracy: BS={best_time_error} (Error: {all_results[best_time_error]['emergence_time_diff']:.2f} hrs)
     """
     wandb.log({"best_configurations_summary": summary_text})
     
     print(f"\n{'='*50}")
     print("EXPERIMENT COMPLETE!")
-    print(f"Best overall performance: LR={best_overall} (RMSE: {all_results[best_overall]['overall_rmse']:.4f})")
-    print(f"Best emergence prediction: LR={best_emergence} (RMSE: {all_results[best_emergence]['emergence_rmse']:.4f})")
-    print(f"Best timing accuracy: LR={best_time_error} (Error: {all_results[best_time_error]['emergence_time_diff']:.2f} hrs)")
+    print(f"Best overall performance: BS={best_overall} (RMSE: {all_results[best_overall]['overall_rmse']:.4f})")
+    print(f"Best emergence prediction: BS={best_emergence} (RMSE: {all_results[best_emergence]['emergence_rmse']:.4f})")
+    print(f"Best timing accuracy: BS={best_time_error} (Error: {all_results[best_time_error]['emergence_time_diff']:.2f} hrs)")
     print(f"{'='*50}")
     
     # Print model saving summary
@@ -1665,29 +1590,29 @@ def main():
     print(f"Search type: {search_type}")
     print(f"Wandb artifacts: Individual models + collection artifact")
     print("\nSaved models:")
-    for lr in learning_rates:
-        model_filename = f"transformer_t{config['time_window']}_r{config['rid_of_top']}_i{config['num_in']}_n{config['num_layers']}_h{config['embed_dim']}_e{config['n_epochs']}_l{lr:.5f}_d{config['dropout']:.1f}.pth"
+    for batch_size in batch_sizes:
+        model_filename = f"transformer_t{config['time_window']}_r{config['rid_of_top']}_i{config['num_in']}_n{config['num_layers']}_h{config['embed_dim']}_e{config['n_epochs']}_bs{batch_size}_l{config['learning_rate']:.5f}_d{config['dropout']:.1f}.pth"
         model_path = os.path.join(models_dir, model_filename)
-        artifact_name = f"transformer_t{config['time_window']}_r{config['rid_of_top']}_i{config['num_in']}_n{config['num_layers']}_h{config['embed_dim']}_e{config['n_epochs']}_l{lr:.5f}_d{config['dropout']:.1f}".replace('.', '_')
+        artifact_name = f"transformer_t{config['time_window']}_r{config['rid_of_top']}_i{config['num_in']}_n{config['num_layers']}_h{config['embed_dim']}_e{config['n_epochs']}_bs{batch_size}_l{config['learning_rate']:.5f}_d{config['dropout']:.1f}".replace('.', '_')
         if os.path.exists(model_path):
             file_size = os.path.getsize(model_path) / (1024*1024)  # Size in MB
-            print(f"  ✓ LR={lr}: {model_filename} ({file_size:.1f} MB)")
+            print(f"  ✓ BS={batch_size}: {model_filename} ({file_size:.1f} MB)")
             print(f"    Wandb artifact: {artifact_name}")
         else:
-            print(f"  ✗ LR={lr}: {model_filename} (MISSING)")
+            print(f"  ✗ BS={batch_size}: {model_filename} (MISSING)")
     
-    print(f"\nWandb artifact collection: lr_search_all_models")
-    print(f"  Contains: {len([lr for lr in learning_rates if lr in all_results])} models")
+    print(f"\nWandb artifact collection: batch_size_search_all_models")
+    print(f"  Contains: {len([batch_size for batch_size in batch_sizes if batch_size in all_results])} models")
     print(f"\nTo download models from wandb:")
     print(f"  # Download individual model")
     print(f"  artifact = wandb.use_artifact('your-entity/sar-emergence/transformer_t12_r4_i110_n3_h64_e300_l0_00100_d0_3:latest')")
     print(f"  artifact_dir = artifact.download()")
     print(f"  # Download all models")
-    print(f"  artifact = wandb.use_artifact('your-entity/sar-emergence/lr_search_all_models:latest')")
+    print(f"  artifact = wandb.use_artifact('your-entity/sar-emergence/batch_size_search_all_models:latest')")
     print(f"  artifact_dir = artifact.download()")
     
     print(f"\nTo load a model:")
-    print(f"  model_state = torch.load('{models_dir}/transformer_t{config['time_window']}_r{config['rid_of_top']}_i{config['num_in']}_n{config['num_layers']}_h{config['embed_dim']}_e{config['n_epochs']}_l{lr:.5f}_d{config['dropout']:.1f}.pth')")
+    print(f"  model_state = torch.load('{models_dir}/transformer_t{config['time_window']}_r{config['rid_of_top']}_i{config['num_in']}_n{config['num_layers']}_h{config['embed_dim']}_e{config['n_epochs']}_bs{batch_size}_l{config['learning_rate']:.5f}_d{config['dropout']:.1f}.pth')")
     print(f"{'='*50}")
     
     # Finish wandb run

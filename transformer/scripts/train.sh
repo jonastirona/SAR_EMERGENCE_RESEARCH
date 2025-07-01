@@ -22,10 +22,6 @@ cd /mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/transformer/
 
 source /mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/.env
 
-# Set up wandb environment variables
-export WANDB_ENTITY="jonastirona-new-jersey-institute-of-technology"
-export WANDB_PROJECT="sar-emergence"
-
 # Run comprehensive attention heads comparison
-echo "Starting comprehensive constant lr grid search"
-python -u train_wandb.py 
+echo "Starting comprehensive batch size grid search"
+python -u train.py 

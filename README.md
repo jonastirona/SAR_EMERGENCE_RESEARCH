@@ -1,92 +1,145 @@
-# Solar Active Region (AR) Prediction Models
 
-This repository contains implementations of LSTM and Transformer models for predicting solar active region emergence. The models analyze various solar data parameters to predict AR emergence and evolution.
+# SAR Emergence Research Project
 
-## Models
+This repository contains the implementation of LSTM and Transformer models for predicting Solar Active Region (SAR) emergence patterns.
 
-- **LSTM Model**: 3-layer LSTM architecture for time series prediction
-- **Transformer Model**: 2-layer Spatio-Temporal Transformer for sequence modeling
+## Table of Contents
+1. [Environment Setup](#environment-setup)
+2. [Wulver Cluster Setup](#wulver-cluster-setup)
+3. [Project Structure](#project-structure)
+4. [Configuration](#configuration)
+5. [Training Pipeline](#training-pipeline)
+6. [Evaluation Pipeline](#evaluation-pipeline)
+7. [Data Structure](#data-structure)
 
-## Data
+## Environment Setup
 
-The models use the following input data:
-- Power maps (multiple frequency bands)
-- Magnetic flux measurements
-- Intensity measurements
+1. **Clone the repository** and enter the directory:
+   ```bash
+   git clone <the-repo-url>
+   cd path_it_was_cloned_to
+   ```
 
-## Active Regions
+2. **Create and activate a Python virtual environment**:
+   ```bash
+   python3 -m venv sar-env
+   source sar-env/bin/activate
+   ```
 
-The models are tested on several active regions:
-- AR11698
-- AR11726
-- AR13165
-- AR13179
-- AR13183
+3. **Install dependencies**:
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+## Wulver Cluster Setup
+
+1. **Load required modules**:
+   ```bash
+   module load wulver
+   ```
+
+2. **Activate environment**:
+   ```bash
+   source /mmfs1/project/PI-ucid/your-ucid/sar-env/bin/activate
+   ```
+
+3. **Environment Configuration**:
+   Create a `.env` file in the project root with:
+   ```
+   WANDB_API_KEY=your_wandb_api_key_here
+   WANDB_ENTITY="jonastirona-new-jersey-institute-of-technology"
+   WANDB_PROJECT="sar-emergence"
+   ```
 
 ## Project Structure
+SAR_EMERGENCE_RESEARCH/
+├── data/ # Raw data directory
+├── transformer/
+│ ├── models/ # Model architectures
+│ ├── scripts/ # Training scripts
+│ ├── train.py # Main transformer training script
+│ ├── train_wandb.py # Training with W&B logging
+│ └── eval.py # Evaluation script
+├── lstm/
+│ ├── train_w_stats.py # LSTM training with statistics
+│ ├── eval.py # LSTM evaluation
+│ └── functions.py # Helper functions
+└── README.md
 
-```
-.
-├── lstm/              # LSTM model implementation
-├── transformer/       # Transformer model implementation
-│   ├── scripts/      # Training and optimization scripts
-│   └── results/      # Model results and outputs
-├── evaluation/        # Evaluation scripts and utilities
-├── data/             # Solar Active Region Directory
-```
+## Training Pipeline
 
-## Hyperparameter Optimization
+### Transformer Training
 
-The project includes two approaches for hyperparameter optimization:
-
-1. **Grid Search**: A systematic 4-stage grid search that optimizes:
-   - Stage 1: Learning rate and warmup ratio
-   - Stage 2: Hidden size and number of layers
-   - Stage 3: Feed-forward ratio and number of attention heads
-   - Stage 4: Dropout rate
-
-2. **Random Search**: A more efficient random search that explores:
-   - Number of layers (2-4)
-   - Hidden size (48-96)
-   - Learning rate (0.001-0.01)
-   - Embedding dimension (48-96)
-   - Number of attention heads (4-12)
-   - Feed-forward dimension (96-256)
-   - Dropout rate (0.05-0.2)
-
-## Requirements
-
-- Python 3.x
-- PyTorch
-- NumPy
-- Matplotlib
-- scikit-learn
-- Optuna (for hyperparameter optimization)
-
-## Usage
-
-1. Prepare data in the appropriate format
-2. Run hyperparameter optimization:
+1. **`train.py`**:
    ```bash
-   # For grid search
-   cd transformer/scripts
-   ./grid_search_stage1.sh  # Run each stage sequentially
-   
-   # For random search
-   ./random_search.sh
+   cd SAR_EMERGENCE_RESEARCH/transformer
+   python train.py
    ```
-3. Train models using the optimized parameters
-4. Evaluate models using `eval_comparison.py`
+   This will run a batch size search experiment with:
+   - Fixed learning rate (0.001)
+   - Fixed dropout (0.3)
+   - Batch sizes: [64, 128, 256, 512]
 
-## Evaluation
+2. **Run `train.sh`**:
+   ```bash
+   cd SAR_EMERGENCE_RESEARCH/transformer/scripts
+   sbatch train.sh
+   ```
+   This will run train.py on the NJIT Wulver HPC.
+### LSTM Training
 
-The evaluation produces:
-- Side-by-side model comparisons
-- Derivative analysis
-- Emergence detection
-- Performance metrics
-- Hyperparameter optimization results
+1. **`train_w_stats.py`**:
+   ```bash
+   cd SAR_EMERGENCE_RESEARCH/lstm
+   python train_w_stats.py <num_pred> <rid_of_top> <num_in> <num_layers> <hidden_size> <n_epochs> <learning_rate> <dropout>
+   ```
 
-## Results
+2. **Run `train_lstm.sh`**:
+   ```bash
+   cd SAR_EMERGENCE_RESEARCH/lstm/scripts
+   sbatch train_lstm.sh
+   This will run train_w_stats.py on the NJIT Wulver HPC.
+   ```
 
-Results from both grid search and random search are stored in the `transformer/results/` directory, organized by optimization method and stage.
+## Evaluation Pipeline
+
+### Transformer Evaluation: configured on wandb
+
+### LSTM Evaluation
+```bash
+cd SAR_EMERGENCE_RESEARCH/lstm
+python eval.py
+```
+
+## Data Structure
+
+The project uses SAR data organized by Active Region (AR) number:
+data/
+├── AR11698/
+├── AR11726/
+├── AR13165/
+├── AR13179/
+└── AR13183/
+...
+
+
+Each AR directory contains:
+- Power maps (`mean_pmdop{AR}_flat.npz`)
+- Magnetic flux data (`mean_mag{AR}_flat.npz`)
+- Intensity data (`mean_int{AR}_flat.npz`)
+
+## Model Outputs
+
+### Transformer Models
+Saved in: `transformer/results/batch_size_search/`
+Format: `transformer_t{time_window}_r{rid_of_top}_i{num_in}_n{num_layers}_h{hidden_size}_e{epochs}_bs{batch_size}_l{learning_rate}_d{dropout}.pth`
+
+### LSTM Models
+Saved in: `lstm/results/`
+Format: `t{time_window}_r{rid_of_top}_i{num_in}_n{num_layers}_h{hidden_size}_e{epochs}_l{learning_rate}_d{dropout}.pth`
+
+## Weights & Biases Integration
+
+The project uses Weights & Biases for experiment tracking. Configure your W&B credentials in the `.env` file as shown in the [Environment Configuration](#wulver-cluster-setup) section.
+
+Training metrics, model artifacts, and experiment results are automatically logged to your W&B project dashboard.
