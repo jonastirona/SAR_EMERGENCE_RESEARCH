@@ -1,13 +1,13 @@
 #!/bin/bash
 
-#SBATCH --job-name=layer_grid_search
+#SBATCH --job-name=dropout_0.1_lr_search
 #SBATCH --partition=gpu
 #SBATCH --account=mx6
-#SBATCH --qos=low
+#SBATCH --qos=standard
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
-#SBATCH --gres=gpu:2
+#SBATCH --gres=gpu:3
 #SBATCH --time=24:00:00
 #SBATCH --output=%x_%j.out
 #SBATCH --error=%x_%j.err
@@ -26,6 +26,6 @@ source /mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/.env
 export WANDB_ENTITY="jonastirona-new-jersey-institute-of-technology"
 export WANDB_PROJECT="sar-emergence"
 
-# Run comprehensive layer comparison (1-5 layers)
-echo "Starting comprehensive transformer layer grid search..."
+# Run comprehensive attention heads comparison
+echo "Starting comprehensive constant lr grid search"
 python -u train_wandb.py 

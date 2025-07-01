@@ -81,7 +81,6 @@ def find_first_emergence_window(signal, threshold=-0.01, min_duration=4):
         return None, None
     
     # Find a 24-hour window starting from first emergence
-    # Assuming hourly data, 24-hour window = 24 indices
     window_size = 24
     emergence_end = min(first_emergence_start + window_size, len(signal))
     
@@ -101,7 +100,7 @@ def calculate_emergence_metrics(true, pred_lstm, pred_transformer, time_arr, thr
     lstm_start, lstm_end = find_first_emergence_window(d_lstm, threshold, min_duration)
     transformer_start, transformer_end = find_first_emergence_window(d_transformer, threshold, min_duration)
     
-    # Calculate basic metrics (MAE, RMSE, R²) for overall series
+    # Calculate metrics for overall series
     def calc_basic_metrics(y_true, y_pred):
         mae = np.mean(np.abs(y_true - y_pred))
         mse = np.mean((y_true - y_pred) ** 2)
@@ -113,7 +112,7 @@ def calculate_emergence_metrics(true, pred_lstm, pred_transformer, time_arr, thr
     lstm_mae, lstm_rmse, lstm_r2 = calc_basic_metrics(true, pred_lstm)
     transformer_mae, transformer_rmse, transformer_r2 = calc_basic_metrics(true, pred_transformer)
     
-    # Calculate emergence window specific metrics if window exists
+    # Calculate emergence window specific metrics if it exists
     lstm_emerg_mae, lstm_emerg_rmse, lstm_emerg_r2 = None, None, None
     transformer_emerg_mae, transformer_emerg_rmse, transformer_emerg_r2 = None, None, None
     
@@ -133,9 +132,9 @@ def calculate_emergence_metrics(true, pred_lstm, pred_transformer, time_arr, thr
     
     if obs_start is not None:
         if lstm_start is not None:
-            lstm_timing_diff = (lstm_start - obs_start)  # Difference in time steps (hours)
+            lstm_timing_diff = (lstm_start - obs_start)
         if transformer_start is not None:
-            transformer_timing_diff = (transformer_start - obs_start)  # Difference in time steps (hours)
+            transformer_timing_diff = (transformer_start - obs_start)
     
     return {
         'lstm': {
@@ -171,20 +170,17 @@ def create_emergence_metrics_table(ax, metrics):
     transformer_metrics = metrics['transformer']
     obs_metrics = metrics['observed']
     
-    # Check if emergence window exists
     has_emergence_window = obs_metrics['emergence_window'] is not None
     
-    # Create table data
     data = [['Metric', 'LSTM', 'Transformer']]
     
-    # Overall metrics
     data.extend([
         ['Overall MAE', f'{lstm_metrics["MAE"]:.4f}', f'{transformer_metrics["MAE"]:.4f}'],
         ['Overall RMSE', f'{lstm_metrics["RMSE"]:.4f}', f'{transformer_metrics["RMSE"]:.4f}'],
         ['Overall R²', f'{lstm_metrics["R2"]:.4f}', f'{transformer_metrics["R2"]:.4f}']
     ])
     
-    # Emergence window metrics (if window exists)
+    # Emergence window metrics
     if has_emergence_window:
         data.extend([
             ['Window MAE', 
@@ -203,11 +199,9 @@ def create_emergence_metrics_table(ax, metrics):
                 f'{lstm_metrics["emergence_timing_diff"]:+.0f}' if lstm_metrics["emergence_timing_diff"] is not None else 'N/A',
                 f'{transformer_metrics["emergence_timing_diff"]:+.0f}' if transformer_metrics["emergence_timing_diff"] is not None else 'N/A'])
     
-    # Adjust table position based on whether emergence window exists
     table_height = 0.8 if has_emergence_window else 0.6
     table_y_position = -0.6 if has_emergence_window else -0.4
     
-    # Create table
     table = ax.table(
         cellText=data,
         loc='upper left',
@@ -216,37 +210,29 @@ def create_emergence_metrics_table(ax, metrics):
         colLoc='center'
     )
     
-    # Style the table
     table.auto_set_font_size(False)
     table.set_fontsize(8)
     
-    # Style cells
     for (row, col), cell in table.get_celld().items():
         cell.set_text_props(color='black')
         cell.set_facecolor('white')
-        # Add borders to all cells
         cell.set_edgecolor('#CCCCCC')
         cell.set_linewidth(0.5)
         
-        # Bold header row
         if row == 0:
             cell.set_text_props(weight='bold')
             cell.set_facecolor('#e0e0e0')
-        # Alternate row colors for overall metrics
-        elif row <= 3:  # Overall metrics rows
+        elif row <= 3:
             if row % 2 == 0:
                 cell.set_facecolor('#f9f9f9')
-        # Different color for emergence window metrics
-        elif has_emergence_window and row <= 6:  # Window metrics rows
+        elif has_emergence_window and row <= 6:
             if row % 2 == 1:
-                cell.set_facecolor('#fff2cc')  # Light yellow for window metrics
+                cell.set_facecolor('#fff2cc')
             else:
-                cell.set_facecolor('#ffe599')  # Slightly darker yellow
-        # Timing difference row
+                cell.set_facecolor('#ffe599')
         else:
-            cell.set_facecolor('#d9ead3')  # Light green for timing
+            cell.set_facecolor('#d9ead3')
         
-        # Make timing difference label smaller
         if 'Δ Emergence' in str(cell.get_text().get_text()) and col == 0:
             cell.set_text_props(fontsize=6)
         else:
@@ -254,58 +240,39 @@ def create_emergence_metrics_table(ax, metrics):
 
 
 def lstm_ready(tile, size, power_maps, intensities, num_in, num_pred, model_seq_len=None):
-    """Modified lstm_ready that adapts to available data length.
+    X_trans = power_maps[tile]
+    y_trans = intensities[tile]
     
-    If num_in is larger than available data, use the maximum possible sequence length.
-    This ensures we can always generate some sequences for evaluation.
-    
-    Args:
-        tile: Tile index
-        size: Grid size
-        power_maps: Power maps data
-        intensities: Intensity data
-        num_in: Requested input sequence length (AR-specific)
-        num_pred: Number of prediction steps
-        model_seq_len: Expected sequence length by the model (for padding)
-    """
-    # Get data for specific tile
-    X_trans = power_maps[tile]  # (features, time)
-    y_trans = intensities[tile]  # (time,)
-    
-    # Transpose to get time as first dimension
-    X_trans = X_trans.T  # (time, features)
+    X_trans = X_trans.T
     
     available_time_steps = len(X_trans)
-    
-    # Calculate maximum possible num_in given the data and required num_pred
+
     max_possible_num_in = available_time_steps - num_pred
     
     if max_possible_num_in <= 0:
         raise ValueError(f"Not enough data for tile {tile}. Available: {available_time_steps}, Need at least: {num_pred + 1}")
     
-    # Use the smaller of requested num_in or what's available
     effective_num_in = min(num_in, max_possible_num_in)
     
-    # Split into sequences using effective sequence length
     X_ss, y_mm = split_sequences(X_trans, y_trans, effective_num_in, num_pred)
     
     # If model expects a different sequence length, pad accordingly
     target_seq_len = model_seq_len if model_seq_len is not None else effective_num_in
     if effective_num_in < target_seq_len and len(X_ss) > 0:
         padding_length = target_seq_len - effective_num_in
-        # Pad with zeros at the beginning (older time steps)
         padding_shape = (len(X_ss), padding_length, X_ss.shape[2])
         padding = np.zeros(padding_shape)
         X_ss = np.concatenate([padding, X_ss], axis=1)
     
     # Convert to tensors
-    X = torch.Tensor(X_ss)  # (batch, seq_len, input_dim)
-    y = torch.Tensor(y_mm)  # (batch, output_dim)
+    X = torch.Tensor(X_ss)
+    y = torch.Tensor(y_mm)
     
     return X, y
 
 
 def evaluate_models_for_ar(test_AR, lstm_path, transformer_path, transformer_params, output_dir):
+    """Evaluate LSTM and Transformer models for a specific AR and return the saved plot path."""
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f'Evaluating AR {test_AR} on: {device}')
     
@@ -313,8 +280,7 @@ def evaluate_models_for_ar(test_AR, lstm_path, transformer_path, transformer_par
         print(f"  Debug: transformer_params = {transformer_params}")
         print(f"  Debug: transformer_params keys = {list(transformer_params.keys())}")
         
-        # Get model parameters from transformer_params (passed from train_wandb.py)
-        # Only override num_in for AR-specific settings and force rid_of_top = 1
+        # Get model parameters from transformer_params
         num_pred = transformer_params['num_pred']
         num_layers = transformer_params['num_layers'] 
         hidden_size = transformer_params['hidden_size']
@@ -324,11 +290,10 @@ def evaluate_models_for_ar(test_AR, lstm_path, transformer_path, transformer_par
         if 'rid_of_top' not in transformer_params:
             raise KeyError(f"'rid_of_top' key missing from transformer_params. Available keys: {list(transformer_params.keys())}")
         
-        # Force rid_of_top = 1 for evaluation to match data expectations
         rid_of_top = 1
         print(f"  Debug: rid_of_top = {rid_of_top} (hardcoded for evaluation)")
 
-        # AR settings - this will override num_in with AR-specific value
+        # AR settings
         print(f"  Debug: Calling get_ar_settings({test_AR}, {rid_of_top})")
         start_tile, before_plot, num_in, NOAA_first, NOAA_second = get_ar_settings(test_AR, rid_of_top)
         print(f"  Debug: AR settings - start_tile={start_tile}, before_plot={before_plot}, num_in={num_in} (AR-specific)")
@@ -401,9 +366,8 @@ def evaluate_models_for_ar(test_AR, lstm_path, transformer_path, transformer_par
         fig.subplots_adjust(left=0.15, right=0.85, top=0.97, bottom=0.1)
         gs0 = gridspec.GridSpec(7,1,figure=fig,hspace=.2)
         
-        # Use correct future indices for each model
-        lstm_fut = lstm_num_pred-1  # LSTM future index (11 for 12-hour prediction)
-        transformer_fut = num_pred-1  # Transformer future index (23 for 24-hour prediction)
+        lstm_fut = lstm_num_pred-1
+        transformer_fut = num_pred-1
         thr= -0.01; st=4
 
         for i in range(7):
@@ -424,7 +388,6 @@ def evaluate_models_for_ar(test_AR, lstm_path, transformer_path, transformer_par
             p_l = recalibrate(p_l, ii[tile_idx,last])
             p_t = recalibrate(p_t, ii[tile_idx,last])
 
-            # Calculate emergence-based metrics
             tile_metrics = calculate_emergence_metrics(true, p_l, p_t, time_arr, thr, st)
             all_tile_metrics.append(tile_metrics)
 
@@ -433,12 +396,10 @@ def evaluate_models_for_ar(test_AR, lstm_path, transformer_path, transformer_par
             tnum = mdates.date2num(tcut)
             nanarr = np.full(before.shape, np.nan)
 
-            # Compute derivatives (no padding for d_obs)
             d_obs = np.gradient(smooth_with_numpy(np.concatenate((before, true))))
             d_l = np.gradient(p_l)
             d_t = np.gradient(p_t)
 
-            # Create padded versions for plotting dLSTM/dt and dTransformer/dt only
             nan_pad = np.full(before_plot, np.nan)
             d_l_full = np.concatenate([nan_pad, d_l])
             d_t_full = np.concatenate([nan_pad, d_t])
@@ -464,7 +425,6 @@ def evaluate_models_for_ar(test_AR, lstm_path, transformer_path, transformer_par
 
             gs1 = gridspec.GridSpecFromSubplotSpec(5,1,subplot_spec=gs0[i],height_ratios=[18,4,4,4,4],hspace=0.3)
 
-            # All subplots use tnum for x-axis
             ax0 = fig.add_subplot(gs1[0])
             ax0.plot(tnum, np.concatenate((before,true)), 'k-', label='Observed Intensity')
             ax0.plot(tnum, np.concatenate((nanarr,p_l)), 'b-', label='LSTM Prediction')
@@ -472,7 +432,6 @@ def evaluate_models_for_ar(test_AR, lstm_path, transformer_path, transformer_par
             ax0.axvline(NOAA1, color='magenta', linestyle='--', label='NOAA First Record')
             ax0.axvline(NOAA2, color='darkmagenta', linestyle='--', label='NOAA Second Record')
             
-            # Add yellow emergence window highlighting to intensity plot
             if obs_window:
                 ax0.axvspan(t_start, t_end, color='yellow', alpha=0.3, label='Emergence Window')
             
@@ -482,17 +441,13 @@ def evaluate_models_for_ar(test_AR, lstm_path, transformer_path, transformer_par
             ax0.set_yticks([0, 0.25, 0.5, 0.75, 1])
             legend = ax0.legend(bbox_to_anchor=(1.033, .83, 0.223, 0.11), loc='upper left', borderaxespad=0, fontsize=10, framealpha=1, mode='expand')
             legend.get_frame().set_boxstyle('square', pad=1)
-            # Remove date formatting from intensity plot
             ax0.tick_params(labelbottom=False)
 
-            # Add emergence metrics table
             create_emergence_metrics_table(ax0, tile_metrics)
 
             ax1 = fig.add_subplot(gs1[1], sharex=ax0)
-            # dObs/dt: plot full black, overlay green for emergence (no padding)
             ax1.plot(tnum, d_obs, color='black', linewidth=1)
             
-            # Add yellow emergence window if it exists
             if obs_window:
                 ax1.axvspan(t_start, t_end, color='yellow', alpha=0.3, label='Emergence Window')
             
@@ -504,7 +459,6 @@ def evaluate_models_for_ar(test_AR, lstm_path, transformer_path, transformer_par
             ax1.tick_params(labelbottom=False)
 
             ax2 = fig.add_subplot(gs1[2], sharex=ax0)
-            # dTrans/dt: plot full red, overlay green for emergence (padded)
             ax2.plot(tnum, d_t_full, color='red', linewidth=1)
             
             # Add yellow emergence window if it exists
@@ -521,7 +475,6 @@ def evaluate_models_for_ar(test_AR, lstm_path, transformer_path, transformer_par
             ax2.set_xlim(tnum[0], tnum[-1])
 
             ax3 = fig.add_subplot(gs1[3], sharex=ax0)
-            # dLSTM/dt: plot full blue, overlay green for emergence (padded)
             ax3.plot(tnum, d_l_full, color='blue', linewidth=1)
             
             # Add yellow emergence window if it exists
@@ -539,13 +492,40 @@ def evaluate_models_for_ar(test_AR, lstm_path, transformer_path, transformer_par
 
             # Error curve
             ax4 = fig.add_subplot(gs1[4], sharex=ax0)
-            ax4.plot(tnum[before_plot:before_plot+len(true)], np.abs(true - p_l), 'b-')
-            ax4.plot(tnum[before_plot:before_plot+len(true)], np.abs(true - p_t), 'r-')
+            lstm_errors = np.abs(true - p_l)
+            transformer_errors = np.abs(true - p_t)
+            
+            ax4.plot(tnum[before_plot:before_plot+len(true)], lstm_errors, 'b-', label='LSTM')
+            ax4.plot(tnum[before_plot:before_plot+len(true)], transformer_errors, 'r-', label='Transformer')
             ax4.axvline(NOAA1, color='magenta', linestyle='--')
             
-            # Add yellow emergence window highlighting to error plot
             if obs_window:
                 ax4.axvspan(t_start, t_end, color='yellow', alpha=0.3, label='Emergence Window')
+            
+            # Add trend lines to error plot
+            x_vals = np.arange(len(lstm_errors))
+            
+            # LSTM error trend
+            z_lstm = np.polyfit(x_vals, lstm_errors, 1)
+            p_lstm = np.poly1d(z_lstm)
+            ax4.plot(tnum[before_plot:before_plot+len(true)], p_lstm(x_vals), 'b--', alpha=0.7, linewidth=1)
+            
+            # Transformer error trend
+            z_transformer = np.polyfit(x_vals, transformer_errors, 1)
+            p_transformer = np.poly1d(z_transformer)
+            ax4.plot(tnum[before_plot:before_plot+len(true)], p_transformer(x_vals), 'r--', alpha=0.7, linewidth=1)
+            
+            # Add trend line formulas
+            slope_lstm, intercept_lstm = z_lstm[0], z_lstm[1]
+            slope_transformer, intercept_transformer = z_transformer[0], z_transformer[1]
+            
+            formula_lstm = f'LSTM: y = {slope_lstm:.4f}x + {intercept_lstm:.4f}'
+            formula_transformer = f'Transformer: y = {slope_transformer:.4f}x + {intercept_transformer:.4f}'
+            
+            ax4.text(0.02, 0.98, formula_lstm, transform=ax4.transAxes, fontsize=7, 
+                    verticalalignment='top', color='blue', bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.8))
+            ax4.text(0.02, 0.85, formula_transformer, transform=ax4.transAxes, fontsize=7, 
+                    verticalalignment='top', color='red', bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.8))
             
             ax4.set_ylabel('|Error|', fontsize=8)
             ax4.set_xlabel('Date', fontsize=10)
@@ -575,10 +555,10 @@ def evaluate_models_for_ar(test_AR, lstm_path, transformer_path, transformer_par
         trfm_params = {
             'Time Window': transformer_params['time_window'],
             'Rid of Top': transformer_params['rid_of_top'], 
-            'Input Len': num_in,  # Use AR-specific num_in
+            'Input Len': num_in,
             'Layers': transformer_params['num_layers'],
             'Hidden': transformer_params['hidden_size'],
-            'Epochs': "400",  # Fixed value as in original
+            'Epochs': "400",
             'LR': transformer_params['learning_rate']
         }
 
@@ -621,11 +601,9 @@ def evaluate_models_for_ar(test_AR, lstm_path, transformer_path, transformer_par
             
             metric_rows.append([label, lstm_str, transformer_str])
 
-        # --- Summary tables at bottom ---
         metrics_ax = fig.add_axes([0.15, -0.045, 0.3, 0.12])
         metrics_ax.axis('off')
 
-        # Add title for the metrics table
         metrics_ax.text(0.5, 1, 'Overall Performance Metrics', 
                        ha='center', va='center', fontsize=12)
 
@@ -645,7 +623,6 @@ def evaluate_models_for_ar(test_AR, lstm_path, transformer_path, transformer_par
         metrics_table.set_fontsize(10)
         metrics_table.scale(1, 1.3)
 
-        # Add grid lines, bold header, and alternating row shading for metrics table
         for (row, col), cell in metrics_table.get_celld().items():
             cell.set_edgecolor('gray')
             cell.set_linewidth(0.5)
@@ -678,7 +655,6 @@ def evaluate_models_for_ar(test_AR, lstm_path, transformer_path, transformer_par
         params_table.set_fontsize(10)
         params_table.scale(1, 1.3)
 
-        # Add grid lines, bold header, and alternating row shading for parameters table
         for (row, col), cell in params_table.get_celld().items():
             cell.set_edgecolor('gray')
             cell.set_linewidth(0.5)
@@ -702,6 +678,9 @@ def evaluate_models_for_ar(test_AR, lstm_path, transformer_path, transformer_par
         cropped = img.crop((0, 0, w, h - 500))
         cropped.save(out)
         print(f"Comparison plot saved to: {out}")
+        
+        # Return the path to the saved image for potential wandb artifact upload
+        return out
 
     except Exception as e:
         import traceback
@@ -757,7 +736,6 @@ if __name__ == '__main__':
         'dropout': args.dropout
     }
     
-    # Create output directory if it doesn't exist
     os.makedirs(args.output_dir, exist_ok=True)
     
     for ar in [11698,11726,13165,13179,13183]:
