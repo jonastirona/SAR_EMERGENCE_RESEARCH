@@ -1,0 +1,6 @@
+# Please go to this website https://pytorch.org/get-started/locally/ and download the appropriate torch
+numpy
+matplotlib
+pillow
+scikit-learn
+astropy
