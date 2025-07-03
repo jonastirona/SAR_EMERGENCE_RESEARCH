@@ -1,23 +1,14 @@
 import matplotlib.pyplot as plt
 import warnings
-warnings.filterwarnings('ignore')
-from datetime import datetime
 import numpy as np
 import sys
-from PIL import Image
-from sklearn.model_selection import train_test_split
-from functions import split_image, get_piece_means, dtws, lstm_ready, training_loop, training_loop_w_stats, LSTM, split_sequences, min_max_scaling
+from functions import  lstm_ready, training_loop_w_stats, LSTM, min_max_scaling
 import time
 import torch
-import torch.nn as nn
-import torch.optim as optim
-from torch.optim.lr_scheduler import StepLR, ExponentialLR, ReduceLROnPlateau
-from torch.utils.data import Dataset, TensorDataset, DataLoader
-from sklearn.preprocessing import StandardScaler, MinMaxScaler
-import torch.distributed as dist
-from torch.nn.parallel import DistributedDataParallel
 import os
 from matplotlib.backends.backend_pdf import PdfPages
+
+warnings.filterwarnings('ignore')
 
 start_time = time.time()
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu') # Define the device (either 'cuda' for GPU or 'cpu' for CPU)
