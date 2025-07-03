@@ -128,6 +128,9 @@ def plot_frame_difference_metric(frame_diffs,cor_file):
 ##### Sept 18th and later
 
 def min_max_scaling(arr, min_val, max_val):
+    """
+    Set values 
+    """
     return (arr - min_val) / (max_val - min_val)
 
 def lstm_ready(tile,size,power_maps,intensities,num_in,num_pred):#,min_p,max_p,min_i,max_i):

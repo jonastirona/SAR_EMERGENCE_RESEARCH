@@ -54,13 +54,13 @@ print('Load data and split in tiles for {} ARs'.format(len(ARs)))
 all_inputs = []
 all_intensities = []
 for AR in ARs_:
-    power_maps = np.load('/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/data/AR{}/mean_pmdop{}_flat.npz'.format(AR,AR),allow_pickle=True) 
-    mag_flux = np.load('/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/data/AR{}/mean_mag{}_flat.npz'.format(AR,AR),allow_pickle=True)
-    intensities = np.load('/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/data/AR{}/mean_int{}_flat.npz'.format(AR,AR),allow_pickle=True) 
-    power_maps23 = power_maps['arr_0']
-    power_maps34 = power_maps['arr_1']
-    power_maps45 = power_maps['arr_2']
-    power_maps56 = power_maps['arr_3']
+    pm_and_flux = np.load('../data/AR{}/mean_pmdop{}_flat.npz'.format(AR,AR),allow_pickle=True) 
+    mag_flux = np.load('../data/AR{}/mean_mag{}_flat.npz'.format(AR,AR),allow_pickle=True)
+    intensities = np.load('../data/AR{}/mean_int{}_flat.npz'.format(AR,AR),allow_pickle=True) 
+    power_maps23 = pm_and_flux['arr_0']
+    power_maps34 = pm_and_flux['arr_1']
+    power_maps45 = pm_and_flux['arr_2']
+    power_maps56 = pm_and_flux['arr_3']
     mag_flux = mag_flux['arr_0']
     intensities = intensities['arr_0']
     # Trim array to get rid of top and bottom 0 tiles
@@ -79,8 +79,8 @@ for AR in ARs_:
     mag_flux = min_max_scaling(mag_flux, min_m, max_m)
     intensities = min_max_scaling(intensities, min_i, max_i)
     # Reshape mag_flux to have an extra dimension and then put it with pmaps
-    mag_flux_reshaped = np.expand_dims(mag_flux, axis=1)
-    pm_and_flux = np.concatenate([stacked_maps, mag_flux_reshaped], axis=1)
+    mag_flux_reshaped = np.expand_dims(mag_flux, axis=1) #TODO: change to intensities 
+    pm_and_flux = np.concatenate([stacked_maps, mag_flux_reshaped], axis=1) #TODO: change mag flux reshaped to intensities
     # append all ARs
     all_inputs.append(pm_and_flux)
     all_intensities.append(intensities)
@@ -96,7 +96,7 @@ loss_fn = torch.nn.MSELoss()  #torch.nn.L1Loss() #   # mean-squared error for re
 
 # Define the path for the results file
 # JONAS: CHANGED THIS TO MY LOCAL PATH
-result_file_path = os.path.join("/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/lstm/results.txt")
+result_file_path = os.path.join("../lstm/results.txt")
 os.makedirs(os.path.dirname(result_file_path), exist_ok=True)
 
 # Open the file once, before the loop
@@ -106,13 +106,13 @@ with open(result_file_path, "w") as file:
     
     # Iterate over ARs and tiles, writing results to the same file
     for AR_ in range(len(ARs)):
-        power_maps = all_inputs[:,:,:,AR_] #change to inputs, its not only power maps
+        pm_and_flux = all_inputs[:,:,:,AR_] #change to inputs, its not only power maps
         intensities = all_intensities[:,:,AR_]
         for tile in range(tiles):
             optimiser = torch.optim.Adam(lstm.parameters(), lr=learning_rate) # WAS MOVED HERE, SEEMS MORE CORRECT
             print('AR{} - Tile: {}'.format(ARs[AR_],tile))
-            X_train, y_train = lstm_ready(tile,size,power_maps,intensities,num_in,num_pred)
-            X_test, y_test = lstm_ready(int(tiles/2),size,power_maps,intensities,num_in,num_pred)
+            X_train, y_train = lstm_ready(tile,size,pm_and_flux,intensities,num_in,num_pred)
+            X_test, y_test = lstm_ready(int(tiles/2),size,pm_and_flux,intensities,num_in,num_pred)
             # reshaping to rows, timestamps, features
             X_train_final = torch.reshape(X_train,(X_train.shape[0], num_in, X_train.shape[2]))
             X_test_final = torch.reshape(X_test,(X_test.shape[0], num_in, X_test.shape[2])) 
@@ -137,7 +137,7 @@ with open(result_file_path, "w") as file:
                 file.write(f"{epoch}, {train_loss:.5f}, {test_loss:.5f}, {lr:.5f}\n")
 
 # Create PDF with loss curves
-pdf_path = os.path.join("/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/lstm/results", f"t{num_pred}_r{rid_of_top}_i{num_in}_n{num_layers}_h{hidden_size}_e{n_epochs}_l{learning_rate}_loss_curves.pdf")
+pdf_path = os.path.join("../lstm/results", f"t{num_pred}_r{rid_of_top}_i{num_in}_n{num_layers}_h{hidden_size}_e{n_epochs}_l{learning_rate}_loss_curves.pdf")
 
 with PdfPages(pdf_path) as pdf:
     # Create summary plots
@@ -178,6 +178,6 @@ print(f"Loss curves saved at: {pdf_path}")
 
 # Save the model weights
 # JONAS: CHANGED THIS TO MY LOCAL PATH
-torch.save(lstm.state_dict(),'/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/lstm/results/t{}_r{}_i{}_n{}_h{}_e{}_l{}_d{}.pth'.format(num_pred,rid_of_top,num_in,num_layers,hidden_size,n_epochs,learning_rate,dropout))
+torch.save(lstm.state_dict(),'../lstm/results/t{}_r{}_i{}_n{}_h{}_e{}_l{}_d{}.pth'.format(num_pred,rid_of_top,num_in,num_layers,hidden_size,n_epochs,learning_rate,dropout))
 end_time = time.time()
 print("Elapsed time: {} minutes".format((end_time - start_time)/60))
