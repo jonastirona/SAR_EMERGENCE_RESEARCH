@@ -45,9 +45,9 @@ print('Load data and split in tiles for {} ARs'.format(len(ARs)))
 all_inputs = []
 all_flux = []
 for AR in ARs_:
-    pm_and_int = np.load('/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/data/AR{}/mean_pmdop{}_flat.npz'.format(AR,AR),allow_pickle=True) 
-    mag_flux = np.load('/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/data/AR{}/mean_mag{}_flat.npz'.format(AR,AR),allow_pickle=True)
-    flux = np.load('/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/data/AR{}/mean_int{}_flat.npz'.format(AR,AR),allow_pickle=True) 
+    pm_and_int = np.load('/mmfs1/project/mx6/ebd/SAR_EMERGENCE_RESEARCH/data/AR{}/mean_pmdop{}_flat.npz'.format(AR,AR),allow_pickle=True) 
+    mag_flux = np.load('/mmfs1/project/mx6/ebd/SAR_EMERGENCE_RESEARCH/data/AR{}/mean_mag{}_flat.npz'.format(AR,AR),allow_pickle=True)
+    flux = np.load('/mmfs1/project/mx6/ebd/SAR_EMERGENCE_RESEARCH/data/AR{}/mean_int{}_flat.npz'.format(AR,AR),allow_pickle=True) 
     power_maps23 = pm_and_int['arr_0']
     power_maps34 = pm_and_int['arr_1']
     power_maps45 = pm_and_int['arr_2']
@@ -93,7 +93,7 @@ loss_fn = torch.nn.MSELoss()  #torch.nn.L1Loss() #   # mean-squared error for re
 
 # Define the path for the results file
 # JONAS: CHANGED THIS TO MY LOCAL PATH
-result_file_path = os.path.join("/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/lstm/results.txt")
+result_file_path = os.path.join("/mmfs1/project/mx6/ebd/SAR_EMERGENCE_RESEARCH/lstm/results.txt")
 os.makedirs(os.path.dirname(result_file_path), exist_ok=True)
 
 # Open the file once, before the loop
@@ -134,7 +134,7 @@ with open(result_file_path, "w") as file:
                 file.write(f"{epoch}, {train_loss:.5f}, {test_loss:.5f}, {lr:.5f}\n")
 
 # Create PDF with loss curves
-pdf_path = os.path.join("/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/lstm/results", f"t{num_pred}_r{rid_of_top}_i{num_in}_n{num_layers}_h{hidden_size}_e{n_epochs}_l{learning_rate}_loss_curves.pdf")
+pdf_path = os.path.join("/mmfs1/project/mx6/ebd/SAR_EMERGENCE_RESEARCH/lstm/results", f"t{num_pred}_r{rid_of_top}_i{num_in}_n{num_layers}_h{hidden_size}_e{n_epochs}_l{learning_rate}_loss_curves.pdf")
 
 with PdfPages(pdf_path) as pdf:
     # Create summary plots
@@ -175,6 +175,6 @@ print(f"Loss curves saved at: {pdf_path}")
 
 # Save the model weights
 # JONAS: CHANGED THIS TO MY LOCAL PATH
-torch.save(lstm.state_dict(),'/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/lstm/results/t{}_r{}_i{}_n{}_h{}_e{}_l{}_d{}.pth'.format(num_pred,rid_of_top,num_in,num_layers,hidden_size,n_epochs,learning_rate,dropout))
+torch.save(lstm.state_dict(),'/mmfs1/project/mx6/ebd/SAR_EMERGENCE_RESEARCH/lstm/results/t{}_r{}_i{}_n{}_h{}_e{}_l{}_d{}.pth'.format(num_pred,rid_of_top,num_in,num_layers,hidden_size,n_epochs,learning_rate,dropout))
 end_time = time.time()
 print("Elapsed time: {} minutes".format((end_time - start_time)/60))
