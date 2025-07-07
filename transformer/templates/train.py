@@ -474,7 +474,7 @@ def run_single_experiment(config: Dict[str, Any], device: torch.device, learning
     print(f"Number of layers: {config['num_layers']} (fixed)")
     print(f"Output dim: {config['num_pred']}")
     print(f"Dropout: {config['dropout']}")
-    print(f"Learning rate: {learning_rate}")
+    print(f"Learning rate: {config['learning_rate']}")
     print(f"Device: {device}")
     
     # Count model parameters
@@ -686,22 +686,22 @@ def run_single_experiment(config: Dict[str, Any], device: torch.device, learning
             # Calculate unique global step for this trial and epoch
             global_step = global_step_offset + epoch
             
-            # Log per-epoch metrics with lr prefix and unique global step
-            lr_str = f"{learning_rate:.4f}"
+            # Log per-epoch metrics with batch size prefix and unique global step
+            bs_str = f"{batch_size}"
             metrics_to_log = {
-                f'lr_{lr_str}/train_loss': epoch_train_loss,
-                f'lr_{lr_str}/test_loss': epoch_test_loss,
-                f'lr_{lr_str}/test_emergence_rmse': test_emergence_metrics['emergence_rmse'],
-                f'lr_{lr_str}/test_emergence_mse': test_emergence_metrics.get('emergence_mse', float('nan')),
-                f'lr_{lr_str}/test_emergence_mae': test_emergence_metrics.get('emergence_mae', float('nan')),
-                f'lr_{lr_str}/test_emergence_r2': test_emergence_metrics.get('emergence_r2', float('nan')),
-                f'lr_{lr_str}/test_overall_rmse': test_emergence_metrics.get('overall_rmse', float('nan')),
-                f'lr_{lr_str}/test_overall_mse': test_emergence_metrics.get('overall_mse', float('nan')),
-                f'lr_{lr_str}/test_overall_mae': test_emergence_metrics.get('overall_mae', float('nan')),
-                f'lr_{lr_str}/test_overall_r2': test_emergence_metrics.get('overall_r2', float('nan')),
-                f'lr_{lr_str}/learning_rate': optimizer.param_groups[0]['lr'],
-                f'lr_{lr_str}/epoch': epoch,
-                # Also log without lr prefix for easy cross-trial comparison
+                f'bs_{bs_str}/train_loss': epoch_train_loss,
+                f'bs_{bs_str}/test_loss': epoch_test_loss,
+                f'bs_{bs_str}/test_emergence_rmse': test_emergence_metrics['emergence_rmse'],
+                f'bs_{bs_str}/test_emergence_mse': test_emergence_metrics.get('emergence_mse', float('nan')),
+                f'bs_{bs_str}/test_emergence_mae': test_emergence_metrics.get('emergence_mae', float('nan')),
+                f'bs_{bs_str}/test_emergence_r2': test_emergence_metrics.get('emergence_r2', float('nan')),
+                f'bs_{bs_str}/test_overall_rmse': test_emergence_metrics.get('overall_rmse', float('nan')),
+                f'bs_{bs_str}/test_overall_mse': test_emergence_metrics.get('overall_mse', float('nan')),
+                f'bs_{bs_str}/test_overall_mae': test_emergence_metrics.get('overall_mae', float('nan')),
+                f'bs_{bs_str}/test_overall_r2': test_emergence_metrics.get('overall_r2', float('nan')),
+                f'bs_{bs_str}/learning_rate': optimizer.param_groups[0]['lr'],
+                f'bs_{bs_str}/epoch': epoch,
+                # Also log without batch size prefix for easy cross-trial comparison
                 'train_loss': epoch_train_loss,
                 'test_loss': epoch_test_loss,
                 'test_emergence_rmse': test_emergence_metrics['emergence_rmse'],
@@ -714,8 +714,8 @@ def run_single_experiment(config: Dict[str, Any], device: torch.device, learning
                 'test_overall_r2': test_emergence_metrics.get('overall_r2', float('nan')),
                 'learning_rate': optimizer.param_groups[0]['lr'],
                 'epoch': epoch,
-                'current_lr': learning_rate,  # Add current LR for filtering
-                'trial_id': f'lr_{lr_str}'  # Add trial identifier
+                'current_batch_size': batch_size,  # Add current batch size for filtering
+                'trial_id': f'bs_{bs_str}'  # Add trial identifier
             }
             
             # Log with unique global step to avoid conflicts
@@ -755,34 +755,31 @@ def run_single_experiment(config: Dict[str, Any], device: torch.device, learning
         'best_model_state': best_model_state
     }
 
-def create_cross_trial_comparison_plots(all_results: Dict[float, Dict], config: Dict) -> None:
-    """Create comprehensive comparison plots across all learning rate trials with separate grids for each metric."""
+def create_cross_trial_comparison_plots(all_results: Dict[int, Dict], config: Dict) -> None:  # Changed from float to int for batch sizes
+    """Create comprehensive comparison plots across all batch size trials."""
     
     # Extract data for plotting
-    learning_rates = sorted(all_results.keys())
+    batch_sizes = sorted(all_results.keys())
     
     # Create two comprehensive figures - one for overall metrics, one for emergence metrics
-    
-    # 1. Overall Performance Metrics - 2x2 grid
-    fig1, axes1 = plt.subplots(2, 2, figsize=(20, 14))  # Increased figure size
-    fig1.suptitle('Overall Performance Metrics Across Learning Rates (3 Layers, 4 Heads)', fontsize=18, y=0.95)
+    fig1, axes1 = plt.subplots(2, 2, figsize=(20, 14))
+    fig1.suptitle('Overall Performance Metrics Across Batch Sizes (3 Layers, 4 Heads)', fontsize=18, y=0.95)
     
     overall_metrics = ['overall_mse', 'overall_rmse', 'overall_mae', 'overall_r2']
     metric_labels = ['MSE', 'RMSE', 'MAE', 'R²']
     colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728']
     
-    # Flatten axes for easier iteration
     axes1_flat = axes1.flatten()
     
-    # Calculate appropriate bar width based on number of learning rates
-    bar_width = min(0.6, 1.2 / len(learning_rates))  # Adaptive bar width - increased for thicker bars
+    # Calculate appropriate bar width based on number of batch sizes
+    bar_width = min(0.6, 1.2 / len(batch_sizes)) if batch_sizes else 0.6  # Added safety check
     
     for i, (metric, label, color) in enumerate(zip(overall_metrics, metric_labels, colors)):
         ax = axes1_flat[i]
-        values = [all_results[lr][metric] for lr in learning_rates]
+        values = [all_results[bs][metric] for bs in batch_sizes]  # Changed lr to bs
         
         # Create bar plot with adaptive width
-        bars = ax.bar(range(len(learning_rates)), values, color=color, alpha=0.8, width=bar_width)
+        bars = ax.bar(range(len(batch_sizes)), values, color=color, alpha=0.8, width=bar_width)
         
         # Add value labels on bars with minimal offset - directly on top
         max_val = max(values)
@@ -796,22 +793,22 @@ def create_cross_trial_comparison_plots(all_results: Dict[float, Dict], config: 
             ax.text(j, height + text_offset,
                     f'{value:.4f}', ha='center', va='bottom', fontsize=9, fontweight='bold')
         
-        ax.set_xlabel('Learning Rate', fontsize=12)
+        ax.set_xlabel('Batch Size', fontsize=12)
         ax.set_ylabel(f'{label} Value', fontsize=12)
         ax.set_title(f'Overall {label}', fontsize=14, pad=20)
         
         # Set x-axis ticks and labels
-        ax.set_xticks(range(len(learning_rates)))
-        ax.set_xticklabels([f'{lr:.4f}' for lr in learning_rates])
+        ax.set_xticks(range(len(batch_sizes)))
+        ax.set_xticklabels([f'{bs}' for bs in batch_sizes])  # Remove .4f format since batch sizes are integers
         
         # Adjust y-axis limits to accommodate text with less space
         ax.set_ylim([min_val - val_range * 0.1, max_val + val_range * 0.15])  # Reduced top margin
         ax.grid(True, alpha=0.3)
         
         # Add trend line
-        z = np.polyfit(range(len(learning_rates)), values, 1)
+        z = np.polyfit(range(len(batch_sizes)), values, 1)
         p = np.poly1d(z)
-        ax.plot(range(len(learning_rates)), p(range(len(learning_rates))), "--", alpha=0.7, color='red', linewidth=2)
+        ax.plot(range(len(batch_sizes)), p(range(len(batch_sizes))), "--", alpha=0.7, color='red', linewidth=2)
         
         # Add trend line formula to corner
         slope, intercept = z[0], z[1]
@@ -825,7 +822,7 @@ def create_cross_trial_comparison_plots(all_results: Dict[float, Dict], config: 
     
     # 2. Emergence Window Performance Metrics - 2x2 grid  
     fig2, axes2 = plt.subplots(2, 2, figsize=(20, 14))  # Increased figure size
-    fig2.suptitle('Emergence Window Performance Metrics (±12 hrs) Across Learning Rates (3 Layers, 4 Heads)', fontsize=18, y=0.95)
+    fig2.suptitle('Emergence Window Performance Metrics (±12 hrs) Across Batch Sizes (3 Layers, 4 Heads)', fontsize=18, y=0.95)
     
     emergence_metrics = ['emergence_mse', 'emergence_rmse', 'emergence_mae', 'emergence_r2']
     
@@ -834,10 +831,10 @@ def create_cross_trial_comparison_plots(all_results: Dict[float, Dict], config: 
     
     for i, (metric, label, color) in enumerate(zip(emergence_metrics, metric_labels, colors)):
         ax = axes2_flat[i]
-        values = [all_results[lr][metric] for lr in learning_rates]
+        values = [all_results[bs][metric] for bs in batch_sizes]
         
         # Create bar plot with adaptive width
-        bars = ax.bar(range(len(learning_rates)), values, color=color, alpha=0.8, width=bar_width)
+        bars = ax.bar(range(len(batch_sizes)), values, color=color, alpha=0.8, width=bar_width)
         
         # Add value labels on bars with minimal offset - directly on top
         max_val = max(values)
@@ -850,22 +847,22 @@ def create_cross_trial_comparison_plots(all_results: Dict[float, Dict], config: 
             ax.text(j, height + text_offset,
                     f'{value:.4f}', ha='center', va='bottom', fontsize=9, fontweight='bold')
         
-        ax.set_xlabel('Learning Rate', fontsize=12)
+        ax.set_xlabel('Batch Size', fontsize=12)
         ax.set_ylabel(f'{label} Value', fontsize=12)
         ax.set_title(f'Emergence Window {label}', fontsize=14, pad=20)
         
         # Set x-axis ticks and labels
-        ax.set_xticks(range(len(learning_rates)))
-        ax.set_xticklabels([f'{lr:.4f}' for lr in learning_rates])
+        ax.set_xticks(range(len(batch_sizes)))
+        ax.set_xticklabels([f'{bs}' for bs in batch_sizes])
         
         # Adjust y-axis limits to accommodate text with less space
         ax.set_ylim([min_val - val_range * 0.1, max_val + val_range * 0.15])  # Reduced top margin
         ax.grid(True, alpha=0.3)
         
         # Add trend line
-        z = np.polyfit(range(len(learning_rates)), values, 1)
+        z = np.polyfit(range(len(batch_sizes)), values, 1)
         p = np.poly1d(z)
-        ax.plot(range(len(learning_rates)), p(range(len(learning_rates))), "--", alpha=0.7, color='red', linewidth=2)
+        ax.plot(range(len(batch_sizes)), p(range(len(batch_sizes))), "--", alpha=0.7, color='red', linewidth=2)
         
         # Add trend line formula to corner
         slope, intercept = z[0], z[1]
@@ -879,21 +876,21 @@ def create_cross_trial_comparison_plots(all_results: Dict[float, Dict], config: 
     
     # 3. Emergence Timing Accuracy - strip plots showing distributions
     fig3, ax3 = plt.subplots(1, 1, figsize=(14, 8))
-    fig3.suptitle('Emergence Timing Difference Distributions Across Learning Rates (3 Layers, 4 Heads)', fontsize=16, y=0.95)
+    fig3.suptitle('Emergence Timing Difference Distributions Across Batch Sizes (3 Layers, 4 Heads)', fontsize=16, y=0.95)
     
-    # Collect individual timing differences for each learning rate
+    # Collect individual timing differences for each batch size
     timing_data = []
     timing_stats = []
     
     print("DEBUG: Examining timing difference data for strip plots...")
     
-    for lr in learning_rates:
-        individual_diffs = all_results[lr].get('individual_timing_diffs', [])
+    for bs in batch_sizes:
+        individual_diffs = all_results[bs].get('individual_timing_diffs', [])
         # Filter out None and NaN values
         valid_diffs = [x for x in individual_diffs if x is not None and not np.isnan(x)]
         timing_data.append(valid_diffs)
         
-        print(f"  LR {lr}: {len(individual_diffs)} total, {len(valid_diffs)} valid timing differences")
+        print(f"  BS {bs}: {len(individual_diffs)} total, {len(valid_diffs)} valid timing differences")
         if valid_diffs:
             print(f"    Range: [{min(valid_diffs):.1f}, {max(valid_diffs):.1f}] hours")
             print(f"    Sample values: {valid_diffs[:5]}")
@@ -913,7 +910,7 @@ def create_cross_trial_comparison_plots(all_results: Dict[float, Dict], config: 
     
     if has_any_data:
         # Plot individual data points with jitter
-        for i, (lr, data, stats) in enumerate(zip(learning_rates, timing_data, timing_stats)):
+        for i, (bs, data, stats) in enumerate(zip(batch_sizes, timing_data, timing_stats)):
             if len(data) > 0:
                 # Add jitter to x-coordinates for visibility
                 jitter_amount = 0.15
@@ -923,7 +920,7 @@ def create_cross_trial_comparison_plots(all_results: Dict[float, Dict], config: 
                 # Plot individual points
                 color = colors[i % len(colors)]
                 ax3.scatter(x_positions, data, alpha=0.6, s=40, color=color, 
-                           edgecolors='white', linewidth=0.5, zorder=3, label=f'LR {lr:.4f}')
+                           edgecolors='white', linewidth=0.5, zorder=3, label=f'BS {bs}')
                 
                 # Plot mean as a larger marker
                 if not np.isnan(stats['mean']):
@@ -939,7 +936,7 @@ def create_cross_trial_comparison_plots(all_results: Dict[float, Dict], config: 
                                    alpha=0.8, zorder=4)
         
         # Add mean and std annotations
-        for i, (lr, stats) in enumerate(zip(learning_rates, timing_stats)):
+        for i, (bs, stats) in enumerate(zip(batch_sizes, timing_stats)):
             if not np.isnan(stats['mean']):
                 # Position text above the highest points
                 max_val = max([max(data) if data else stats['mean'] for data in timing_data])
@@ -955,18 +952,18 @@ def create_cross_trial_comparison_plots(all_results: Dict[float, Dict], config: 
         
     else:
         # No valid data - show message
-        ax3.text(0.5, 0.5, 'No Valid Timing Difference Data\nAcross Any Learning Rates', 
+        ax3.text(0.5, 0.5, 'No Valid Timing Difference Data\nAcross Any Batch Sizes', 
                 ha='center', va='center', transform=ax3.transAxes, fontsize=16,
                 bbox=dict(boxstyle='round,pad=0.5', facecolor='lightgray', alpha=0.8))
         plot_type = "No Data Available"
     
-    ax3.set_xlabel('Learning Rate', fontsize=12)
+    ax3.set_xlabel('Batch Size', fontsize=12)
     ax3.set_ylabel('Emergence Timing Difference (hours)', fontsize=12)
     ax3.set_title(f'Distribution: predicted_time - observed_time ({plot_type})', fontsize=14, pad=20)
     
     # Set x-axis ticks and labels
-    ax3.set_xticks(range(len(learning_rates)))
-    ax3.set_xticklabels([f'{lr:.4f}' for lr in learning_rates])
+    ax3.set_xticks(range(len(batch_sizes)))
+    ax3.set_xticklabels([f'{bs}' for bs in batch_sizes])
     
     # Customize the plot
     ax3.grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
@@ -1010,7 +1007,7 @@ def create_cross_trial_comparison_plots(all_results: Dict[float, Dict], config: 
     
     # 4. Combined Summary Plot - all key metrics in one view
     fig4, axes4 = plt.subplots(2, 3, figsize=(24, 16))  # Increased figure size significantly
-    fig4.suptitle('Complete Performance Summary Across Learning Rates (3 Layers, 4 Heads)', fontsize=20, y=0.95)
+    fig4.suptitle('Complete Performance Summary Across Batch Sizes (3 Layers, 4 Heads)', fontsize=20, y=0.95)
     
     # List of all metrics to plot
     all_metrics = [
@@ -1026,10 +1023,10 @@ def create_cross_trial_comparison_plots(all_results: Dict[float, Dict], config: 
     
     for i, (metric, title, color) in enumerate(all_metrics):
         ax = axes4_flat[i]
-        values = [all_results[lr][metric] for lr in learning_rates]
+        values = [all_results[bs][metric] for bs in batch_sizes]
         
         # Create bar plot with adaptive width
-        bars = ax.bar(range(len(learning_rates)), values, color=color, alpha=0.8, width=bar_width)
+        bars = ax.bar(range(len(batch_sizes)), values, color=color, alpha=0.8, width=bar_width)
         
         # Add value labels on bars with minimal offset - directly on top
         max_val = max(values) if values else 1.0
@@ -1051,13 +1048,13 @@ def create_cross_trial_comparison_plots(all_results: Dict[float, Dict], config: 
             else:
                 ax.text(j, height + text_offset, f'{value:.3f}', ha='center', va='bottom', fontsize=8, fontweight='bold')
         
-        ax.set_xlabel('Learning Rate', fontsize=11)
+        ax.set_xlabel('Batch Size', fontsize=11)
         ax.set_ylabel(title.split()[-1], fontsize=11)
         ax.set_title(title, fontsize=13, pad=15)
         
         # Set x-axis ticks and labels
-        ax.set_xticks(range(len(learning_rates)))
-        ax.set_xticklabels([f'{lr:.3f}' for lr in learning_rates], rotation=45, ha='right', fontsize=9)
+        ax.set_xticks(range(len(batch_sizes)))
+        ax.set_xticklabels([f'{bs}' for bs in batch_sizes], rotation=45, ha='right', fontsize=9)
         
         # Adjust y-axis limits to accommodate text with less space
         if metric == 'emergence_time_diff':
@@ -1070,9 +1067,9 @@ def create_cross_trial_comparison_plots(all_results: Dict[float, Dict], config: 
         
         # Add trend line
         if len(values) > 1:  # Only add trend line if we have multiple values
-            z = np.polyfit(range(len(learning_rates)), values, 1)
+            z = np.polyfit(range(len(batch_sizes)), values, 1)
             p = np.poly1d(z)
-            ax.plot(range(len(learning_rates)), p(range(len(learning_rates))), "--", alpha=0.7, color='red', linewidth=1.5)
+            ax.plot(range(len(batch_sizes)), p(range(len(batch_sizes))), "--", alpha=0.7, color='red', linewidth=1.5)
         
         # Add trend line formula to corner
         slope, intercept = z[0], z[1]
@@ -1086,31 +1083,32 @@ def create_cross_trial_comparison_plots(all_results: Dict[float, Dict], config: 
     
     # Create summary table with key metrics
     summary_data = []
-    for lr in learning_rates:
+    for bs in batch_sizes:
         row = {
-            'learning_rate': lr,
-            'overall_rmse': all_results[lr]['overall_rmse'],
-            'overall_r2': all_results[lr]['overall_r2'],
-            'emergence_rmse': all_results[lr]['emergence_rmse'],
-            'emergence_r2': all_results[lr]['emergence_r2'],
-            'emergence_time_error': all_results[lr]['emergence_time_diff']
+            'batch_size': bs,
+            'overall_rmse': all_results[bs]['overall_rmse'],
+            'overall_r2': all_results[bs]['overall_r2'],
+            'emergence_rmse': all_results[bs]['emergence_rmse'],
+            'emergence_r2': all_results[bs]['emergence_r2'],
+            'emergence_time_error': all_results[bs]['emergence_time_diff']
         }
         summary_data.append(row)
     
     summary_df = pd.DataFrame(summary_data)
-    wandb.log({"lr_comparison_summary": wandb.Table(dataframe=summary_df)})
+    wandb.log({"bs_comparison_summary": wandb.Table(dataframe=summary_df)})
 
-def create_epoch_mse_statistics_plot(all_results: Dict[float, Dict], config: Dict) -> None:
-    """Create visualization showing mean±std of MSE across all epochs for each learning rate."""
+def create_epoch_mse_statistics_plot(all_results: Dict[int, Dict], config: Dict) -> None:
+    """Create visualization showing mean±std of MSE across all epochs for each batch size."""
     
-    learning_rates = sorted(all_results.keys())
+    # Keys are batch sizes, not learning rates
+    batch_sizes = sorted(all_results.keys())
     
-    # Calculate statistics for each learning rate
+    # Calculate statistics for each batch size
     emergence_stats = []
     overall_stats = []
     
-    for lr in learning_rates:
-        results = all_results[lr]
+    for bs in batch_sizes:
+        results = all_results[bs]
         
         # Emergence MSE statistics across epochs
         emergence_mses = results.get('test_emergence_mses', [])
@@ -1144,9 +1142,9 @@ def create_epoch_mse_statistics_plot(all_results: Dict[float, Dict], config: Dic
     
     # Create visualization
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 8))
-    fig.suptitle('MSE Statistics Across All Epochs for Each Learning Rate', fontsize=16, y=0.95)
+    fig.suptitle('MSE Statistics Across All Epochs for Each Batch Size', fontsize=16, y=0.95)
     
-    x_pos = range(len(learning_rates))
+    x_pos = range(len(batch_sizes))
     bar_width = 0.6
     
     # Emergence MSE plot
@@ -1158,7 +1156,7 @@ def create_epoch_mse_statistics_plot(all_results: Dict[float, Dict], config: Dic
                    label='Mean ± Std')
     
     # Add statistics text
-    for i, (lr, stat) in enumerate(zip(learning_rates, emergence_stats)):
+    for i, (bs, stat) in enumerate(zip(batch_sizes, emergence_stats)):
         if not np.isnan(stat['mean']):
             text = f"μ={stat['mean']:.4f}\nσ={stat['std']:.4f}\nmin={stat['min']:.4f}\nmax={stat['max']:.4f}\n(n={stat['count']})"
             ax1.text(i, stat['mean'] + stat['std'] + max(emergence_means) * 0.05, text, 
@@ -1166,10 +1164,10 @@ def create_epoch_mse_statistics_plot(all_results: Dict[float, Dict], config: Dic
                     bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.8))
     
     ax1.set_title('Emergence MSE Across All Epochs', fontsize=14)
-    ax1.set_xlabel('Learning Rate', fontsize=12)
+    ax1.set_xlabel('Batch Size', fontsize=12)
     ax1.set_ylabel('Emergence MSE', fontsize=12)
     ax1.set_xticks(x_pos)
-    ax1.set_xticklabels([f'{lr:.3f}' for lr in learning_rates])
+    ax1.set_xticklabels([f'{bs}' for bs in batch_sizes])
     ax1.grid(True, alpha=0.3)
     
     # Overall MSE plot
@@ -1181,7 +1179,7 @@ def create_epoch_mse_statistics_plot(all_results: Dict[float, Dict], config: Dic
                    label='Mean ± Std')
     
     # Add statistics text
-    for i, (lr, stat) in enumerate(zip(learning_rates, overall_stats)):
+    for i, (bs, stat) in enumerate(zip(batch_sizes, overall_stats)):
         if not np.isnan(stat['mean']):
             text = f"μ={stat['mean']:.4f}\nσ={stat['std']:.4f}\nmin={stat['min']:.4f}\nmax={stat['max']:.4f}\n(n={stat['count']})"
             ax2.text(i, stat['mean'] + stat['std'] + max(overall_means) * 0.05, text, 
@@ -1189,10 +1187,10 @@ def create_epoch_mse_statistics_plot(all_results: Dict[float, Dict], config: Dic
                     bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.8))
     
     ax2.set_title('Overall MSE Across All Epochs', fontsize=14)
-    ax2.set_xlabel('Learning Rate', fontsize=12)
+    ax2.set_xlabel('Batch Size', fontsize=12)
     ax2.set_ylabel('Overall MSE', fontsize=12)
     ax2.set_xticks(x_pos)
-    ax2.set_xticklabels([f'{lr:.3f}' for lr in learning_rates])
+    ax2.set_xticklabels([f'{bs}' for bs in batch_sizes])
     ax2.grid(True, alpha=0.3)
     
     plt.tight_layout(rect=[0, 0.05, 1, 0.93])
@@ -1201,9 +1199,9 @@ def create_epoch_mse_statistics_plot(all_results: Dict[float, Dict], config: Dic
     
     # Also log the raw statistics as a table
     stats_data = []
-    for i, lr in enumerate(learning_rates):
+    for i, bs in enumerate(batch_sizes):
         stats_data.append({
-            'learning_rate': lr,
+            'batch_size': bs,
             'emergence_mse_mean': emergence_stats[i]['mean'],
             'emergence_mse_std': emergence_stats[i]['std'],
             'emergence_mse_min': emergence_stats[i]['min'],
@@ -1218,10 +1216,10 @@ def create_epoch_mse_statistics_plot(all_results: Dict[float, Dict], config: Dic
     stats_df = pd.DataFrame(stats_data)
     wandb.log({"epoch_mse_statistics_table": wandb.Table(dataframe=stats_df)})
 
-def create_per_trial_mse_statistics(results: Dict, learning_rate: float) -> None:
+def create_per_trial_mse_statistics(results: Dict, batch_size: int) -> None:
     """Create MSE statistics visualization for a single trial showing epoch-wise mean±std."""
     
-    lr_str = f"{learning_rate:.4f}"
+    bs_str = f"{batch_size}"
     
     # Extract MSE data across epochs
     emergence_mses = results.get('test_emergence_mses', [])
@@ -1232,7 +1230,7 @@ def create_per_trial_mse_statistics(results: Dict, learning_rate: float) -> None
     valid_overall = [x for x in overall_mses if not np.isnan(x)]
     
     if not valid_emergence and not valid_overall:
-        print(f"No valid MSE data for LR {learning_rate}")
+        print(f"No valid MSE data for {batch_size}")
         return
     
     # Calculate statistics
@@ -1254,7 +1252,7 @@ def create_per_trial_mse_statistics(results: Dict, learning_rate: float) -> None
     
     # Create visualization
     fig, axes = plt.subplots(1, 2, figsize=(16, 6))
-    fig.suptitle(f'MSE Analysis for Learning Rate {learning_rate}', fontsize=16, y=0.95)
+    fig.suptitle(f'MSE Analysis for Batch Size {batch_size}', fontsize=16, y=0.95)
     
     # 1. Emergence MSE trajectory over epochs
     ax1 = axes[0]
@@ -1287,7 +1285,7 @@ def create_per_trial_mse_statistics(results: Dict, learning_rate: float) -> None
     ax2.legend()
     
     # Add summary statistics text box
-    stats_text = f"""Trial Statistics for LR {learning_rate}:
+    stats_text = f"""Trial Statistics for {batch_size}:
 
 Emergence MSE:
   Mean = {emergence_stats['mean']:.4f}
@@ -1309,15 +1307,15 @@ Overall MSE:
     plt.tight_layout(rect=[0.25, 0.15, 1, 0.93])
     
     # Log to wandb under the specific learning rate tab
-    wandb.log({f'lr_{lr_str}/mse_epoch_analysis': wandb.Image(fig)})
+    wandb.log({f'bs_{bs_str}/mse_epoch_analysis': wandb.Image(fig)})
     plt.close(fig)
     
     # Also log individual statistics
     wandb.log({
-        f'lr_{lr_str}/emergence_mse_mean_across_epochs': emergence_stats['mean'],
-        f'lr_{lr_str}/emergence_mse_std_across_epochs': emergence_stats['std'],
-        f'lr_{lr_str}/overall_mse_mean_across_epochs': overall_stats['mean'],
-        f'lr_{lr_str}/overall_mse_std_across_epochs': overall_stats['std'],
+        f'bs_{bs_str}/emergence_mse_mean_across_epochs': emergence_stats['mean'],
+        f'bs_{bs_str}/emergence_mse_std_across_epochs': emergence_stats['std'],
+        f'bs_{bs_str}/overall_mse_mean_across_epochs': overall_stats['mean'],
+        f'bs_{bs_str}/overall_mse_std_across_epochs': overall_stats['std'],
     })
 
 # Load environment variables from .env file
@@ -1327,11 +1325,11 @@ wandb_api_key = os.environ.get('WANDB_API_KEY')
 wandb_entity = os.environ.get('WANDB_ENTITY')
 wandb_project = os.environ.get('WANDB_PROJECT')
 
+# Login to wandb first
+wandb.login(key=wandb_api_key)
+
 def main():
     print("Starting comprehensive batch size comparison experiment...")
-
-    # Login to wandb first
-    wandb.login(key=wandb_api_key)
 
     # Fixed configuration for all experiments
     config = {
@@ -1339,47 +1337,46 @@ def main():
         'num_in': 110,
         'embed_dim': 64,
         'ff_dim': 128,
-        'num_layers': 3,  # Fixed to 3 layers
-        'dropout': 0.3,   # Set dropout to 0.3
+        'num_layers': 3,
+        'dropout': 0.3,
         'n_epochs': 300,
         'time_window': 12,
         'rid_of_top': 4,
-        'learning_rate': 0.001,  # Set learning rate to 0.001
-        # batch_size will be varied in the experiment
+        'learning_rate': 0.001,  # Fixed learning rate
+        'batch_sizes': [64, 128, 256, 512]  # Add batch sizes to config
     }
 
     # Create models directory for saving best models
     project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
     results_dir = os.path.join(project_root, 'transformer', 'results')
-    search_type = "batch_size_search"  # This is a batch size search experiment
+    search_type = "batch_size_search"
     models_dir = os.path.join(results_dir, search_type)
     os.makedirs(models_dir, exist_ok=True)
     print(f"Models will be saved to: {models_dir}")
 
-    # Batch sizes to test
-    batch_sizes = [64, 128, 256, 512]
-
-    # Initialize wandb run (one run for the sweep, each trial will be a group)
+    # Initialize wandb run - use a single name for the entire batch size search
     wandb.init(
         project=wandb_project,
         entity=wandb_entity,
         config=config,
-        name="batch size search",
-        notes="Grid search comparing transformer performance across batch sizes (64, 128, 256, 512) with constant learning rate (0.001), dropout (0.3), fixed attention head count (4), and 3 layers"
+        name="batch_size_search_all",  # Changed from batch_size_search to be clearer
+        notes="Comparing transformer performance across batch sizes (64, 128, 256, 512) in a single run with constant learning rate (0.001), dropout (0.3), fixed attention heads (4), and 3 layers"
     )
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     all_results = {}
 
-    global_step_counter = 0  # Track global step across all trials
+    global_step_counter = 0
 
-    for batch_size in batch_sizes:
+    for batch_size in config['batch_sizes']:
         print(f"\n{'='*50}")
-        print(f"TRIAL {batch_sizes.index(batch_size) + 1}/{len(batch_sizes)}: Testing batch size {batch_size}")
+        print(f"TRIAL {config['batch_sizes'].index(batch_size) + 1}/{len(config['batch_sizes'])}: Testing batch size {batch_size}")
         print(f"{'='*50}")
 
         try:
-            # Run experiment with global step offset
+            # Create a unique name for this batch size trial
+            trial_name = f"batch_size_{batch_size}"
+            
             results = run_single_experiment(config, device, config['learning_rate'], global_step_counter, batch_size)
             all_results[batch_size] = results
 
@@ -1387,20 +1384,20 @@ def main():
             print(f"Creating MSE statistics for batch size {batch_size}...")
             create_per_trial_mse_statistics(results, batch_size)
 
-            # Save the best model locally
+            # Save the best model with batch size in filename
             model_filename = f"transformer_t{config['time_window']}_r{config['rid_of_top']}_i{config['num_in']}_n{config['num_layers']}_h{config['embed_dim']}_e{config['n_epochs']}_bs{batch_size}_l{config['learning_rate']:.5f}_d{config['dropout']:.1f}.pth"
             model_path = os.path.join(models_dir, model_filename)
             torch.save(results['best_model_state'], model_path)
             print(f"Best model saved to: {model_path}")
 
-            # Save model to wandb as artifact
+            # Save model to wandb as artifact with batch size in name
             model_artifact = wandb.Artifact(
-                name=f"transformer_t{config['time_window']}_r{config['rid_of_top']}_i{config['num_in']}_n{config['num_layers']}_h{config['embed_dim']}_e{config['n_epochs']}_bs{batch_size}_l{config['learning_rate']:.5f}_d{config['dropout']:.1f}".replace('.', '_'),
+                name=f"transformer_bs{batch_size}_t{config['time_window']}_r{config['rid_of_top']}_i{config['num_in']}_n{config['num_layers']}_h{config['embed_dim']}_e{config['n_epochs']}_d{config['dropout']:.1f}",
                 type="model",
                 description=f"Best transformer model for batch size {batch_size} after {config['n_epochs']} epochs",
                 metadata={
                     "batch_size": batch_size,
-                    "learning_rate": config['learning_rate'],
+                    "learning_rate": config['learning_rate'],  # Fixed learning rate
                     "epochs": config['n_epochs'],
                     "embed_dim": config['embed_dim'],
                     "num_heads": 4,
@@ -1425,15 +1422,15 @@ def main():
             # Log trial completion
             wandb.log({
                 f'trial_completion/bs_{batch_size}': 1.0,
-                'completed_trials': batch_sizes.index(batch_size) + 1,
-                'total_trials': len(batch_sizes),
+                'completed_trials': config['batch_sizes'].index(batch_size) + 1,
+                'total_trials': len(config['batch_sizes']),
                 'model_saved_path': model_path
             }, step=global_step_counter - 1)
 
-            print(f"✓ Trial {batch_sizes.index(batch_size) + 1}/{len(batch_sizes)} completed successfully for batch size {batch_size}")
+            print(f"✓ Trial {config['batch_sizes'].index(batch_size) + 1}/{len(config['batch_sizes'])} completed successfully for batch size {batch_size}")
 
         except Exception as e:
-            print(f"✗ ERROR in Trial {batch_sizes.index(batch_size) + 1}/{len(batch_sizes)} for batch size {batch_size}:")
+            print(f"✗ ERROR in Trial {config['batch_sizes'].index(batch_size) + 1}/{len(config['batch_sizes'])} for batch size {batch_size}:")
             print(f"  Exception: {str(e)}")
             import traceback
             traceback.print_exc()
@@ -1441,8 +1438,8 @@ def main():
             # Log the failure
             wandb.log({
                 f'trial_completion/bs_{batch_size}': 0.0,
-                'completed_trials': batch_sizes.index(batch_size) + 1,
-                'total_trials': len(batch_sizes),
+                'completed_trials': config['batch_sizes'].index(batch_size) + 1,
+                'total_trials': len(config['batch_sizes']),
                 'trial_failed': True,
                 'error_message': str(e)
             }, step=global_step_counter + config['n_epochs'] - 1)
@@ -1487,7 +1484,7 @@ def main():
         trial_summary_data.append(trial_data)
         
         # Also log individual trial summary metrics with final step
-        final_step = (batch_sizes.index(batch_size) + 1) * config['n_epochs'] - 1  # Correct step for each trial
+        final_step = (config['batch_sizes'].index(batch_size) + 1) * config['n_epochs'] - 1  # Correct step for each trial
         wandb.log({
             f'final_results/bs_{batch_size}_train_loss': trial_data['train_loss_final'],
             f'final_results/bs_{batch_size}_test_loss': trial_data['test_loss_final'],
@@ -1511,10 +1508,10 @@ def main():
     all_models_artifact = wandb.Artifact(
         name="batch_size_search_all_models",
         type="model_collection",
-        description=f"All transformer models from batch size search experiment with {len(batch_sizes)} batch sizes",
+        description=f"All transformer models from batch size search experiment with {len(config['batch_sizes'])} batch sizes",
         metadata={
             "experiment_type": "batch_size_search",
-            "batch_sizes": batch_sizes,
+            "batch_sizes": config['batch_sizes'],
             "n_epochs": config['n_epochs'],
             "embed_dim": config['embed_dim'],
             "num_heads": 4,
@@ -1529,7 +1526,7 @@ def main():
     )
     
     # Add all model files to the collection artifact
-    for batch_size in batch_sizes:
+    for batch_size in config['batch_sizes']:
         if batch_size in all_results:  # Only add if training was successful
             model_filename = f"transformer_t{config['time_window']}_r{config['rid_of_top']}_i{config['num_in']}_n{config['num_layers']}_h{config['embed_dim']}_e{config['n_epochs']}_bs{batch_size}_l{config['learning_rate']:.5f}_d{config['dropout']:.1f}.pth"
             model_path = os.path.join(models_dir, model_filename)
@@ -1590,7 +1587,7 @@ def main():
     print(f"Search type: {search_type}")
     print(f"Wandb artifacts: Individual models + collection artifact")
     print("\nSaved models:")
-    for batch_size in batch_sizes:
+    for batch_size in config['batch_sizes']:
         model_filename = f"transformer_t{config['time_window']}_r{config['rid_of_top']}_i{config['num_in']}_n{config['num_layers']}_h{config['embed_dim']}_e{config['n_epochs']}_bs{batch_size}_l{config['learning_rate']:.5f}_d{config['dropout']:.1f}.pth"
         model_path = os.path.join(models_dir, model_filename)
         artifact_name = f"transformer_t{config['time_window']}_r{config['rid_of_top']}_i{config['num_in']}_n{config['num_layers']}_h{config['embed_dim']}_e{config['n_epochs']}_bs{batch_size}_l{config['learning_rate']:.5f}_d{config['dropout']:.1f}".replace('.', '_')
@@ -1602,7 +1599,7 @@ def main():
             print(f"  ✗ BS={batch_size}: {model_filename} (MISSING)")
     
     print(f"\nWandb artifact collection: batch_size_search_all_models")
-    print(f"  Contains: {len([batch_size for batch_size in batch_sizes if batch_size in all_results])} models")
+    print(f"  Contains: {len([batch_size for batch_size in config['batch_sizes'] if batch_size in all_results])} models")
     print(f"\nTo download models from wandb:")
     print(f"  # Download individual model")
     print(f"  artifact = wandb.use_artifact('your-entity/sar-emergence/transformer_t12_r4_i110_n3_h64_e300_l0_00100_d0_3:latest')")

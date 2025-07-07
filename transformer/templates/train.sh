@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH --job-name=dropout_0.1_lr_search
+#SBATCH --job-name=batch_size_search
 #SBATCH --partition=gpu
 #SBATCH --account=mx6
 #SBATCH --qos=standard
@@ -22,6 +22,6 @@ cd /mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/transformer/
 
 source /mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/.env
 
-# Run comprehensive attention heads comparison
+# Run comprehensive batch size search
 echo "Starting comprehensive batch size grid search"
 python -u train.py 
