@@ -18,4 +18,4 @@ module load wulver
 source /mmfs1/project/mx6/ebd/SAR_EMERGENCE_RESEARCH/sar/bin/activate
 
 cd /mmfs1/project/mx6/ebd/SAR_EMERGENCE_RESEARCH/lstm/
-python -u train_w_stats.py 12 4 110 5 140 500 0.0012 0.115
+python -u train_w_stats.py 12 4 120 3 64 500 0.01 0.1
