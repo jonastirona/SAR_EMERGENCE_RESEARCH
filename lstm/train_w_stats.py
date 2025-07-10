@@ -47,28 +47,28 @@ all_flux = []
 for AR in ARs_:
     pm_and_int = np.load('/mmfs1/project/mx6/ebd/SAR_EMERGENCE_RESEARCH/data/AR{}/mean_pmdop{}_flat.npz'.format(AR,AR),allow_pickle=True) 
     mag_flux = np.load('/mmfs1/project/mx6/ebd/SAR_EMERGENCE_RESEARCH/data/AR{}/mean_mag{}_flat.npz'.format(AR,AR),allow_pickle=True)
-    int = np.load('/mmfs1/project/mx6/ebd/SAR_EMERGENCE_RESEARCH/data/AR{}/mean_int{}_flat.npz'.format(AR,AR),allow_pickle=True) 
+    cont_int = np.load('/mmfs1/project/mx6/ebd/SAR_EMERGENCE_RESEARCH/data/AR{}/mean_int{}_flat.npz'.format(AR,AR),allow_pickle=True) 
     power_maps23 = pm_and_int['arr_0']
     power_maps34 = pm_and_int['arr_1']
     power_maps45 = pm_and_int['arr_2']
     power_maps56 = pm_and_int['arr_3']
     mag_flux = mag_flux['arr_0']
-    int = int['arr_0']
+    cont_int = cont_int['arr_0']
     # Trim array to get rid of top and bottom 0 tiles
     power_maps23 = power_maps23[rid_of_top*size:-rid_of_top*size, :] 
     power_maps34 = power_maps34[rid_of_top*size:-rid_of_top*size, :]
     power_maps45 = power_maps45[rid_of_top*size:-rid_of_top*size, :]
     power_maps56 = power_maps56[rid_of_top*size:-rid_of_top*size, :]
     mag_flux = mag_flux[rid_of_top*size:-rid_of_top*size, :] ; mag_flux[np.isnan(mag_flux)] = 0
-    int = int[rid_of_top*size:-rid_of_top*size, :] ; int[np.isnan(int)] = 0
+    cont_int = cont_int[rid_of_top*size:-rid_of_top*size, :] ; cont_int[np.isnan(cont_int)] = 0
     # stack inputs and normalize
     stacked_maps = np.stack([power_maps23, power_maps34, power_maps45, power_maps56], axis=1); stacked_maps[np.isnan(stacked_maps)] = 0
     min_p = np.min(stacked_maps); max_p = np.max(stacked_maps)
     min_m = np.min(mag_flux); max_m = np.max(mag_flux)
-    min_i = np.min(int); max_i = np.max(int)
+    min_i = np.min(cont_int); max_i = np.max(cont_int)
     stacked_maps = min_max_scaling(stacked_maps, min_p, max_p)
     mag_flux = min_max_scaling(mag_flux, min_m, max_m)
-    int = min_max_scaling(int, min_i, max_i)
+    cont_int = min_max_scaling(cont_int, min_i, max_i)
     # Reshape mag_flux to have an extra dimension and then put it with pmaps
     # mag_flux_reshaped = np.expand_dims(mag_flux, axis=1) #TODO: change to intensities 
     # pm_and_flux = np.concatenate([stacked_maps, mag_flux_reshaped], axis=1) #TODO: change mag flux reshaped to intensities
@@ -76,7 +76,7 @@ for AR in ARs_:
     # all_inputs.append(pm_and_flux)
     # all_intensities.append(intensities)
 
-    int_reshaped = np.expand_dims(int, axis=1)
+    int_reshaped = np.expand_dims(cont_int, axis=1)
     pm_and_int = np.concatenate([stacked_maps, int_reshaped], axis=1)
     # append all ARs
     all_inputs.append(pm_and_int)
@@ -104,12 +104,12 @@ with open(result_file_path, "w") as file:
     # Iterate over ARs and tiles, writing results to the same file
     for AR_ in range(len(ARs)):
         pm_and_int = all_inputs[:,:,:,AR_] #change to inputs, its not only power maps
-        int = all_flux[:,:,AR_]
+        cont_int = all_flux[:,:,AR_]
         for tile in range(tiles):
             optimiser = torch.optim.Adam(lstm.parameters(), lr=learning_rate) # WAS MOVED HERE, SEEMS MORE CORRECT
             print('AR{} - Tile: {}'.format(ARs[AR_],tile))
-            X_train, y_train = lstm_ready(tile,size,pm_and_int,int,num_in,num_pred)
-            X_test, y_test = lstm_ready(int(tiles/2),size,pm_and_int,int,num_in,num_pred)
+            X_train, y_train = lstm_ready(tile,size,pm_and_int,cont_int,num_in,num_pred)
+            X_test, y_test = lstm_ready(int(tiles/2),size,pm_and_int,cont_int,num_in,num_pred)
             # reshaping to rows, timestamps, features
             X_train_final = torch.reshape(X_train,(X_train.shape[0], num_in, X_train.shape[2]))
             X_test_final = torch.reshape(X_test,(X_test.shape[0], num_in, X_test.shape[2])) 

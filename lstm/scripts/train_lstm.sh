@@ -17,7 +17,7 @@
 module load wulver foss/2023b Python/3.11.5 CUDA/12.4
 module li
 echo 'Loading environment'
-cd /mmfs1/project/mx6/ebd/SAR_EMERGENCE_RESEARCH/
+cd /
 source sar/bin/activate
 pip -V
 echo 'Done loading environment'
