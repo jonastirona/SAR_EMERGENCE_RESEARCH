@@ -26,11 +26,10 @@ def eval_AR_emergence_with_plots(test_AR):
     warnings.filterwarnings('ignore')
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu') # Define the device (either 'cuda' for GPU or 'cpu' for CPU)
     print('Runs on: {}'.format(device)," / Using", torch.cuda.device_count(), "GPUs!")
-    pth_files = glob.glob('/mmfs1/project/mx6/ebd/SAR_EMERGENCE_RESEARCH/lstm/results/*.pth') # Assuming there's only one .pth file and its naming follows the specific pattern
+    pth_files = glob.glob('./mmfs1/project/mx6/ebd/SAR_EMERGENCE_RESEARCH/lstm/results/*.pth') # Assuming there's only one .pth file and its naming follows the specific pattern
     filename = pth_files[0]
-    print(filename)
-    matches = re.findall(r't(\d+)_r(\d+)_i(\d+)_n(\d+)_h(\d+)_e(\d+)_l([0-9.]+)\.pth', filename) # Extract numbers from the filename
-    num_pred, rid_of_top, num_in, num_layers, hidden_size, n_epochs, learning_rate, dropout =  list(map(matches[0], float)) # Unpack the matched values into variables
+    matches = re.findall(r't(\d+)_r(\d+)_i(\d+)_n(\d+)_h(\d+)_e(\d+)_l([0-9.]+)_d([0-9.]+)\.pth', filename) # Extract numbers from the filename
+    num_pred, rid_of_top, num_in, num_layers, hidden_size, n_epochs, learning_rate, dropout =  list(map(float, matches[0])) # Unpack the matched values into variables
     print(f"Extracted from filename: Time Window: {num_pred}, Rid of Top: {rid_of_top}, Number of Inputs: {num_in}, Number of Layers: {num_layers}, Hidden Size: {hidden_size}, Number of Epochs: {n_epochs}, Learning Rate: {learning_rate}") # Print extracted values for confirmation
     rid_of_top = 1 # REDEFINED BE CAREFUL / # Now you can use these variables in your script
     num_pred = 12
