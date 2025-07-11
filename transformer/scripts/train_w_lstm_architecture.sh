@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH --job-name=dropout_0.1_lr_search
+#SBATCH --job-name=lstm_architecture
 #SBATCH --partition=gpu
 #SBATCH --account=mx6
 #SBATCH --qos=standard
@@ -27,4 +27,4 @@ export WANDB_ENTITY="jonastirona-new-jersey-institute-of-technology"
 export WANDB_PROJECT="sar-emergence"
 
 # Run single trial for lr=0.0003
-python -u train_lr_0.0003.py 
+python -u train_w_lstm_architecture.py 

@@ -24,7 +24,7 @@ sys.path.append(project_root)
 from transformer.models.st_transformer import SpatioTemporalTransformer
 from transformer.functions import lstm_ready, smooth_with_numpy, emergence_indication, split_sequences
 
-# Import the new evaluation module
+# Import the evaluation module
 from transformer.eval import evaluate_models_for_ar
 
 # Set up logging
@@ -35,22 +35,14 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-class ConstantScheduler(torch.optim.lr_scheduler._LRScheduler):
-    """Simple constant learning rate scheduler - no warmup, no decay"""
-    def __init__(self, optimizer, last_epoch=-1):
-        super().__init__(optimizer, last_epoch)
-
-    def get_lr(self):
-        # Always return the base learning rates unchanged
-        return self.base_lrs
-
 def calculate_r2(y_true: np.ndarray, y_pred: np.ndarray) -> float:
     """Calculate R² score."""
     if len(y_true.shape) > 1:
         y_true = y_true.flatten()
     if len(y_pred.shape) > 1:
         y_pred = y_pred.flatten()
-    return r2_score(y_true, y_pred)
+    result = r2_score(y_true, y_pred)
+    return float(result)
 
 def calculate_derivative(time_series: np.ndarray, time_step: float = 1.0) -> np.ndarray:
     """Calculate the derivative of a time series."""
@@ -367,11 +359,7 @@ def load_all_ars_data(ARs, rid_of_top, size, num_in, num_pred):
     all_inputs = []
     all_intensities = []
     
-    # Collect all raw data first to compute global normalization stats
-    all_stacked_maps = []
-    all_mag_flux = []
-    all_intensities_raw = []
-    
+    # Process each AR individually with per-AR normalization (like LSTM)
     for AR in ARs:
         power_maps = np.load(f'/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/data/AR{AR}/mean_pmdop{AR}_flat.npz', allow_pickle=True)
         mag_flux = np.load(f'/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/data/AR{AR}/mean_mag{AR}_flat.npz', allow_pickle=True)
@@ -382,6 +370,7 @@ def load_all_ars_data(ARs, rid_of_top, size, num_in, num_pred):
         power_maps56 = power_maps['arr_3']
         mag_flux = mag_flux['arr_0']
         intensities = intensities['arr_0']
+        
         # Trim array to get rid of top and bottom 0 tiles
         power_maps23 = power_maps23[rid_of_top*size:-rid_of_top*size, :]
         power_maps34 = power_maps34[rid_of_top*size:-rid_of_top*size, :]
@@ -389,52 +378,24 @@ def load_all_ars_data(ARs, rid_of_top, size, num_in, num_pred):
         power_maps56 = power_maps56[rid_of_top*size:-rid_of_top*size, :]
         mag_flux = mag_flux[rid_of_top*size:-rid_of_top*size, :]; mag_flux[np.isnan(mag_flux)] = 0
         intensities = intensities[rid_of_top*size:-rid_of_top*size, :]; intensities[np.isnan(intensities)] = 0
-        # stack inputs
+        
+        # Stack inputs and normalize PER AR (like LSTM)
         stacked_maps = np.stack([power_maps23, power_maps34, power_maps45, power_maps56], axis=1); stacked_maps[np.isnan(stacked_maps)] = 0
         
-        all_stacked_maps.append(stacked_maps)
-        all_mag_flux.append(mag_flux)
-        all_intensities_raw.append(intensities)
-    
-    # Compute global normalization statistics
-    all_stacked_concat = np.concatenate(all_stacked_maps, axis=0)
-    all_mag_concat = np.concatenate(all_mag_flux, axis=0)
-    all_int_concat = np.concatenate(all_intensities_raw, axis=0)
-    
-    global_min_p = np.min(all_stacked_concat)
-    global_max_p = np.max(all_stacked_concat)
-    global_min_m = np.min(all_mag_concat)
-    global_max_m = np.max(all_mag_concat)
-    global_min_i = np.min(all_int_concat)
-    global_max_i = np.max(all_int_concat)
-    
-    # Store global stats for later use in evaluation
-    global GLOBAL_NORM_STATS
-    GLOBAL_NORM_STATS = {
-        'min_p': global_min_p, 'max_p': global_max_p,
-        'min_m': global_min_m, 'max_m': global_max_m,
-        'min_i': global_min_i, 'max_i': global_max_i
-    }
-    
-    print(f"Global normalization stats computed:")
-    print(f"  Power maps: [{global_min_p:.4f}, {global_max_p:.4f}]")
-    print(f"  Mag flux: [{global_min_m:.4f}, {global_max_m:.4f}]")
-    print(f"  Intensities: [{global_min_i:.4f}, {global_max_i:.4f}]")
-    
-    # Now normalize each AR using global statistics
-    for i, AR in enumerate(ARs):
-        stacked_maps = all_stacked_maps[i]
-        mag_flux = all_mag_flux[i]
-        intensities = all_intensities_raw[i]
+        # Per-AR normalization (Local normalization) - same as LSTM
+        min_p = np.min(stacked_maps); max_p = np.max(stacked_maps)
+        min_m = np.min(mag_flux); max_m = np.max(mag_flux)
+        min_i = np.min(intensities); max_i = np.max(intensities)
         
-        # Apply global normalization
-        stacked_maps = (stacked_maps - global_min_p) / (global_max_p - global_min_p)
-        mag_flux = (mag_flux - global_min_m) / (global_max_m - global_min_m)
-        intensities = (intensities - global_min_i) / (global_max_i - global_min_i)
+        # Apply per-AR normalization
+        stacked_maps = (stacked_maps - min_p) / (max_p - min_p)
+        mag_flux = (mag_flux - min_m) / (max_m - min_m)
+        intensities = (intensities - min_i) / (max_i - min_i)
         
         # Reshape mag_flux to have an extra dimension and then put it with pmaps
         mag_flux_reshaped = np.expand_dims(mag_flux, axis=1)
         pm_and_flux = np.concatenate([stacked_maps, mag_flux_reshaped], axis=1)
+        
         # append all ARs
         all_inputs.append(pm_and_flux)
         all_intensities.append(intensities)
@@ -442,320 +403,217 @@ def load_all_ars_data(ARs, rid_of_top, size, num_in, num_pred):
     all_inputs = np.stack(all_inputs, axis=-1)
     all_intensities = np.stack(all_intensities, axis=-1)
     
+    print(f"Per-AR normalization applied (like LSTM)")
+    print(f"  Each AR normalized to [0,1] using its own min/max values")
+    print(f"  Preserves relative distances within each AR")
+    print(f"all_inputs shape: {all_inputs.shape}")
+    print(f"all_intensities shape: {all_intensities.shape}")
+    
     return all_inputs, all_intensities
 
 # Global variable to store normalization statistics
 GLOBAL_NORM_STATS = None
 
-def run_single_experiment(config: Dict[str, Any], device: torch.device, learning_rate: float, global_step_offset: int = 0) -> Dict[str, float]:
-    """Run a single experiment with the given configuration."""
-    print(f"Training model with learning rate {learning_rate}...")
-    
-    # Initialize model with fixed attention heads
-    model = SpatioTemporalTransformer(
-        input_dim=5,  # 4 power maps + 1 magnetic flux
-        seq_len=config['num_in'],
-        embed_dim=config['embed_dim'],
-        num_heads=4,  # Fixed at 4 heads
-        ff_dim=config['ff_dim'],
-        num_layers=config['num_layers'],  # Fixed at 3 layers
-        output_dim=config['num_pred'],
-        dropout=config['dropout'],
-    ).to(device)
-    
-    print(f"\n=== MODEL ARCHITECTURE ===")
-    print(f"Model: SpatioTemporalTransformer")
-    print(f"Input dim: 5 (4 power maps + 1 magnetic flux)")
-    print(f"Sequence length: {config['num_in']}")
-    print(f"Embed dim: {config['embed_dim']}")
-    print(f"Attention heads: 4 (fixed)")
-    print(f"Feed-forward dim: {config['ff_dim']}")
-    print(f"Number of layers: {config['num_layers']} (fixed)")
-    print(f"Output dim: {config['num_pred']}")
-    print(f"Dropout: {config['dropout']}")
-    print(f"Learning rate: {learning_rate}")
-    print(f"Device: {device}")
-    
-    # Count model parameters
-    total_params = sum(p.numel() for p in model.parameters())
-    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print(f"Total parameters: {total_params:,}")
-    print(f"Trainable parameters: {trainable_params:,}")
-    print(f"Model size: {total_params * 4 / 1024 / 1024:.2f} MB (assuming 4 bytes per param)")
-    
+def run_single_experiment(config: Dict[str, Any], device: torch.device, learning_rate: float, global_step_offset: int = 0) -> Dict[str, Any]:
+    """Run a single experiment with the given configuration, tile-by-tile, fresh optimizer per tile (LSTM style)."""
+    print(f"Training model with learning rate {learning_rate} (tile-by-tile, fresh optimizer per tile)...")
+
     # ARs list (copied from train_w_stats.py)
-    ARs = [11130,11149,11158,11162,11199,11327,11344,11387,11393,11416,11422,11455,11619,11640,11660,11678,11682,11765,11768,11776,11916,11928,12036,12051,12085,12089,12144,12175,12203,12257,12331,12494,12659,12778,12864,12877,12900,12929,13004,13085,13098,13179]
+    ARs = [11130,11149,11158,11162,11199,11327,11344,11387,11393,11416,11422,11455,11619,11640,11660,11678,11682,11765,11768,11776,11916,11928,12036,12051,12085,12089,12144,12175,12203,12257,12331,12494,12659,12778,12864,12877,12900,12929,13004,13085,13098]
     size = 9
     rid_of_top = config['rid_of_top']
     num_in = config['num_in']
     num_pred = config['num_pred']
+    n_epochs = config['n_epochs']
+    batch_size = 128
 
     all_inputs, all_intensities = load_all_ars_data(ARs, rid_of_top, size, num_in, num_pred)
     input_size = np.shape(all_inputs)[1]
-    
-    print(f"\n=== DATA SHAPES ===")
-    print(f"all_inputs shape: {all_inputs.shape}")  # (tiles, features, time, ARs)
-    print(f"all_intensities shape: {all_intensities.shape}")  # (tiles, time, ARs)
-    print(f"input_size (features): {input_size}")
-
-    # Prepare data for all tiles and ARs - keep track of tile indices
-    X_trains = []
-    y_trains = []
-    tile_indices = []  # Track which tile each sample comes from
     remaining_rows = size - 2*rid_of_top
     tiles = remaining_rows * size
-    
-    print(f"\n=== PROCESSING INFO ===")
-    print(f"Number of ARs: {len(ARs)}")
-    print(f"Grid size: {size}x{size}")
-    print(f"Tiles after trimming: {tiles} (removed {rid_of_top} from top/bottom)")
-    print(f"Input sequence length: {num_in}")
-    print(f"Prediction sequence length: {num_pred}")
-    
-    for ar_idx in range(len(ARs)):
+
+    print(f"\n=== DATA SHAPES ===")
+    print(f"all_inputs shape: {all_inputs.shape}")
+    print(f"all_intensities shape: {all_intensities.shape}")
+    print(f"input_size (features): {input_size}")
+    print(f"Tiles after trimming: {tiles}")
+
+    # Model definition (shared, but re-initialized for each AR if desired)
+    def make_model():
+        return SpatioTemporalTransformer(
+            input_dim=5,
+            seq_len=num_in,
+            embed_dim=config['embed_dim'],
+            num_heads=4,
+            ff_dim=config['ff_dim'],
+            num_layers=config['num_layers'],
+            output_dim=num_pred,
+            dropout=config['dropout'],
+        ).to(device)
+
+    # Store results for all ARs/tiles
+    all_training_results = {}
+    # lr_curves = {}    # Store learning rate curves for each tile
+
+    # Create a single model instance (like LSTM)
+    model = make_model()
+    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate, weight_decay=0)
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=n_epochs//10, gamma=0.9)
+    loss_fn = nn.MSELoss()
+
+    for ar_idx, AR in enumerate(ARs):
         power_maps = all_inputs[:,:,:,ar_idx]
         intensities = all_intensities[:,:,ar_idx]
-        print(f"\nAR {ARs[ar_idx]} - power_maps shape: {power_maps.shape}, intensities shape: {intensities.shape}")
+        print(f"\nAR {AR} - power_maps shape: {power_maps.shape}, intensities shape: {intensities.shape}")
         
         for tile in range(tiles):
-            X_tile, y_tile = lstm_ready(tile, size, power_maps, intensities, num_in, num_pred, model_seq_len=num_in)
-            X_trains.append(X_tile)
-            y_trains.append(y_tile)
-            # Add tile indices for each sequence in this tile
-            tile_indices.extend([tile] * len(X_tile))
-            
-            # Print shape info for first few tiles
-            if tile < 3 and ar_idx == 0:
-                print(f"  Tile {tile}: X_tile shape: {X_tile.shape}, y_tile shape: {y_tile.shape}")
-    
-    X = torch.cat(X_trains, dim=0)
-    y = torch.cat(y_trains, dim=0)
-    X = torch.reshape(X, (X.shape[0], num_in, X.shape[2]))
-    tile_indices = np.array(tile_indices)
-    
-    print(f"\n=== FINAL TENSOR SHAPES ===")
-    print(f"X (input) shape: {X.shape}")  # (total_samples, seq_len, features)
-    print(f"y (target) shape: {y.shape}")  # (total_samples, num_pred)
-    print(f"tile_indices shape: {tile_indices.shape}")  # (total_samples,)
-    print(f"Total samples: {len(X)}")
-
-    # Split data first on CPU
-    train_size = int(0.8 * len(X))
-    X_train, X_test = X[:train_size], X[train_size:]
-    y_train, y_test = y[:train_size], y[train_size:]
-    tile_indices_train, tile_indices_test = tile_indices[:train_size], tile_indices[train_size:]
-    
-    print(f"\n=== TRAIN/TEST SPLIT ===")
-    print(f"X_train shape: {X_train.shape}")
-    print(f"y_train shape: {y_train.shape}")
-    print(f"X_test shape: {X_test.shape}")
-    print(f"y_test shape: {y_test.shape}")
-    print(f"Training samples: {len(X_train)}")
-    print(f"Test samples: {len(X_test)}")
-    
-    # Create DataLoaders with CPU data
-    batch_size = min(64, len(X_train) // 10)  # Adaptive batch size
-    print(f"Batch size: {batch_size}")
-    
-    train_dataset = TensorDataset(X_train, y_train)
-    test_dataset = TensorDataset(X_test, y_test)
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=0, pin_memory=False)
-    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=0, pin_memory=False)
-    
-    # Move data to device after DataLoader creation
-    X_train = X_train.to(device)
-    y_train = y_train.to(device)
-    X_test = X_test.to(device)
-    y_test = y_test.to(device)
-    
-    # Training setup
-    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
-    scheduler = ConstantScheduler(optimizer)
-    loss_fn = nn.MSELoss()
-    
-    # Initialize tracking variables
-    best_test_loss = float('inf')
-    best_predictions = None
-    best_observations = None
-    best_model_state = None
-    best_tile_indices = None
-    
-    # Initialize lists to store per-epoch metrics
-    train_losses = []
-    test_losses = []
-    test_emergence_rmses = []  # Only track test emergence RMSE for plotting
-    test_emergence_mses = []   # Track emergence MSE across epochs
-    test_overall_mses = []     # Track overall MSE across epochs
-    
-    for epoch in range(config['n_epochs']):
-        # Training phase
-        model.train()
-        epoch_train_loss = 0
-        num_batches = 0
-        
-        for batch_idx, (batch_X, batch_y) in enumerate(train_loader):
-            # Move batch to device
-            batch_X, batch_y = batch_X.to(device), batch_y.to(device)
-            
-            # Print shapes for first batch of first epoch
-            if epoch == 0 and batch_idx == 0:
-                print(f"\n=== FIRST BATCH SHAPES ===")
-                print(f"Input batch shape: {batch_X.shape}")  # (batch_size, seq_len, features)
-                print(f"Target batch shape: {batch_y.shape}")  # (batch_size, output_dim)
-                print(f"Input range: [{batch_X.min().item():.4f}, {batch_X.max().item():.4f}]")
-                print(f"Target range: [{batch_y.min().item():.4f}, {batch_y.max().item():.4f}]")
-            
-            optimizer.zero_grad()
-            outputs = model(batch_X)
-            
-            # Print output shapes for first batch of first epoch
-            if epoch == 0 and batch_idx == 0:
-                print(f"Model output shape: {outputs.shape}")  # (batch_size, output_dim)
-                print(f"Output range: [{outputs.min().item():.4f}, {outputs.max().item():.4f}]")
-                print(f"Expected vs actual output shapes: {batch_y.shape} vs {outputs.shape}")
-                print(f"Shapes match: {batch_y.shape == outputs.shape}")
-            
-            loss = loss_fn(outputs, batch_y)
-            
-            # Check for NaN loss
-            if torch.isnan(loss):
-                print(f"Warning: NaN loss detected at epoch {epoch}, batch {batch_idx}")
+            print(f"  Training AR {AR} - Tile {tile}")
+            # Prepare data for this tile
+            X_tile, y_tile = lstm_ready(tile, size, power_maps, intensities, num_in, num_pred)
+            if X_tile.shape[0] == 0:
+                print(f"    Skipping tile {tile} (no data)")
                 continue
+            X_tile = torch.reshape(X_tile, (X_tile.shape[0], num_in, X_tile.shape[2])).to(device)
+            y_tile = y_tile.to(device)
+            # Split train/test (80/20)
+            train_size = int(0.8 * len(X_tile))
+            X_train, X_test = X_tile[:train_size], X_tile[train_size:]
+            y_train, y_test = y_tile[:train_size], y_tile[train_size:]
+            # Fresh optimizer for each tile (like LSTM)
+            optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate, weight_decay=0)
+            scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=n_epochs//10, gamma=0.9)
+            
+            train_losses = []
+            test_losses = []
+            lr_values = []
+            best_test_loss = float('inf')
+            best_model_state = None
+            
+            for epoch in range(n_epochs):
+                model.train()
+                optimizer.zero_grad()
+                outputs = model(X_train)
+                loss = loss_fn(outputs, y_train)
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                optimizer.step()
+                scheduler.step()
                 
-            loss.backward()
-            
-            # Add gradient clipping for stability
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-            
-            optimizer.step()
-            epoch_train_loss += loss.item()
-            num_batches += 1
-        
-        # Calculate average training loss
-        if num_batches > 0:
-            epoch_train_loss /= num_batches
-        else:
-            epoch_train_loss = float('nan')
-        
-        # Evaluation phase
-        model.eval()
-        epoch_test_loss = 0
-        num_test_batches = 0
-        all_test_preds = []
-        all_test_targets = []
-        
-        with torch.no_grad():
-            for batch_X, batch_y in test_loader:
-                # Move batch to device
-                batch_X, batch_y = batch_X.to(device), batch_y.to(device)
-                
-                test_pred = model(batch_X)
-                test_loss = loss_fn(test_pred, batch_y)
-                
-                if not torch.isnan(test_loss):
-                    epoch_test_loss += test_loss.item()
-                    num_test_batches += 1
-                    all_test_preds.append(test_pred.cpu())
-                    all_test_targets.append(batch_y.cpu())
-            
-            # Calculate average test loss
-            if num_test_batches > 0:
-                epoch_test_loss /= num_test_batches
-                
-                # Concatenate all predictions and targets for metrics calculation
-                all_test_preds = torch.cat(all_test_preds, dim=0).numpy()
-                all_test_targets = torch.cat(all_test_targets, dim=0).numpy()
-                
-                # Calculate tile-level emergence metrics for test set
-                test_emergence_metrics = calculate_tile_level_emergence_metrics(
-                    all_test_targets, 
-                    all_test_preds,
-                    tile_indices_test
-                )
-            else:
-                epoch_test_loss = float('nan')
-                test_emergence_metrics = {'emergence_rmse': float('nan')}
-                all_test_preds = y_test.cpu().numpy()
-                all_test_targets = y_test.cpu().numpy()
-            
-            # Store metrics for plotting
-            train_losses.append(epoch_train_loss)
-            test_losses.append(epoch_test_loss)
-            test_emergence_rmses.append(test_emergence_metrics['emergence_rmse'])
-            test_emergence_mses.append(test_emergence_metrics['emergence_mse'])
-            test_overall_mses.append(test_emergence_metrics['overall_mse'])
-            
-            # Calculate unique global step for this trial and epoch
-            global_step = global_step_offset + epoch
-            
-            # Log per-epoch metrics with lr prefix and unique global step
-            lr_str = f"{learning_rate:.4f}"
-            metrics_to_log = {
-                f'lr_{lr_str}/train_loss': epoch_train_loss,
-                f'lr_{lr_str}/test_loss': epoch_test_loss,
-                f'lr_{lr_str}/test_emergence_rmse': test_emergence_metrics['emergence_rmse'],
-                f'lr_{lr_str}/test_emergence_mse': test_emergence_metrics.get('emergence_mse', float('nan')),
-                f'lr_{lr_str}/test_emergence_mae': test_emergence_metrics.get('emergence_mae', float('nan')),
-                f'lr_{lr_str}/test_emergence_r2': test_emergence_metrics.get('emergence_r2', float('nan')),
-                f'lr_{lr_str}/test_overall_rmse': test_emergence_metrics.get('overall_rmse', float('nan')),
-                f'lr_{lr_str}/test_overall_mse': test_emergence_metrics.get('overall_mse', float('nan')),
-                f'lr_{lr_str}/test_overall_mae': test_emergence_metrics.get('overall_mae', float('nan')),
-                f'lr_{lr_str}/test_overall_r2': test_emergence_metrics.get('overall_r2', float('nan')),
-                f'lr_{lr_str}/learning_rate': optimizer.param_groups[0]['lr'],
-                f'lr_{lr_str}/epoch': epoch,
-                # Also log without lr prefix for easy cross-trial comparison
-                'train_loss': epoch_train_loss,
-                'test_loss': epoch_test_loss,
-                'test_emergence_rmse': test_emergence_metrics['emergence_rmse'],
-                'test_emergence_mse': test_emergence_metrics.get('emergence_mse', float('nan')),
-                'test_emergence_mae': test_emergence_metrics.get('emergence_mae', float('nan')),
-                'test_emergence_r2': test_emergence_metrics.get('emergence_r2', float('nan')),
-                'test_overall_rmse': test_emergence_metrics.get('overall_rmse', float('nan')),
-                'test_overall_mse': test_emergence_metrics.get('overall_mse', float('nan')),
-                'test_overall_mae': test_emergence_metrics.get('overall_mae', float('nan')),
-                'test_overall_r2': test_emergence_metrics.get('overall_r2', float('nan')),
-                'learning_rate': optimizer.param_groups[0]['lr'],
-                'epoch': epoch,
-                'current_lr': learning_rate,  # Add current LR for filtering
-                'trial_id': f'lr_{lr_str}'  # Add trial identifier
+                current_lr = scheduler.get_last_lr()[0]
+                lr_values.append(current_lr)
+                train_losses.append(loss.item())
+                # Test
+                model.eval()
+                with torch.no_grad():
+                    test_pred = model(X_test)
+                    test_loss = loss_fn(test_pred, y_test)
+                    test_losses.append(test_loss.item())
+                    if test_loss.item() < best_test_loss:
+                        best_test_loss = test_loss.item()
+                        best_model_state = model.state_dict().copy()
+                if epoch % max(1, n_epochs//10) == 0:
+                    print(f"    Epoch {epoch}: train loss {loss.item():.5f}, test loss {test_loss.item():.5f}, lr {current_lr:.2e}")
+                wandb.log({
+                    f"AR{AR}_Tile{tile}/train_loss": loss.item(),
+                    f"AR{AR}_Tile{tile}/test_loss": test_loss.item(),
+                    f"AR{AR}_Tile{tile}/learning_rate": current_lr,
+                    "epoch": epoch
+                })
+            # Calculate final metrics
+            model.eval()
+            with torch.no_grad():
+                final_test_pred = model(X_test)
+                final_test_loss = loss_fn(final_test_pred, y_test).item()
+            y_test_np = y_test.cpu().numpy()
+            final_test_pred_np = final_test_pred.cpu().numpy()
+            emergence_metrics = calculate_emergence_metrics(y_test_np.flatten(), final_test_pred_np.flatten(), time_step=1.0)
+            overall_metrics = calculate_tile_level_emergence_metrics(y_test_np, final_test_pred_np, np.zeros(len(y_test_np)))
+            tile_key = f'AR{AR}_Tile{tile}'
+            all_training_results[tile_key] = {
+                'train_losses': train_losses,
+                'test_losses': test_losses,
+                'final_train_loss': train_losses[-1] if train_losses else float('nan'),
+                'final_test_loss': final_test_loss,
+                'emergence_rmse': emergence_metrics.get('emergence_rmse', float('nan')),
+                'emergence_mae': emergence_metrics.get('emergence_mae', float('nan')),
+                'emergence_mse': emergence_metrics.get('emergence_mse', float('nan')),
+                'emergence_r2': emergence_metrics.get('emergence_r2', float('nan')),
+                'overall_rmse': overall_metrics.get('overall_rmse', float('nan')),
+                'overall_mae': overall_metrics.get('overall_mae', float('nan')),
+                'overall_mse': overall_metrics.get('overall_mse', float('nan')),
+                'overall_r2': overall_metrics.get('overall_r2', float('nan')),
             }
-            
-            # Log with unique global step to avoid conflicts
-            wandb.log(metrics_to_log, step=global_step)
-            
-            if not np.isnan(epoch_test_loss) and epoch_test_loss < best_test_loss:
-                best_test_loss = epoch_test_loss
-                best_predictions = all_test_preds
-                best_observations = all_test_targets
-                best_model_state = model.state_dict()
-                best_tile_indices = tile_indices_test
-        
-        scheduler.step()
-        if (epoch + 1) % 10 == 0 or epoch == 0:
-            current_lr = optimizer.param_groups[0]['lr']
-            print(f"  Epoch {epoch + 1}/{config['n_epochs']} - Train Loss: {epoch_train_loss:.5f}, Test Loss: {epoch_test_loss:.5f}, LR: {current_lr:.2e}")
-    
-    # Calculate final tile-level emergence metrics on best model
-    final_metrics = calculate_tile_level_emergence_metrics(
-        best_observations, 
-        best_predictions,
-        best_tile_indices
-    )
-    
-    # Add lr info to metrics
-    final_metrics['learning_rate'] = learning_rate
-    
-    # Return all metrics including the lists for plotting and best model state
-    return {
-        **final_metrics,
-        'train_losses': train_losses,
-        'test_losses': test_losses,
-        'train_emergence_losses': test_emergence_rmses,  # Use test for consistency
-        'test_emergence_losses': test_emergence_rmses,
-        'test_emergence_mses': test_emergence_mses,      # Add emergence MSE across epochs
-        'test_overall_mses': test_overall_mses,          # Add overall MSE across epochs
-        'best_model_state': best_model_state
+            wandb.log({
+                f"AR{AR}_Tile{tile}/final_train_loss": train_losses[-1] if train_losses else float('nan'),
+                f"AR{AR}_Tile{tile}/final_test_loss": final_test_loss,
+                f"AR{AR}_Tile{tile}/emergence_rmse": emergence_metrics.get('emergence_rmse', float('nan')),
+                f"AR{AR}_Tile{tile}/emergence_mae": emergence_metrics.get('emergence_mae', float('nan')),
+                f"AR{AR}_Tile{tile}/emergence_mse": emergence_metrics.get('emergence_mse', float('nan')),
+                f"AR{AR}_Tile{tile}/emergence_r2": emergence_metrics.get('emergence_r2', float('nan')),
+                f"AR{AR}_Tile{tile}/overall_rmse": overall_metrics.get('overall_rmse', float('nan')),
+                f"AR{AR}_Tile{tile}/overall_mae": overall_metrics.get('overall_mae', float('nan')),
+                f"AR{AR}_Tile{tile}/overall_mse": overall_metrics.get('overall_mse', float('nan')),
+                f"AR{AR}_Tile{tile}/overall_r2": overall_metrics.get('overall_r2', float('nan'))
+            })
+    print("\nTile-by-tile training complete. Results stored in all_training_results.")
+    # Save the final model weights (like LSTM)
+    models_dir = os.path.join(project_root, 'transformer', 'results', 'tile_models')
+    os.makedirs(models_dir, exist_ok=True)
+    model_path = os.path.join(models_dir, f"transformer_lstm_style_final_model.pth")
+    torch.save(model.state_dict(), model_path)
+    print(f"Saved final model to {model_path}")
+    # Upload model to wandb
+    wandb.save(model_path)
+    # Create AR evaluation plots using the final model
+    print("\nCreating AR evaluation plots...")
+    # LSTM model path (assuming it exists)
+    lstm_path = "/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/lstm/results/t12_r4_i110_n3_h64_e1000_l0.01.pth"
+    # Test ARs to evaluate
+    test_ars = [11698, 11726, 13165, 13179, 13183]
+    successful_ars = []
+    failed_ars = []
+    for ar in test_ars:
+        try:
+            # Use the final model for evaluation (optionally, you can reload if needed)
+            temp_model_path = model_path
+            transformer_params = {
+                'embed_dim': config['embed_dim'],
+                'num_heads': 4,
+                'ff_dim': config['ff_dim'],
+                'num_layers': config['num_layers'],
+                'dropout': config['dropout'],
+                'rid_of_top': config['rid_of_top'],
+                'num_pred': config['num_pred'],
+                'time_window': config['time_window'],
+                'num_in': config['num_in'],
+                'hidden_size': config['embed_dim'],
+                'learning_rate': learning_rate
+            }
+            temp_output_dir = f"/tmp/ar_eval_AR{ar}"
+            os.makedirs(temp_output_dir, exist_ok=True)
+            plot_path = evaluate_models_for_ar(ar, lstm_path, temp_model_path, transformer_params, temp_output_dir)
+            if plot_path and os.path.exists(plot_path):
+                wandb.log({f'AR_{ar}_comparison': wandb.Image(plot_path)})
+                successful_ars.append(ar)
+                print(f"  ✓ AR {ar} evaluation completed")
+            else:
+                failed_ars.append(ar)
+                print(f"  ✗ AR {ar} evaluation failed")
+        except Exception as e:
+            failed_ars.append(ar)
+            print(f"  ✗ Error evaluating AR {ar}: {str(e)}")
+            continue
+    print(f"AR evaluations completed: {len(successful_ars)}/{len(test_ars)} successful")
+    summary_stats = {
+        'total_tiles_trained': len(all_training_results),
+        'successful_ar_evaluations': len(successful_ars),
+        'failed_ar_evaluations': len(failed_ars),
+        'avg_final_test_loss': np.mean([r['final_test_loss'] for r in all_training_results.values() if not np.isnan(r['final_test_loss'])]),
+        'avg_emergence_rmse': np.mean([r['emergence_rmse'] for r in all_training_results.values() if not np.isnan(r['emergence_rmse'])]),
+        'avg_overall_rmse': np.mean([r['overall_rmse'] for r in all_training_results.values() if not np.isnan(r['overall_rmse'])])
     }
+    wandb.log(summary_stats)
+    return all_training_results
 
 def create_cross_trial_comparison_plots(all_results: Dict[float, Dict], config: Dict) -> None:
     """Create comprehensive comparison plots across all learning rate trials with separate grids for each metric."""
@@ -821,7 +679,7 @@ def create_cross_trial_comparison_plots(all_results: Dict[float, Dict], config: 
         ax.text(0.02, 0.98, formula, transform=ax.transAxes, fontsize=8, 
                 verticalalignment='top', bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.8))
     
-    plt.tight_layout(rect=[0, 0.05, 1, 0.93])  # Better spacing
+    plt.tight_layout(rect=(0, 0.05, 1, 0.93))  # Better spacing
     wandb.log({"overall_metrics_comparison": wandb.Image(fig1)})
     plt.close(fig1)
     
@@ -875,7 +733,7 @@ def create_cross_trial_comparison_plots(all_results: Dict[float, Dict], config: 
         ax.text(0.02, 0.98, formula, transform=ax.transAxes, fontsize=8, 
                 verticalalignment='top', bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.8))
     
-    plt.tight_layout(rect=[0, 0.05, 1, 0.93])  # Better spacing
+    plt.tight_layout(rect=(0, 0.05, 1, 0.93))  # Better spacing
     wandb.log({"emergence_metrics_comparison": wandb.Image(fig2)})
     plt.close(fig2)
     
@@ -1006,7 +864,7 @@ def create_cross_trial_comparison_plots(all_results: Dict[float, Dict], config: 
         ax3.legend(all_handles, all_labels, loc='upper left', bbox_to_anchor=(1.02, 1), 
                   fontsize=10, framealpha=0.9)
     
-    plt.tight_layout(rect=[0, 0.1, 0.85, 0.92])
+    plt.tight_layout(rect=(0, 0.1, 0.85, 0.92))
     wandb.log({"timing_accuracy_comparison": wandb.Image(fig3)})
     plt.close(fig3)
     
@@ -1082,7 +940,7 @@ def create_cross_trial_comparison_plots(all_results: Dict[float, Dict], config: 
         ax.text(0.02, 0.98, formula, transform=ax.transAxes, fontsize=8, 
                 verticalalignment='top', bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.8))
     
-    plt.tight_layout(rect=[0, 0.05, 1, 0.93])  # Better spacing
+    plt.tight_layout(rect=(0, 0.05, 1, 0.93))  # Better spacing
     wandb.log({"complete_performance_summary": wandb.Image(fig4)})
     plt.close(fig4)
     
@@ -1197,7 +1055,7 @@ def create_epoch_mse_statistics_plot(all_results: Dict[float, Dict], config: Dic
     ax2.set_xticklabels([f'{lr:.3f}' for lr in learning_rates])
     ax2.grid(True, alpha=0.3)
     
-    plt.tight_layout(rect=[0, 0.05, 1, 0.93])
+    plt.tight_layout(rect=(0, 0.05, 1, 0.93))
     wandb.log({"epoch_mse_statistics": wandb.Image(fig)})
     plt.close(fig)
     
@@ -1308,7 +1166,7 @@ Overall MSE:
     fig.text(0.02, 0.02, stats_text, fontsize=10, verticalalignment='bottom',
              bbox=dict(boxstyle='round,pad=0.5', facecolor='lightgray', alpha=0.8))
     
-    plt.tight_layout(rect=[0.25, 0.15, 1, 0.93])
+    plt.tight_layout(rect=(0.25, 0.15, 1, 0.93))
     
     # Log to wandb under the specific learning rate tab
     wandb.log({f'lr_{lr_str}/mse_epoch_analysis': wandb.Image(fig)})
@@ -1323,7 +1181,7 @@ Overall MSE:
     })
 
 def main():
-    print("Starting comprehensive learning rate comparison experiment...")
+    print("Starting tile-by-tile transformer training (LSTM architecture style)...")
     
     # Read API key from .env file
     with open('/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/.env', 'r') as f:
@@ -1335,25 +1193,23 @@ def main():
     # Login to wandb first
     wandb.login(key=api_key)
     
-    # Fixed configuration for all experiments
+    # Fixed configuration for the experiment
     config = {
         'num_pred': 12,
         'num_in': 110,
         'embed_dim': 64,
         'ff_dim': 128,
         'num_layers': 3,  # Fixed to 3 layers
-        'dropout': 0.1, # play around, try 0.1-0.5
-        'n_epochs': 300,
+        'dropout': 0.1,
+        'n_epochs': 1000,  # UPDATED from 300 to 1000
         'time_window': 12,
-        'rid_of_top': 4,
-        # learning_rate will be varied in the experiment
+        'rid_of_top': 4
     }
     
     # Create models directory for saving best models
-    # Save to results directory with search-specific subfolder
     project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
     results_dir = os.path.join(project_root, 'transformer', 'results')
-    search_type = "lr_search"  # This is a learning rate search experiment
+    search_type = "tile_by_tile_training"  # This is a tile-by-tile training experiment
     models_dir = os.path.join(results_dir, search_type)
     os.makedirs(models_dir, exist_ok=True)
     print(f"Models will be saved to: {models_dir}")
@@ -1363,298 +1219,34 @@ def main():
         project="sar-emergence",
         entity="jonastirona-new-jersey-institute-of-technology",
         config=config,
-        name="dropout 0.1 LR search",
-        notes="Comprehensive grid search comparing transformer performance across smaller learning rates (0.0001, 0.0005, 0.001, 0.005, 0.01) with constant learning rate schedule, fixed attention head count (4) and 3 layers"
+        name="transformer w lstm architecture and params",
+        notes="Tile-by-tile training: t12 r4 i110 n3 h64 e1000 l0.01, 4 heads, 0.1 dropout. Transformer vs LSTM benchmark.",
     )
     
-    # Run experiments for different learning rates
+    # Run single experiment with tile-by-tile training
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    all_results = {}
+    learning_rate = 0.01  # Fixed learning rate
     
-    learning_rates = [0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1]  # Much smaller learning rates
-    global_step_counter = 0  # Track global step across all trials
-    
-    for lr in learning_rates:
-        print(f"\n{'='*50}")
-        print(f"TRIAL {learning_rates.index(lr) + 1}/5: Testing learning rate {lr}")
-        print(f"{'='*50}")
-        
-        try:
-            # Run experiment with global step offset
-            results = run_single_experiment(config, device, lr, global_step_counter)
-            all_results[lr] = results
-            
-            # Create per-trial MSE statistics visualization
-            print(f"Creating MSE statistics for LR {lr}...")
-            create_per_trial_mse_statistics(results, lr)
-            
-            # Save the best model locally
-            model_filename = f"transformer_t{config['time_window']}_r{config['rid_of_top']}_i{config['num_in']}_n{config['num_layers']}_h{config['embed_dim']}_e{config['n_epochs']}_l{lr:.5f}_d{config['dropout']:.1f}.pth"
-            model_path = os.path.join(models_dir, model_filename)
-            torch.save(results['best_model_state'], model_path)
-            print(f"Best model saved to: {model_path}")
-            
-            # Save model to wandb as artifact
-            model_artifact = wandb.Artifact(
-                name=f"transformer_t{config['time_window']}_r{config['rid_of_top']}_i{config['num_in']}_n{config['num_layers']}_h{config['embed_dim']}_e{config['n_epochs']}_l{lr:.5f}_d{config['dropout']:.1f}".replace('.', '_'),
-                type="model",
-                description=f"Best transformer model for learning rate {lr} after {config['n_epochs']} epochs",
-                metadata={
-                    "learning_rate": lr,
-                    "epochs": config['n_epochs'],
-                    "embed_dim": config['embed_dim'],
-                    "num_heads": 4,
-                    "ff_dim": config['ff_dim'],
-                    "num_layers": config['num_layers'],
-                    "dropout": config['dropout'],
-                    "time_window": config['time_window'],
-                    "rid_of_top": config['rid_of_top'],
-                    "num_in": config['num_in'],
-                    "test_loss": results.get('overall_rmse', 'N/A'),
-                    "emergence_rmse": results.get('emergence_rmse', 'N/A'),
-                    "model_type": "SpatioTemporalTransformer"
-                }
-            )
-            model_artifact.add_file(model_path, name=model_filename)
-            wandb.log_artifact(model_artifact)
-            print(f"Model uploaded to wandb as artifact: {model_artifact.name}")
-            
-            # Update global step counter for next trial (assuming 300 epochs per trial)
-            global_step_counter += config['n_epochs']
-            
-            # Log trial completion
-            wandb.log({
-                f'trial_completion/lr_{lr:.3f}': 1.0,
-                'completed_trials': learning_rates.index(lr) + 1,
-                'total_trials': len(learning_rates),
-                'model_saved_path': model_path
-            }, step=global_step_counter - 1)
-            
-            print(f"✓ Trial {learning_rates.index(lr) + 1}/5 completed successfully for learning rate {lr}")
-            
-        except Exception as e:
-            print(f"✗ ERROR in Trial {learning_rates.index(lr) + 1}/5 for learning rate {lr}:")
-            print(f"  Exception: {str(e)}")
-            import traceback
-            traceback.print_exc()
-            
-            # Log the failure
-            wandb.log({
-                f'trial_completion/lr_{lr:.3f}': 0.0,
-                'completed_trials': learning_rates.index(lr) + 1,
-                'total_trials': len(learning_rates),
-                'trial_failed': True,
-                'error_message': str(e)
-            }, step=global_step_counter + config['n_epochs'] - 1)
-            
-            global_step_counter += config['n_epochs']
-            continue
-        
-        # Create individual AR evaluation plots using eval module
-        print(f"Generating AR comparison plots with LSTM benchmark...")
-        
-        # LSTM model path (assuming it exists)
-        lstm_path = "/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/lstm/results/t12_r4_i110_n3_h64_e1000_l0.01.pth"
-        
-        transformer_params = {
-            'embed_dim': config['embed_dim'],
-            'num_heads': 4,  # Fixed attention head count
-            'ff_dim': config['ff_dim'],
-            'num_layers': config['num_layers'],  # Fixed to 3 layers
-            'dropout': config['dropout'],
-            'rid_of_top': config['rid_of_top'],
-            'num_pred': config['num_pred'],
-            'time_window': config['time_window'],
-            'num_in': config['num_in'],
-            'hidden_size': config['embed_dim'],  # Use embed_dim as hidden_size
-            'learning_rate': lr
-        }
-        
-        # Test ARs to evaluate
-        test_ars = [11698, 11726, 13165, 13179, 13183]
-        successful_ars = []
-        failed_ars = []
-        
-        lr_str = f"{lr:.4f}"
-        
-        for ar in test_ars:
-            try:
-                # Create a temporary output directory for this evaluation
-                temp_output_dir = f"/tmp/ar_eval_lr{lr:.3f}"
-                os.makedirs(temp_output_dir, exist_ok=True)
-                plot_path = evaluate_models_for_ar(ar, lstm_path, model_path, transformer_params, temp_output_dir)
-                
-                # Upload the generated plot to wandb
-                if plot_path and os.path.exists(plot_path):
-                    wandb.log({f'lr_{lr_str}/AR_{ar}_comparison': wandb.Image(plot_path)})
-                    successful_ars.append(ar)
-                else:
-                    failed_ars.append(ar)
-                    
-            except Exception as e:
-                failed_ars.append(ar)
-                print(f"  ✗ Error evaluating AR {ar}: {str(e)}")
-                continue
-        
-        print(f"Completed AR evaluations for learning rate {lr}: {len(successful_ars)}/{len(test_ars)} successful")
-        
-        # Create artifact with all evaluation plots for this learning rate
-        if successful_ars:
-            eval_plots_artifact = wandb.Artifact(
-                name=f"evaluation_plots_lr_{lr:.3f}".replace('.', '_'),
-                type="evaluation_plots",
-                description=f"AR comparison plots for learning rate {lr}",
-                metadata={
-                    "learning_rate": lr,
-                    "successful_ars": successful_ars,
-                    "failed_ars": failed_ars,
-                    "total_ars_attempted": len(test_ars),
-                    "success_rate": len(successful_ars) / len(test_ars)
-                }
-            )
-            
-            # Add successful evaluation plots to artifact
-            for ar in successful_ars:
-                plot_filename = f"AR{ar}_comparison.png"
-                plot_path = f"/tmp/ar_eval_lr{lr:.3f}/{plot_filename}"
-                if os.path.exists(plot_path):
-                    eval_plots_artifact.add_file(plot_path, name=plot_filename)
-            
-            wandb.log_artifact(eval_plots_artifact)
-            print(f"Evaluation plots artifact created: {eval_plots_artifact.name}")
-        
-        print(f"✓ Trial {learning_rates.index(lr) + 1}/5 fully completed including AR evaluations")
-    
-    # Create comprehensive comparison plots
     print(f"\n{'='*50}")
-    print("Creating comprehensive comparison plots...")
+    print(f"TILE-BY-TILE TRAINING: Learning rate {learning_rate}")
     print(f"{'='*50}")
-    create_cross_trial_comparison_plots(all_results, config)
     
-    # Create epoch-wise MSE statistics visualization
-    print("Creating epoch-wise MSE statistics...")
-    create_epoch_mse_statistics_plot(all_results, config)
-    
-    # Log comprehensive summary of all trials
-    print("Logging comprehensive trial summary...")
-    
-    # Create a summary table with all trial results
-    trial_summary_data = []
-    for lr in sorted(all_results.keys()):
-        results = all_results[lr]
-        trial_data = {
-            'learning_rate': lr,
-            'train_loss_final': results['train_losses'][-1] if results['train_losses'] else float('nan'),
-            'test_loss_final': results['test_losses'][-1] if results['test_losses'] else float('nan'),
-            'test_overall_rmse': results.get('overall_rmse', float('nan')),
-            'test_overall_r2': results.get('overall_r2', float('nan')),
-            'test_overall_mse': results.get('overall_mse', float('nan')),
-            'test_overall_mae': results.get('overall_mae', float('nan')),
-            'test_emergence_rmse': results.get('emergence_rmse', float('nan')),
-            'test_emergence_r2': results.get('emergence_r2', float('nan')),
-            'test_emergence_mse': results.get('emergence_mse', float('nan')),
-            'test_emergence_mae': results.get('emergence_mae', float('nan')),
-            'emergence_time_diff': results.get('emergence_time_diff', float('nan')),
-            'emergence_window_size': results.get('emergence_window_size', float('nan')),
-            'num_valid_tiles': results.get('num_valid_tiles', 0),
-            'tile_success_rate': results.get('tile_success_rate', 0.0)
-        }
-        trial_summary_data.append(trial_data)
+    try:
+        # Run tile-by-tile experiment
+        all_results = run_single_experiment(config, device, learning_rate, 0)
+        print(f"✓ Tile-by-tile training completed successfully")
         
-        # Also log individual trial summary metrics with final step
-        final_step = (learning_rates.index(lr) + 1) * config['n_epochs'] - 1  # Correct step for each trial
-        wandb.log({
-            f'final_results/lr_{lr:.4f}_train_loss': trial_data['train_loss_final'],
-            f'final_results/lr_{lr:.4f}_test_loss': trial_data['test_loss_final'],
-            f'final_results/lr_{lr:.4f}_test_overall_rmse': trial_data['test_overall_rmse'],
-            f'final_results/lr_{lr:.4f}_test_overall_r2': trial_data['test_overall_r2'],
-            f'final_results/lr_{lr:.4f}_test_overall_mse': trial_data['test_overall_mse'],
-            f'final_results/lr_{lr:.4f}_test_overall_mae': trial_data['test_overall_mae'],
-            f'final_results/lr_{lr:.4f}_test_emergence_rmse': trial_data['test_emergence_rmse'],
-            f'final_results/lr_{lr:.4f}_test_emergence_r2': trial_data['test_emergence_r2'],
-            f'final_results/lr_{lr:.4f}_test_emergence_mse': trial_data['test_emergence_mse'],
-            f'final_results/lr_{lr:.4f}_test_emergence_mae': trial_data['test_emergence_mae'],
-            f'final_results/lr_{lr:.4f}_emergence_time_diff': trial_data['emergence_time_diff']
-        }, step=final_step)
-    
-    # Log the comprehensive trial summary table
-    trial_summary_df = pd.DataFrame(trial_summary_data)
-    wandb.log({"comprehensive_trial_summary": wandb.Table(dataframe=trial_summary_df)})
-    
-    # Create summary artifact with all models
-    print("Creating wandb artifact with all models...")
-    all_models_artifact = wandb.Artifact(
-        name="lr_search_all_models",
-        type="model_collection",
-        description=f"All transformer models from learning rate search experiment with {len(learning_rates)} learning rates",
-        metadata={
-            "experiment_type": "learning_rate_search",
-            "learning_rates": learning_rates,
-            "n_epochs": config['n_epochs'],
-            "embed_dim": config['embed_dim'],
-            "num_heads": 4,
-            "ff_dim": config['ff_dim'],
-            "num_layers": config['num_layers'],
-            "dropout": config['dropout'],
-            "best_overall_lr": min(all_results.keys(), key=lambda x: all_results[x].get('overall_rmse', float('inf'))),
-            "best_emergence_lr": min(all_results.keys(), key=lambda x: all_results[x].get('emergence_rmse', float('inf'))),
-            "best_timing_lr": min(all_results.keys(), key=lambda x: all_results[x].get('emergence_time_diff', float('inf'))),
-            "total_models": len(all_results)
-        }
-    )
-    
-    # Add all model files to the collection artifact
-    for lr in learning_rates:
-        if lr in all_results:  # Only add if training was successful
-            model_filename = f"transformer_t{config['time_window']}_r{config['rid_of_top']}_i{config['num_in']}_n{config['num_layers']}_h{config['embed_dim']}_e{config['n_epochs']}_l{lr:.5f}_d{config['dropout']:.1f}.pth"
-            model_path = os.path.join(models_dir, model_filename)
-            if os.path.exists(model_path):
-                all_models_artifact.add_file(model_path, name=model_filename)
-    
-    wandb.log_artifact(all_models_artifact)
-    print(f"All models collection uploaded to wandb as artifact: {all_models_artifact.name}")
-    
-    # Log summary statistics
-    summary_stats = {
-        'total_trials_completed': len(all_results),
-        'best_overall_rmse_lr': min(all_results.keys(), key=lambda x: all_results[x].get('overall_rmse', float('inf'))),
-        'best_emergence_rmse_lr': min(all_results.keys(), key=lambda x: all_results[x].get('emergence_rmse', float('inf'))),
-        'best_timing_accuracy_lr': min(all_results.keys(), key=lambda x: all_results[x].get('emergence_time_diff', float('inf'))),
-        'all_trials_rmse_range': max([r.get('overall_rmse', 0) for r in all_results.values()]) - min([r.get('overall_rmse', 0) for r in all_results.values()]),
-        'avg_emergence_rmse': np.mean([r.get('emergence_rmse', 0) for r in all_results.values()]),
-        'avg_overall_rmse': np.mean([r.get('overall_rmse', 0) for r in all_results.values()])
-    }
-    wandb.log(summary_stats)
-    
-    # Find and log best configurations
-    best_overall = min(all_results.keys(), key=lambda x: all_results[x]['overall_rmse'])
-    best_emergence = min(all_results.keys(), key=lambda x: all_results[x]['emergence_rmse'])
-    best_time_error = min(all_results.keys(), key=lambda x: all_results[x]['emergence_time_diff'])
-    
-    # Log best configurations as simple text values
-    wandb.log({
-        'best_overall_lr': best_overall,
-        'best_emergence_lr': best_emergence,
-        'best_timing_lr': best_time_error,
-        'best_overall_rmse': all_results[best_overall]['overall_rmse'],
-        'best_emergence_rmse': all_results[best_emergence]['emergence_rmse'],
-        'best_time_error': all_results[best_time_error]['emergence_time_diff']
-    })
-    
-    # Also log as summary text for easy viewing
-    summary_text = f"""
-    BEST CONFIGURATIONS:
-    - Overall Performance: LR={best_overall} (RMSE: {all_results[best_overall]['overall_rmse']:.4f})
-    - Emergence Prediction: LR={best_emergence} (RMSE: {all_results[best_emergence]['emergence_rmse']:.4f})  
-    - Timing Accuracy: LR={best_time_error} (Error: {all_results[best_time_error]['emergence_time_diff']:.2f} hrs)
-    """
-    wandb.log({"best_configurations_summary": summary_text})
+    except Exception as e:
+        print(f"✗ ERROR in tile-by-tile training:")
+        print(f"  Exception: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return
     
     print(f"\n{'='*50}")
     print("EXPERIMENT COMPLETE!")
-    print(f"Best overall performance: LR={best_overall} (RMSE: {all_results[best_overall]['overall_rmse']:.4f})")
-    print(f"Best emergence prediction: LR={best_emergence} (RMSE: {all_results[best_emergence]['emergence_rmse']:.4f})")
-    print(f"Best timing accuracy: LR={best_time_error} (Error: {all_results[best_time_error]['emergence_time_diff']:.2f} hrs)")
+    print(f"Tile-by-tile training finished with learning rate {learning_rate}")
+    print(f"Total tiles trained: {len(all_results)}")
     print(f"{'='*50}")
     
     # Print model saving summary
@@ -1663,38 +1255,29 @@ def main():
     print(f"{'='*50}")
     print(f"Local directory: {models_dir}")
     print(f"Search type: {search_type}")
-    print(f"Wandb artifacts: Individual models + collection artifact")
-    print("\nSaved models:")
-    for lr in learning_rates:
-        model_filename = f"transformer_t{config['time_window']}_r{config['rid_of_top']}_i{config['num_in']}_n{config['num_layers']}_h{config['embed_dim']}_e{config['n_epochs']}_l{lr:.5f}_d{config['dropout']:.1f}.pth"
-        model_path = os.path.join(models_dir, model_filename)
-        artifact_name = f"transformer_t{config['time_window']}_r{config['rid_of_top']}_i{config['num_in']}_n{config['num_layers']}_h{config['embed_dim']}_e{config['n_epochs']}_l{lr:.5f}_d{config['dropout']:.1f}".replace('.', '_')
+    print(f"Wandb artifacts: Individual tile models + evaluation plots")
+    
+    # Count saved models
+    saved_models = 0
+    for tile_key in all_results.keys():
+        model_path = os.path.join(models_dir, f"{tile_key}_best_model.pth")
         if os.path.exists(model_path):
-            file_size = os.path.getsize(model_path) / (1024*1024)  # Size in MB
-            print(f"  ✓ LR={lr}: {model_filename} ({file_size:.1f} MB)")
-            print(f"    Wandb artifact: {artifact_name}")
-        else:
-            print(f"  ✗ LR={lr}: {model_filename} (MISSING)")
+            saved_models += 1
     
-    print(f"\nWandb artifact collection: lr_search_all_models")
-    print(f"  Contains: {len([lr for lr in learning_rates if lr in all_results])} models")
-    print(f"\nTo download models from wandb:")
-    print(f"  # Download individual model")
-    print(f"  artifact = wandb.use_artifact('your-entity/sar-emergence/transformer_t12_r4_i110_n3_h64_e300_l0_00100_d0_3:latest')")
-    print(f"  artifact_dir = artifact.download()")
-    print(f"  # Download all models")
-    print(f"  artifact = wandb.use_artifact('your-entity/sar-emergence/lr_search_all_models:latest')")
-    print(f"  artifact_dir = artifact.download()")
-    
-    print(f"\nTo load a model:")
-    print(f"  model_state = torch.load('{models_dir}/transformer_t{config['time_window']}_r{config['rid_of_top']}_i{config['num_in']}_n{config['num_layers']}_h{config['embed_dim']}_e{config['n_epochs']}_l{lr:.5f}_d{config['dropout']:.1f}.pth')")
+    print(f"Saved models: {saved_models}/{len(all_results)} tiles")
     print(f"{'='*50}")
     
     # Finish wandb run
     wandb.finish()
 
 def lstm_ready(tile, size, power_maps, intensities, num_in, num_pred):
-    """Use the same data preprocessing as LSTM code.
+    """LSTM-style data preprocessing for transformer compatibility.
+    
+    Uses the same data preprocessing approach as the LSTM code:
+    - Transposes power_maps to (time, features, tiles)
+    - Transposes intensities to (time, tiles)
+    - Extracts specific tile data
+    - Splits into sequences
     
     Args:
         tile: Tile index
@@ -1704,7 +1287,7 @@ def lstm_ready(tile, size, power_maps, intensities, num_in, num_pred):
         num_in: Requested input sequence length
         num_pred: Number of prediction steps
     """
-    # Use the same preprocessing as LSTM code
+    # LSTM-style data preprocessing
     final_maps = np.transpose(power_maps, axes=(2, 1, 0))  # (time, features, tiles)
     final_ints = np.transpose(intensities, axes=(1,0))     # (time, tiles)
     X_trans = final_maps[:,:,tile]  # (time, features)
