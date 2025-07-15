@@ -1,9 +1,8 @@
 import numpy as np
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import wandb
-from typing import Dict, List, Tuple, Any
+from typing import Dict, Any, List, Tuple
 import logging
 import sys
 from datetime import datetime
@@ -12,31 +11,28 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from torch.utils.data import DataLoader, TensorDataset
 from sklearn.metrics import r2_score
-import matplotlib.dates as mdates
-import matplotlib.gridspec as gridspec
 import math
 
-# Add project root to Python path
+# Add project root and ns_transformer to Python path
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 sys.path.append(project_root)
+sys.path.append(os.path.join(project_root, 'ns_transformer', 'ns_models'))
+
+# Import shared NSTransformer components
+from functions import NSTransformerWrapper, get_ns_transformer_config
 
 # Import from existing files
-from transformer.models.st_transformer import SpatioTemporalTransformer
 from transformer.functions import lstm_ready, smooth_with_numpy, emergence_indication, split_sequences
-
-# Import the evaluation module
-from transformer.eval import evaluate_models_for_ar
 
 # Set up logging
 logging.basicConfig(
-    level=logging.WARNING,  # Changed from INFO to WARNING
+    level=logging.WARNING,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[logging.StreamHandler(sys.stdout)]
 )
 logger = logging.getLogger(__name__)
 
 def calculate_r2(y_true: np.ndarray, y_pred: np.ndarray) -> float:
-    """Calculate R² score."""
     if len(y_true.shape) > 1:
         y_true = y_true.flatten()
     if len(y_pred.shape) > 1:
@@ -414,11 +410,10 @@ def load_all_ars_data(ARs, rid_of_top, size, num_in, num_pred):
 # Global variable to store normalization statistics
 GLOBAL_NORM_STATS = None
 
+# Time feature generation removed - now handled inside NSTransformerWrapper
+
 def run_single_experiment(config: Dict[str, Any], device: torch.device, learning_rate: float, global_step_offset: int = 0) -> Dict[str, Any]:
-    """Run a single experiment with the given configuration, tile-by-tile, fresh optimizer per tile (LSTM style)."""
-    print(f"Training model with learning rate {learning_rate} (tile-by-tile, fresh optimizer per tile)...")
-    
-    # ARs list (copied from train_w_stats.py)
+    print(f"Training Non-stationary Transformer with learning rate {learning_rate} (tile-by-tile, fresh optimizer per tile)...")
     ARs = [11130,11149,11158,11162,11199,11327,11344,11387,11393,11416,11422,11455,11619,11640,11660,11678,11682,11765,11768,11776,11916,11928,12036,12051,12085,12089,12144,12175,12203,12257,12331,12494,12659,12778,12864,12877,12900,12929,13004,13085,13098]
     size = 9
     rid_of_top = config['rid_of_top']
@@ -431,31 +426,34 @@ def run_single_experiment(config: Dict[str, Any], device: torch.device, learning
     input_size = np.shape(all_inputs)[1]
     remaining_rows = size - 2*rid_of_top
     tiles = remaining_rows * size
-    
-    print(f"\n=== DATA SHAPES ===")
-    print(f"all_inputs shape: {all_inputs.shape}")
-    print(f"all_intensities shape: {all_intensities.shape}")
-    print(f"input_size (features): {input_size}")
-    print(f"Tiles after trimming: {tiles}")
 
-    # Model definition (shared, but re-initialized for each AR if desired)
     def make_model():
-        return SpatioTemporalTransformer(
-            input_dim=5,
-            seq_len=num_in,
-            embed_dim=config['embed_dim'],
-            num_heads=4,
-            ff_dim=config['ff_dim'],
-            num_layers=config['num_layers'],
-            output_dim=num_pred,
-            dropout=config['dropout'],
-        ).to(device)
+        ns_config = get_ns_transformer_config()
+        ns_config.seq_len = num_in
+        ns_config.label_len = num_pred  # Length of known values in decoder
+        ns_config.pred_len = num_pred   # Length of values to predict
+        ns_config.enc_in = input_size
+        ns_config.dec_in = input_size
+        ns_config.c_out = 1  # Only predict intensity (1 feature)
+        ns_config.d_model = config['embed_dim']
+        ns_config.d_ff = config['ff_dim']
+        ns_config.n_heads = 4
+        ns_config.e_layers = config['num_layers']
+        ns_config.d_layers = config['num_layers']
+        ns_config.dropout = config['dropout']
+        
+        print(f"NSTransformer Config:")
+        print(f"  seq_len: {ns_config.seq_len}")
+        print(f"  label_len: {ns_config.label_len}")
+        print(f"  pred_len: {ns_config.pred_len}")
+        print(f"  enc_in: {ns_config.enc_in}")
+        print(f"  dec_in: {ns_config.dec_in}")
+        print(f"  c_out: {ns_config.c_out}")
+        print(f"  d_model: {ns_config.d_model}")
+        
+        return NSTransformerWrapper(ns_config).to(device)
 
-    # Store results for all ARs/tiles
     all_training_results = {}
-    # lr_curves = {}    # Store learning rate curves for each tile
-
-    # Create a single model instance (like LSTM)
     model = make_model()
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate, weight_decay=0)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=n_epochs//10, gamma=0.9)
@@ -465,52 +463,52 @@ def run_single_experiment(config: Dict[str, Any], device: torch.device, learning
         power_maps = all_inputs[:,:,:,ar_idx]
         intensities = all_intensities[:,:,ar_idx]
         print(f"\nAR {AR} - power_maps shape: {power_maps.shape}, intensities shape: {intensities.shape}")
-        
         for tile in range(tiles):
             print(f"  Training AR {AR} - Tile {tile}")
-            # Prepare data for this tile
             X_tile, y_tile = lstm_ready(tile, size, power_maps, intensities, num_in, num_pred)
             if X_tile.shape[0] == 0:
                 print(f"    Skipping tile {tile} (no data)")
                 continue
             X_tile = torch.reshape(X_tile, (X_tile.shape[0], num_in, X_tile.shape[2])).to(device)
             y_tile = y_tile.to(device)
-            # Split train/test (80/20)
             train_size = int(0.8 * len(X_tile))
             X_train, X_test = X_tile[:train_size], X_tile[train_size:]
             y_train, y_test = y_tile[:train_size], y_tile[train_size:]
-            # Fresh optimizer for each tile (like LSTM)
             optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate, weight_decay=0)
             scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=n_epochs//10, gamma=0.9)
-            
             train_losses = []
             test_losses = []
             lr_values = []
-    best_test_loss = float('inf')
-    best_model_state = None
-            
+            best_test_loss = float('inf')
+            best_model_state = None
             for epoch in range(n_epochs):
-        model.train()
-            optimizer.zero_grad()
-                outputs = model(X_train)
-                loss = loss_fn(outputs, y_train)
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-            optimizer.step()
-                scheduler.step()
+                model.train()
+                optimizer.zero_grad()
                 
+                # Simplified forward pass - time features handled inside wrapper
+                
+                outputs = model(X_train) # Simplified call
+                loss = loss_fn(outputs, y_train)
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                optimizer.step()
+                scheduler.step()
                 current_lr = scheduler.get_last_lr()[0]
                 lr_values.append(current_lr)
                 train_losses.append(loss.item())
+                
                 # Test
-        model.eval()
-        with torch.no_grad():
-                    test_pred = model(X_test)
+                model.eval()
+                with torch.no_grad():
+                    # Simplified test forward pass
+                    
+                    test_pred = model(X_test) # Simplified call
                     test_loss = loss_fn(test_pred, y_test)
                     test_losses.append(test_loss.item())
                     if test_loss.item() < best_test_loss:
                         best_test_loss = test_loss.item()
                         best_model_state = model.state_dict().copy()
+                        
                 if epoch % max(1, n_epochs//10) == 0:
                     print(f"    Epoch {epoch}: train loss {loss.item():.5f}, test loss {test_loss.item():.5f}, lr {current_lr:.2e}")
                 wandb.log({
@@ -519,10 +517,12 @@ def run_single_experiment(config: Dict[str, Any], device: torch.device, learning
                     f"AR{AR}_Tile{tile}/learning_rate": current_lr,
                     "epoch": epoch
                 })
+                
             # Calculate final metrics
             model.eval()
             with torch.no_grad():
-                final_test_pred = model(X_test)
+                # Simplified final evaluation
+                final_test_pred = model(X_test) # Simplified call
                 final_test_loss = loss_fn(final_test_pred, y_test).item()
             y_test_np = y_test.cpu().numpy()
             final_test_pred_np = final_test_pred.cpu().numpy()
@@ -530,8 +530,8 @@ def run_single_experiment(config: Dict[str, Any], device: torch.device, learning
             overall_metrics = calculate_tile_level_emergence_metrics(y_test_np, final_test_pred_np, np.zeros(len(y_test_np)))
             tile_key = f'AR{AR}_Tile{tile}'
             all_training_results[tile_key] = {
-        'train_losses': train_losses,
-        'test_losses': test_losses,
+                'train_losses': train_losses,
+                'test_losses': test_losses,
                 'final_train_loss': train_losses[-1] if train_losses else float('nan'),
                 'final_test_loss': final_test_loss,
                 'emergence_rmse': emergence_metrics.get('emergence_rmse', float('nan')),
@@ -556,58 +556,16 @@ def run_single_experiment(config: Dict[str, Any], device: torch.device, learning
                 f"AR{AR}_Tile{tile}/overall_r2": overall_metrics.get('overall_r2', float('nan'))
             })
     print("\nTile-by-tile training complete. Results stored in all_training_results.")
-    # Save the final model weights (like LSTM)
-    models_dir = os.path.join(project_root, 'transformer', 'results', 'tile_models')
+    models_dir = os.path.join(project_root, 'ns_transformer', 'results', 'tile_models')
     os.makedirs(models_dir, exist_ok=True)
-    model_path = os.path.join(models_dir, f"transformer_lstm_style_final_model.pth")
+    model_path = os.path.join(models_dir, f"ns_transformer_lstm_style_final_model.pth")
     torch.save(model.state_dict(), model_path)
     print(f"Saved final model to {model_path}")
-    # Upload model to wandb
     wandb.save(model_path)
-    # Create AR evaluation plots using the final model
-    print("\nCreating AR evaluation plots...")
-    # LSTM model path (assuming it exists)
-    lstm_path = "/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/lstm/results/t12_r4_i110_n3_h64_e1000_l0.01.pth"
-    # Test ARs to evaluate
-    test_ars = [11698, 11726, 13165, 13179, 13183]
-    successful_ars = []
-    failed_ars = []
-    for ar in test_ars:
-        try:
-            # Use the final model for evaluation (optionally, you can reload if needed)
-            temp_model_path = model_path
-            transformer_params = {
-                'embed_dim': config['embed_dim'],
-                'num_heads': 4,
-                'ff_dim': config['ff_dim'],
-                'num_layers': config['num_layers'],
-                'dropout': config['dropout'],
-                'rid_of_top': config['rid_of_top'],
-                'num_pred': config['num_pred'],
-                'time_window': config['time_window'],
-                'num_in': config['num_in'],
-                'hidden_size': config['embed_dim'],
-                'learning_rate': learning_rate
-            }
-            temp_output_dir = f"/tmp/ar_eval_AR{ar}"
-            os.makedirs(temp_output_dir, exist_ok=True)
-            plot_path = evaluate_models_for_ar(ar, lstm_path, temp_model_path, transformer_params, temp_output_dir)
-            if plot_path and os.path.exists(plot_path):
-                wandb.log({f'AR_{ar}_comparison': wandb.Image(plot_path)})
-                successful_ars.append(ar)
-                print(f"  ✓ AR {ar} evaluation completed")
-            else:
-                failed_ars.append(ar)
-                print(f"  ✗ AR {ar} evaluation failed")
-        except Exception as e:
-            failed_ars.append(ar)
-            print(f"  ✗ Error evaluating AR {ar}: {str(e)}")
-            continue
-    print(f"AR evaluations completed: {len(successful_ars)}/{len(test_ars)} successful")
+    print("\nTraining completed successfully!")
+    print("To evaluate the model, run the evaluation script separately.")
     summary_stats = {
         'total_tiles_trained': len(all_training_results),
-        'successful_ar_evaluations': len(successful_ars),
-        'failed_ar_evaluations': len(failed_ars),
         'avg_final_test_loss': np.mean([r['final_test_loss'] for r in all_training_results.values() if not np.isnan(r['final_test_loss'])]),
         'avg_emergence_rmse': np.mean([r['emergence_rmse'] for r in all_training_results.values() if not np.isnan(r['emergence_rmse'])]),
         'avg_overall_rmse': np.mean([r['overall_rmse'] for r in all_training_results.values() if not np.isnan(r['overall_rmse'])])
@@ -1181,126 +1139,80 @@ Overall MSE:
     })
 
 def main():
-    print("Starting tile-by-tile transformer training (LSTM architecture style)...")
-    
-    # Read API key from .env file
+    print("Starting tile-by-tile Non-stationary Transformer training (LSTM architecture style)...")
     with open('/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/.env', 'r') as f:
         for line in f:
             if line.startswith('WANDB_API_KEY='):
                 api_key = line.strip().split('=')[1]
                 break
-    
-    # Login to wandb first
     wandb.login(key=api_key)
-    
-    # Fixed configuration for the experiment
     config = {
         'num_pred': 12,
         'num_in': 110,
         'embed_dim': 64,
         'ff_dim': 128,
-        'num_layers': 3,  # Fixed to 3 layers
+        'num_layers': 3,
         'dropout': 0.1,
-        'n_epochs': 1000,  # UPDATED from 300 to 1000
+        'n_epochs': 1000,
         'time_window': 12,
         'rid_of_top': 4
     }
-    
-    # Create models directory for saving best models
     project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-    results_dir = os.path.join(project_root, 'transformer', 'results')
-    search_type = "tile_by_tile_training"  # This is a tile-by-tile training experiment
+    results_dir = os.path.join(project_root, 'ns_transformer', 'results')
+    search_type = "tile_by_tile_training"
     models_dir = os.path.join(results_dir, search_type)
     os.makedirs(models_dir, exist_ok=True)
     print(f"Models will be saved to: {models_dir}")
-    
-    # Initialize wandb run
     wandb.init(
         project="sar-emergence",
         entity="jonastirona-new-jersey-institute-of-technology",
         config=config,
-        name="transformer w lstm architecture and params",
-        notes="Tile-by-tile training: t12 r4 i110 n3 h64 e1000 l0.01, 4 heads, 0.1 dropout. Transformer vs LSTM benchmark.",
+        name="ns_transformer_wrapper w lstm architecture and params",
+        notes="Tile-by-tile training: t12 r4 i110 n3 h64 e1000 l0.01, 4 heads, 0.1 dropout. Non-stationary Transformer vs LSTM benchmark.",
     )
-    
-    # Run single experiment with tile-by-tile training
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    learning_rate = 0.01  # Fixed learning rate
-    
+    learning_rate = 0.01
     print(f"\n{'='*50}")
     print(f"TILE-BY-TILE TRAINING: Learning rate {learning_rate}")
     print(f"{'='*50}")
-    
     try:
-        # Run tile-by-tile experiment
         all_results = run_single_experiment(config, device, learning_rate, 0)
         print(f"✓ Tile-by-tile training completed successfully")
-        
     except Exception as e:
         print(f"✗ ERROR in tile-by-tile training:")
         print(f"  Exception: {str(e)}")
         import traceback
         traceback.print_exc()
         return
-    
     print(f"\n{'='*50}")
     print("EXPERIMENT COMPLETE!")
     print(f"Tile-by-tile training finished with learning rate {learning_rate}")
     print(f"Total tiles trained: {len(all_results)}")
     print(f"{'='*50}")
-    
-    # Print model saving summary
     print(f"\n{'='*50}")
     print("SAVED MODELS SUMMARY")
     print(f"{'='*50}")
     print(f"Local directory: {models_dir}")
     print(f"Search type: {search_type}")
     print(f"Wandb artifacts: Individual tile models + evaluation plots")
-    
-    # Count saved models
     saved_models = 0
     for tile_key in all_results.keys():
         model_path = os.path.join(models_dir, f"{tile_key}_best_model.pth")
         if os.path.exists(model_path):
             saved_models += 1
-    
     print(f"Saved models: {saved_models}/{len(all_results)} tiles")
     print(f"{'='*50}")
-    
-    # Finish wandb run
     wandb.finish()
 
 def lstm_ready(tile, size, power_maps, intensities, num_in, num_pred):
-    """LSTM-style data preprocessing for transformer compatibility.
-    
-    Uses the same data preprocessing approach as the LSTM code:
-    - Transposes power_maps to (time, features, tiles)
-    - Transposes intensities to (time, tiles)
-    - Extracts specific tile data
-    - Splits into sequences
-    
-    Args:
-        tile: Tile index
-        size: Grid size
-        power_maps: Power maps data
-        intensities: Intensity data
-        num_in: Requested input sequence length
-        num_pred: Number of prediction steps
-    """
-    # LSTM-style data preprocessing
-    final_maps = np.transpose(power_maps, axes=(2, 1, 0))  # (time, features, tiles)
-    final_ints = np.transpose(intensities, axes=(1,0))     # (time, tiles)
-    X_trans = final_maps[:,:,tile]  # (time, features)
-    y_trans = final_ints[:,tile]    # (time,)
-    
-    # Split into sequences
+    final_maps = np.transpose(power_maps, axes=(2, 1, 0))
+    final_ints = np.transpose(intensities, axes=(1,0))
+    X_trans = final_maps[:,:,tile]
+    y_trans = final_ints[:,tile]
     X_ss, y_mm = split_sequences(X_trans, y_trans, num_in, num_pred)
-    
-    # Convert to tensors
-    X = torch.Tensor(X_ss)  # (batch, seq_len, input_dim)
-    y = torch.Tensor(y_mm)  # (batch, output_dim)
-    
+    X = torch.Tensor(X_ss)
+    y = torch.Tensor(y_mm)
     return X, y
 
 if __name__ == "__main__":
-    main()
+    main() 
