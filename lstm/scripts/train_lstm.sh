@@ -23,5 +23,4 @@ source sar/bin/activate
 pip -V
 echo 'Done loading environment'
 
-cd lstm/
-python -u train_w_stats.py 12 4 110 5 140 500 0.01 0.1
+python -u lstm/train_w_stats.py 12 4 110 5 140 500 0.01 0.1
