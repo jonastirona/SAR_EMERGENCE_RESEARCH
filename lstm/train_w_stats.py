@@ -12,6 +12,11 @@ import wandb
 
 warnings.filterwarnings("ignore")
 
+path = "/mmfs1/project/mx6/ebd/"
+local = True
+if local:
+    path = "../"
+
 
 def main(device, wandb_api_key, wandb_entity, wandb_project):
     # Check if the correct number of arguments is provided
@@ -115,7 +120,7 @@ def main(device, wandb_api_key, wandb_entity, wandb_project):
     ARs_ = ARs + [test_AR]
     result_string = []
     # Define the path for the results file
-    result_file_path = "/mmfs1/project/mx6/ebd/SAR_EMERGENCE_RESEARCH/lstm/results.txt"
+    result_file_path = path + "SAR_EMERGENCE_RESEARCH/lstm/results.txt"
 
     # Preprocessing
     print("Load data and split in tiles for {} ARs".format(len(ARs)))
@@ -123,21 +128,18 @@ def main(device, wandb_api_key, wandb_entity, wandb_project):
     all_flux = []
     for AR in ARs_:
         pm_and_int = np.load(
-            "/mmfs1/project/mx6/ebd/SAR_EMERGENCE_RESEARCH/data/AR{}/mean_pmdop{}_flat.npz".format(
-                AR, AR
-            ),
+            path
+            + "SAR_EMERGENCE_RESEARCH/data/AR{}/mean_pmdop{}_flat.npz".format(AR, AR),
             allow_pickle=True,
         )
         mag_flux = np.load(
-            "/mmfs1/project/mx6/ebd/SAR_EMERGENCE_RESEARCH/data/AR{}/mean_mag{}_flat.npz".format(
-                AR, AR
-            ),
+            path
+            + "SAR_EMERGENCE_RESEARCH/data/AR{}/mean_mag{}_flat.npz".format(AR, AR),
             allow_pickle=True,
         )
         flux = np.load(
-            "/mmfs1/project/mx6/ebd/SAR_EMERGENCE_RESEARCH/data/AR{}/mean_int{}_flat.npz".format(
-                AR, AR
-            ),
+            path
+            + "SAR_EMERGENCE_RESEARCH/data/AR{}/mean_int{}_flat.npz".format(AR, AR),
             allow_pickle=True,
         )
         power_maps23 = pm_and_int["arr_0"]
@@ -249,8 +251,8 @@ def main(device, wandb_api_key, wandb_entity, wandb_project):
                 file.write("".join(result_string))
 
     # Create PDF with loss curves
-    pdf_path = f"t{num_pred}_r{rid_of_top}_i{num_in}_n{num_layers}_h{hidden_size}_e{n_epochs}_l{learning_rate}_d{dropout}_loss_curves",
-    
+    pdf_path = f"t{num_pred}_r{rid_of_top}_i{num_in}_n{num_layers}_h{hidden_size}_e{n_epochs}_l{learning_rate}_d{dropout}_loss_curves"
+
     ## SAVE LOSS CURVES
     # Create summary plots
     fig = plt.figure(figsize=(15, 12))  # Increased height for new metrics
@@ -309,19 +311,17 @@ def main(device, wandb_api_key, wandb_entity, wandb_project):
     print(f"Loss curves saved at: {pdf_path} in wandb")
 
     # Save the model weights
-    model_name = (
-        "t{}_r{}_i{}_n{}_h{}_e{}_l{}_d{}.pth".format(
-            num_pred,
-            rid_of_top,
-            num_in,
-            num_layers,
-            hidden_size,
-            n_epochs,
-            learning_rate,
-            dropout,
-        ),
+    model_name = "t{}_r{}_i{}_n{}_h{}_e{}_l{}_d{}.pth".format(
+        num_pred,
+        rid_of_top,
+        num_in,
+        num_layers,
+        hidden_size,
+        n_epochs,
+        learning_rate,
+        dropout,
     )
-    model_path = f"/mmfs1/project/mx6/ebd/SAR_EMERGENCE_RESEARCH/lstm/results/{model_name}"
+    model_path = path + "SAR_EMERGENCE_RESEARCH/lstm/results/{model_name}"
     torch.save(lstm.state_dict(), model_path)
 
     # Save model to wandb as artifact
@@ -360,7 +360,9 @@ if __name__ == "__main__":
     wandb_project = os.environ.get("WANDB_PROJECT")
 
     # Login to wandb first
-    wandb.login(key=wandb_api_key)
+    # print("2")
+    # wandb.login(key=wandb_api_key, relogin=True, host="https://api.wandb.ai")
+    # print("1")
 
     main(device, wandb_api_key, wandb_entity, wandb_project)
     end_time = time.time()

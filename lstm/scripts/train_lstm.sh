@@ -1,5 +1,6 @@
 #!/bin/bash
 
+#SBATCH --requeue
 #SBATCH --job-name=train_lstm
 #SBATCH --partition=gpu
 #SBATCH --account=mx6
