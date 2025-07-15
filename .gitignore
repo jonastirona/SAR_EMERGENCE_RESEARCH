@@ -57,3 +57,5 @@ Thumbs.db
 
 # pth files
 *.pth
+
+lstm/results.txt
