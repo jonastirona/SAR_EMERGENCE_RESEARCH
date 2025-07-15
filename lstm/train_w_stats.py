@@ -46,8 +46,6 @@ def main(device, wandb_api_key, wandb_entity, wandb_project):
         config = {
             "num_pred": num_pred,
             "num_in": num_in,
-            "embed_dim": 64,
-            "ff_dim": 128,
             "num_layers": num_layers,  # Fixed to 3 layers
             "dropout": dropout,  # Set dropout to 0.3
             "n_epochs": n_epochs,
@@ -240,15 +238,31 @@ def main(device, wandb_api_key, wandb_entity, wandb_project):
 
                 # Store results for plotting
                 all_training_results[f"AR{ARs[AR_]}_Tile{tile}"] = results
+                epochs, train_losses, test_losses, lrs = [], [], [], []
+                fig, ax = plt.subplots()
 
                 # Write AR and tile header
-                result_string.append(f"\nAR {ARs[AR_]} - Tile {tile}\n")
-                result_string.append("Epoch, Train Loss, Test Loss, Learning Rate\n")
                 for epoch, train_loss, test_loss, lr in results:
-                    result_string.append(
-                        f"{epoch}, {train_loss:.5f}, {test_loss:.5f}, {lr:.5f}\n"
-                    )
-                file.write("".join(result_string))
+                    epochs.append(epoch)
+                    train_losses.append(train_loss)
+                    test_losses.append(test_loss)
+                    lrs.append(lr)
+
+                images = {}
+                for name, data in [
+                    ("epoch", epochs),
+                    ("Train_Loss", train_losses),
+                    ("Test_Loss", test_losses),
+                    ("Learning_Rate", lrs),
+                ]:
+                    fig, ax = plt.subplots()
+                    ax.plot(range(len(data)), data)
+                    ax.set_title(name)
+                    ax.grid(True)
+                    images[f"AR{ARs[AR_]}/tile{tile}/{name}"] = wandb.Image(fig)
+                    plt.close(fig)
+
+                wandb.log(images)
 
     # Create PDF with loss curves
     pdf_path = f"t{num_pred}_r{rid_of_top}_i{num_in}_n{num_layers}_h{hidden_size}_e{n_epochs}_l{learning_rate}_d{dropout}_loss_curves"
