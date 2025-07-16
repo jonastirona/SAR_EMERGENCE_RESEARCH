@@ -8,14 +8,6 @@ from ray import tune
 import ray
 from ray.tune.search.optuna import OptunaSearch
 from ray.tune.schedulers import ASHAScheduler
-
-device = torch.device(
-    "cuda" if torch.cuda.is_available() else "cpu"
-)  # Define the device (either 'cuda' for GPU or 'cpu' for CPU)
-print("Runs on: {}".format(device))
-print("Using", torch.cuda.device_count(), "GPUs!")
-
-
 import os
 import sys
 import time
@@ -51,6 +43,7 @@ def main(
     dropout,
 ):
     # Now you can use these variables in your script
+    print(ray.available_resources())
     ARs = [
         11130,
         11149,
@@ -291,7 +284,11 @@ def main(
 
 def objective(config):
     print("Training with", config)
-
+    device = torch.device(
+    "cuda" if torch.cuda.is_available() else "cpu"
+)  # Define the device (either 'cuda' for GPU or 'cpu' for CPU)
+    print("Runs on: {}".format(device))
+    print("Using", torch.cuda.device_count(), "GPUs!")
     main(
         device,
         config,
@@ -318,9 +315,10 @@ search_space = {
 }
 algo = OptunaSearch()
 scheduler = ASHAScheduler(max_t=500, grace_period=10, reduction_factor=3)
-ray.init(include_dashboard=False)
+ray.init(num_cpus=16,
+    num_gpus=4,include_dashboard=False)
 tuner = tune.Tuner(  # ③
-    objective,
+    tune.with_resources(objective, {"cpu": 4, "gpu": 1}),
     tune_config=tune.TuneConfig(
         metric="score",
         mode="min",
