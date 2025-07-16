@@ -35,7 +35,7 @@ warnings.filterwarnings("ignore")
 
 
 path = "/mmfs1/project/mx6/ebd/"
-path = "C:/Projects"
+# path = "C:/Projects/"
 
 
 def main(
@@ -283,9 +283,8 @@ def main(
         learning_rate,
         dropout,
     )
-    model_path = path + F"SAR_EMERGENCE_RESEARCH/lstm/results/{model_name}"
+    model_path = path + f"SAR_EMERGENCE_RESEARCH/lstm/results/{model_name}"
     torch.save(lstm.state_dict(), model_path)
-    config["time_window"] = 12
 
     return lstm.state_dict()
 
