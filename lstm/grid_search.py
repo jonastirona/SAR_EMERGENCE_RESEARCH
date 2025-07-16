@@ -38,7 +38,6 @@ def main(
     dropout,
 ):
     # Now you can use these variables in your script
-    print(ray.available_resources())
     ARs = [
         11130,
         11149,
@@ -170,7 +169,6 @@ def main(
             # prepare train split
             X_tr, y_tr = lstm_ready(tile, size, pm_and_int, flux, num_in, num_pred)
             # reshape into (n_samples, num_in, n_features)
-            print(X_tr.shape)
             X_tr = X_tr.reshape(X_tr.shape[0], num_in, X_tr.shape[2])
             X_train_list.append(X_tr)
             y_train_list.append(y_tr)
@@ -212,6 +210,7 @@ def main(
             optimiser.zero_grad()  # Calculate the gradient, manually setting to 0
             loss = loss_fn(outputs, y_train)
             loss.backward()  # Calculates the loss of the loss function
+            torch.nn.utils.clip_grad_norm_(lstm.parameters(), max_norm=1.0)
             train_loss.append(loss.item())
             optimiser.step()  # Improve from loss, i.e., backprop
 
@@ -309,6 +308,7 @@ search_space = {
 }
 algo = OptunaSearch()
 scheduler = ASHAScheduler(max_t=500, grace_period=10, reduction_factor=3)
+
 ray.init(num_cpus=4, num_gpus=2, include_dashboard=False)
 tuner = tune.Tuner(  # ③
     tune.with_resources(objective, {"cpu": 1, "gpu": 1}),

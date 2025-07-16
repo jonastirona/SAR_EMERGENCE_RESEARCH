@@ -562,44 +562,8 @@ def eval_AR_emergence(
     print(
         f"Extracted from filename: Time Window: {num_pred}, Rid of Top: {rid_of_top}, Number of Inputs: {num_in}, Number of Layers: {num_layers}, Hidden Size: {hidden_size}, Number of Epochs: {n_epochs}, Learning Rate: {learning_rate}"
     )  # Print extracted values for confirmation
-    rid_of_top = (
-        1  # REDEFINED BE CAREFUL / # Now you can use these variables in your script
-    )
-    num_pred = 12
 
-    if test_AR == 11698:
-        starting_tile = 46 - rid_of_top * 9
-        before_plot = 50
-        num_in = 96
-        NOAA_first = datetime(2013, 3, 15, 0, 0, 0)
-        NOAA_second = datetime(2013, 3, 17, 0, 0, 0)
-    elif test_AR == 11726:
-        starting_tile = 37 - rid_of_top * 9
-        before_plot = 50
-        num_in = 72
-        NOAA_first = datetime(2013, 4, 20, 0, 0, 0)
-        NOAA_second = datetime(2013, 4, 22, 0, 0, 0)
-    elif test_AR == 13165:
-        starting_tile = 28 - rid_of_top * 9
-        before_plot = 40
-        num_in = 96
-        NOAA_first = datetime(2022, 12, 12, 0, 0, 0)
-        NOAA_second = datetime(2022, 12, 14, 0, 0, 0)
-    elif test_AR == 13179:
-        starting_tile = 37 - rid_of_top * 9
-        before_plot = 40
-        num_in = 96
-        NOAA_first = datetime(2022, 12, 30, 0, 0, 0)
-        NOAA_second = datetime(2023, 1, 1, 0, 0, 0)
-    elif test_AR == 13183:
-        starting_tile = 37 - rid_of_top * 9
-        before_plot = 40
-        num_in = 96
-        NOAA_first = datetime(2023, 1, 6, 0, 0, 0)
-        NOAA_second = datetime(2023, 1, 8, 0, 0, 0)
-    else:
-        print("Invalid test_AR value. Please use 11698, 11726, 13165, 13179, or 13183.")
-        return
+    starting_tile = 1
 
     # Define the AR information
     size = 9
@@ -663,13 +627,6 @@ def eval_AR_emergence(
     inputs = np.concatenate([stacked_maps, int_reshaped], axis=1)
     input_size = np.shape(inputs)[1]
 
-    # # Initialize the LSTM with the correct architecture from the saved checkpoint
-    # input_size = 5  # Fixed input size (4 power maps + 1 magnetic flux)
-    # hidden_size = 64  # Original hidden size
-    # num_layers = 3  # Original number of layers
-    # num_pred = 12  # Number of time steps to predict
-    # rid_of_top = 1  # As redefined in the code
-
     # Initialize the LSTM and move it to GPU
     lstm = LSTM(input_size, hidden_size, num_layers, num_pred).to(device)
     saved_state_dict = state_dict or torch.load(filename, map_location=device)
@@ -686,7 +643,7 @@ def eval_AR_emergence(
     all_metrics = []
 
     for i in range(7):
-        print("Tile {}".format(starting_tile + 10 + i))
+        print("Tile {}".format(starting_tile + i))
 
         ### Validation
         X_test, y_test = lstm_ready(
@@ -725,6 +682,7 @@ def eval_AR_emergence(
         round(means[3], 3),
         round(means[4], 3),
     )
+    print(mae_string)
     return means[2]
 
 if __name__ == "__main__":
