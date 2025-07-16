@@ -15,12 +15,13 @@ from ray import tune
 
 warnings.filterwarnings("ignore")
 
-path = "/mmfs1/project/mx6/ebd/"
+path = "../"
 
 def load_data(ARs, size):
         all_inputs = []
         all_flux = []
         for AR in ARs:
+
             pm_and_int = np.load(
                 path
                 + "SAR_EMERGENCE_RESEARCH/data/AR{}/mean_pmdop{}_flat.npz".format(AR, AR),
@@ -69,6 +70,7 @@ def load_data(ARs, size):
             int_reshaped = np.expand_dims(intensities, axis=1)
             pm_and_int = np.concatenate([stacked_maps, int_reshaped], axis=1)
             # append all ARs
+            print(pm_and_int.shape, AR)
             all_inputs.append(pm_and_int)
             all_flux.append(mag_flux)
         all_inputs = np.stack(all_inputs, axis=-1)
@@ -170,12 +172,12 @@ def main(
             X_train_list.append(X_tr)
             y_train_list.append(y_tr)
 
-    ARs_ = [11190, 11462, 11521, 11907, 12219, 12271, 12275, 12567, 12571]
+    ARs_ = [11462, 11521, 11907, 12219, 12271, 12275, 12567]
     all_inputs,all_flux,input_size = load_data(ARs_, size)
 
     for AR_ in range(len(ARs_)):
         pm_int = all_inputs[:, :, :, AR_]
-        flux = all_flux[:, :, :, AR_] # Assuming flux also has this dimension
+        flux = all_flux[:, :, AR_] # Assuming flux also has this dimension
         
         for tile in range(tiles):
             X_te, y_te = lstm_ready(tile, size, pm_int, flux, num_in, num_pred)
@@ -232,7 +234,12 @@ def main(
 
         learning_rate = scheduler.get_last_lr()[0]
         scheduler.step()
-
+        print({
+                "epoch": epoch,
+                "train_loss": avg_train_loss,
+                "test_loss": avg_test_loss,
+                "learning_rate": learning_rate,
+            })
         wandb.log(
             {
                 "epoch": epoch,
