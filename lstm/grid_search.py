@@ -316,9 +316,9 @@ search_space = {
 algo = OptunaSearch()
 scheduler = ASHAScheduler(max_t=500, grace_period=10, reduction_factor=3)
 ray.init(num_cpus=16,
-    num_gpus=4,include_dashboard=False)
+    num_gpus=3,include_dashboard=False)
 tuner = tune.Tuner(  # ③
-    tune.with_resources(objective, {"cpu": 4, "gpu": 1}),
+    tune.with_resources(objective, {"cpu": 1, "gpu": 1}),
     tune_config=tune.TuneConfig(
         metric="score",
         mode="min",
