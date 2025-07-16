@@ -1,24 +1,19 @@
 # from train_per_epoch import main as train
 import torch
-from eval import eval_AR_emergence_with_plots as eval
-import wandb
+from eval import eval_AR_emergence as eval
 import numpy as np
 import matplotlib.pyplot as plt
 from ray import tune
 import ray
 from ray.tune.search.optuna import OptunaSearch
 from ray.tune.schedulers import ASHAScheduler
-import os
-import sys
-import time
 import warnings
 
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from functions import LSTM, lstm_ready, min_max_scaling, training_loop_w_stats
-from matplotlib.backends.backend_pdf import PdfPages
-import wandb
+
 from torch.utils.data import TensorDataset, DataLoader
 from torch.optim.lr_scheduler import StepLR
 from ray import tune
@@ -236,7 +231,7 @@ def main(
 
         scores = []
         for AR in [11698, 11726, 13165, 13179, 13183]:
-            score, fig = eval(
+            score = eval(
                 device,
                 AR,
                 False,
@@ -251,7 +246,6 @@ def main(
                 config["lr"],
                 config["dropout"],
             )
-            plt.close(fig)
             scores.append(score)
         val_rmse = float(np.mean(scores))
         print(f"Score: {val_rmse:.8f}")
@@ -285,8 +279,8 @@ def main(
 def objective(config):
     print("Training with", config)
     device = torch.device(
-    "cuda" if torch.cuda.is_available() else "cpu"
-)  # Define the device (either 'cuda' for GPU or 'cpu' for CPU)
+        "cuda" if torch.cuda.is_available() else "cpu"
+    )  # Define the device (either 'cuda' for GPU or 'cpu' for CPU)
     print("Runs on: {}".format(device))
     print("Using", torch.cuda.device_count(), "GPUs!")
     main(
@@ -315,8 +309,7 @@ search_space = {
 }
 algo = OptunaSearch()
 scheduler = ASHAScheduler(max_t=500, grace_period=10, reduction_factor=3)
-ray.init(num_cpus=4,
-    num_gpus=2,include_dashboard=False)
+ray.init(num_cpus=4, num_gpus=2, include_dashboard=False)
 tuner = tune.Tuner(  # ③
     tune.with_resources(objective, {"cpu": 1, "gpu": 1}),
     tune_config=tune.TuneConfig(

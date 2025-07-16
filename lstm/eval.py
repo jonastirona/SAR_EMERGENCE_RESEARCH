@@ -524,6 +524,210 @@ def eval_AR_emergence_with_plots(
     else:
         return (score**0.5, fig)
 
+def eval_AR_emergence(
+    device,
+    test_AR,
+    save_fig,
+    path,
+    state_dict,
+    num_pred,
+    rid_of_top,
+    num_in,
+    num_layers,
+    hidden_size,
+    n_epochs,
+    learning_rate,
+    dropout,
+):
+    if not state_dict:
+        pth_files = glob.glob(
+            path + "SAR_EMERGENCE_RESEARCH/lstm/results/*.pth"
+        )  # Assuming there's only one .pth file and its naming follows the specific pattern
+        filename = pth_files[0]
+        matches = re.findall(
+            r"t(\d+)_r(\d+)_i(\d+)_n(\d+)_h(\d+)_e(\d+)_l([0-9.]+)_d([0-9.]+)\.pth",
+            filename,
+        )  # Extract numbers from the filename
+        (
+            num_pred,
+            rid_of_top,
+            num_in,
+            num_layers,
+            hidden_size,
+            n_epochs,
+            learning_rate,
+            dropout,
+        ) = [
+            float(val) if i >= 6 else int(val) for i, val in enumerate(matches[0])
+        ]  # Unpack the matched values into variables
+    print(
+        f"Extracted from filename: Time Window: {num_pred}, Rid of Top: {rid_of_top}, Number of Inputs: {num_in}, Number of Layers: {num_layers}, Hidden Size: {hidden_size}, Number of Epochs: {n_epochs}, Learning Rate: {learning_rate}"
+    )  # Print extracted values for confirmation
+    rid_of_top = (
+        1  # REDEFINED BE CAREFUL / # Now you can use these variables in your script
+    )
+    num_pred = 12
+
+    if test_AR == 11698:
+        starting_tile = 46 - rid_of_top * 9
+        before_plot = 50
+        num_in = 96
+        NOAA_first = datetime(2013, 3, 15, 0, 0, 0)
+        NOAA_second = datetime(2013, 3, 17, 0, 0, 0)
+    elif test_AR == 11726:
+        starting_tile = 37 - rid_of_top * 9
+        before_plot = 50
+        num_in = 72
+        NOAA_first = datetime(2013, 4, 20, 0, 0, 0)
+        NOAA_second = datetime(2013, 4, 22, 0, 0, 0)
+    elif test_AR == 13165:
+        starting_tile = 28 - rid_of_top * 9
+        before_plot = 40
+        num_in = 96
+        NOAA_first = datetime(2022, 12, 12, 0, 0, 0)
+        NOAA_second = datetime(2022, 12, 14, 0, 0, 0)
+    elif test_AR == 13179:
+        starting_tile = 37 - rid_of_top * 9
+        before_plot = 40
+        num_in = 96
+        NOAA_first = datetime(2022, 12, 30, 0, 0, 0)
+        NOAA_second = datetime(2023, 1, 1, 0, 0, 0)
+    elif test_AR == 13183:
+        starting_tile = 37 - rid_of_top * 9
+        before_plot = 40
+        num_in = 96
+        NOAA_first = datetime(2023, 1, 6, 0, 0, 0)
+        NOAA_second = datetime(2023, 1, 8, 0, 0, 0)
+    else:
+        print("Invalid test_AR value. Please use 11698, 11726, 13165, 13179, or 13183.")
+        return
+
+    # Define the AR information
+    size = 9
+    tiles = size**2 - 2 * size * rid_of_top
+
+    # Preprocessing
+    power_maps = np.load(
+        path
+        + "SAR_EMERGENCE_RESEARCH/data/AR{}/mean_pmdop{}_flat.npz".format(
+            test_AR, test_AR
+        ),
+        allow_pickle=True,
+    )
+    mag_flux = np.load(
+        path
+        + "SAR_EMERGENCE_RESEARCH/data/AR{}/mean_mag{}_flat.npz".format(
+            test_AR, test_AR
+        ),
+        allow_pickle=True,
+    )
+    intensities = np.load(
+        path
+        + "SAR_EMERGENCE_RESEARCH/data/AR{}/mean_int{}_flat.npz".format(
+            test_AR, test_AR
+        ),
+        allow_pickle=True,
+    )
+    power_maps23 = power_maps["arr_0"]
+    power_maps34 = power_maps["arr_1"]
+    power_maps45 = power_maps["arr_2"]
+    power_maps56 = power_maps["arr_3"]
+    time = power_maps["arr_4"]
+    mag_flux = mag_flux["arr_0"]
+    intensities = intensities["arr_0"]
+    # Trim array to get rid of top and bottom 0 tiles
+    power_maps23 = power_maps23[rid_of_top * size : -rid_of_top * size, :]
+    power_maps34 = power_maps34[rid_of_top * size : -rid_of_top * size, :]
+    power_maps45 = power_maps45[rid_of_top * size : -rid_of_top * size, :]
+    power_maps56 = power_maps56[rid_of_top * size : -rid_of_top * size, :]
+    mag_flux = mag_flux[rid_of_top * size : -rid_of_top * size, :]
+    mag_flux[np.isnan(mag_flux)] = 0
+    intensities = intensities[rid_of_top * size : -rid_of_top * size, :]
+    intensities[np.isnan(intensities)] = 0
+    # stack inputs and normalize
+    stacked_maps = np.stack(
+        [power_maps23, power_maps34, power_maps45, power_maps56], axis=1
+    )
+    stacked_maps[np.isnan(stacked_maps)] = 0
+    min_p = np.min(stacked_maps)
+    max_p = np.max(stacked_maps)
+    min_m = np.min(mag_flux)
+    max_m = np.max(mag_flux)
+    min_i = np.min(intensities)
+    max_i = np.max(intensities)
+    stacked_maps = min_max_scaling(stacked_maps, min_p, max_p)
+    mag_flux = min_max_scaling(mag_flux, min_m, max_m)
+    intensities = min_max_scaling(intensities, min_i, max_i)
+
+    # Reshape int to have an extra dimension and then put it with pmaps
+    int_reshaped = np.expand_dims(intensities, axis=1)
+    inputs = np.concatenate([stacked_maps, int_reshaped], axis=1)
+    input_size = np.shape(inputs)[1]
+
+    # # Initialize the LSTM with the correct architecture from the saved checkpoint
+    # input_size = 5  # Fixed input size (4 power maps + 1 magnetic flux)
+    # hidden_size = 64  # Original hidden size
+    # num_layers = 3  # Original number of layers
+    # num_pred = 12  # Number of time steps to predict
+    # rid_of_top = 1  # As redefined in the code
+
+    # Initialize the LSTM and move it to GPU
+    lstm = LSTM(input_size, hidden_size, num_layers, num_pred).to(device)
+    saved_state_dict = state_dict or torch.load(filename, map_location=device)
+    new_state_dict = OrderedDict()
+    for k, v in saved_state_dict.items():
+        name = k[7:] if k.startswith("module.") else k  # remove 'module.' prefix
+        new_state_dict[name] = v
+    lstm.load_state_dict(new_state_dict)
+    lstm.eval()  # Set the model to evaluation mode
+
+    # Assuming prediction, y_test_tensors, ARs, learning_rate, and n_epochs are already defined
+    # Loop to create 8 plots
+    future = num_pred - 1
+    all_metrics = []
+
+    for i in range(7):
+        print()
+        print("Tile {}".format(starting_tile + 10 + i))
+
+        ### Validation
+        X_test, y_test = lstm_ready(
+            starting_tile + i, size, inputs, mag_flux, num_in, num_pred
+        )  # ,min_p,max_p,min_i,max_i)
+        X_test = X_test.to(device)
+
+        all_predictions = lstm(X_test)
+        pred = all_predictions[:, future].detach().cpu().numpy()
+        true = y_test[:, future].numpy()
+        last_known_idx = (
+            np.shape(mag_flux[starting_tile + i, :])[0] - np.shape(true)[0] - 1
+        )  # the index in the timeline before we start predicting
+        pred = recalibrate(pred, mag_flux[starting_tile + i, last_known_idx])
+        # Evaluation metrics
+        metrics = calculate_metrics(true, pred)
+        all_metrics.append(metrics)
+        # print(f"MAE: {metrics[0]}")
+        # print(f"MSE: {metrics[1]}")
+        print(f"RMSE: {metrics[2]}")
+        # print(f"RMSLE: {metrics[3]}")
+        # print(f"R-squared: {metrics[4]}")
+
+    # Print the metrics at the bottom
+    all_metrics_np = np.array(
+        all_metrics
+    )  # Convert all_metrics to a NumPy array for easier manipulation
+    means = np.mean(
+        all_metrics_np, axis=0
+    )  # Calculate the mean and standard deviation for each metric across the 7 runs
+    stds = np.std(all_metrics_np, axis=0)
+    mae_string = r"Average metrics for all tiles plotted:  $\mathrm{{MAE}} = {}$,  $\mathrm{{MSE}} = {}$,  $\mathrm{{RMSE}} = {}$,  $\mathrm{{RMSLE}} = {}$,  $R^2 = {}$".format(
+        round(means[0], 3),
+        round(means[1], 3),
+        round(means[2], 3),
+        round(means[3], 3),
+        round(means[4], 3),
+    )
+    return means[2]
 
 if __name__ == "__main__":
     device = torch.device(
