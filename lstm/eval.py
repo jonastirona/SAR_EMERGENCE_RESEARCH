@@ -21,6 +21,7 @@ from torch.optim.lr_scheduler import StepLR, ExponentialLR, ReduceLROnPlateau
 from torch.utils.data import Dataset, TensorDataset, DataLoader
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
 from sklearn.model_selection import train_test_split
+from sklearn.metrics import mean_squared_error
 from datetime import datetime, timedelta
 from collections import OrderedDict
 import matplotlib.dates as mdates
@@ -37,43 +38,53 @@ import sys
 import glob
 import re
 import os
+import wandb
 
-local = True
-path = '/mmfs1/project/mx6/ebd/'
-if local:
-    path = '../'
+warnings.filterwarnings("ignore")
 
-def eval_AR_emergence_with_plots(test_AR):
-    # Initialize and load network
-    warnings.filterwarnings("ignore")
-    device = torch.device(
-        "cuda" if torch.cuda.is_available() else "cpu"
-    )  # Define the device (either 'cuda' for GPU or 'cpu' for CPU)
-    print("Runs on: {}".format(device), " / Using", torch.cuda.device_count(), "GPUs!")
-    pth_files = glob.glob(
-        path + "SAR_EMERGENCE_RESEARCH/lstm/results/*.pth"
-    )  # Assuming there's only one .pth file and its naming follows the specific pattern
-    filename = pth_files[0]
-    matches = re.findall(
-        r"t(\d+)_r(\d+)_i(\d+)_n(\d+)_h(\d+)_e(\d+)_l([0-9.]+)_d([0-9.]+)\.pth",
-        filename,
-    )  # Extract numbers from the filename
-    (
-        num_pred,
-        rid_of_top,
-        num_in,
-        num_layers,
-        hidden_size,
-        n_epochs,
-        learning_rate,
-        dropout,
-    ) = [
-        float(val) if i >= 6 else int(val) for i, val in enumerate(matches[0])
-    ]  # Unpack the matched values into variables
+
+def eval_AR_emergence_with_plots(
+    device,
+    test_AR,
+    save_fig,
+    path,
+    state_dict,
+    num_pred,
+    rid_of_top,
+    num_in,
+    num_layers,
+    hidden_size,
+    n_epochs,
+    learning_rate,
+    dropout,
+):
+    if not state_dict:
+        pth_files = glob.glob(
+            path + "SAR_EMERGENCE_RESEARCH/lstm/results/*.pth"
+        )  # Assuming there's only one .pth file and its naming follows the specific pattern
+        filename = pth_files[0]
+        matches = re.findall(
+            r"t(\d+)_r(\d+)_i(\d+)_n(\d+)_h(\d+)_e(\d+)_l([0-9.]+)_d([0-9.]+)\.pth",
+            filename,
+        )  # Extract numbers from the filename
+        (
+            num_pred,
+            rid_of_top,
+            num_in,
+            num_layers,
+            hidden_size,
+            n_epochs,
+            learning_rate,
+            dropout,
+        ) = [
+            float(val) if i >= 6 else int(val) for i, val in enumerate(matches[0])
+        ]  # Unpack the matched values into variables
     print(
         f"Extracted from filename: Time Window: {num_pred}, Rid of Top: {rid_of_top}, Number of Inputs: {num_in}, Number of Layers: {num_layers}, Hidden Size: {hidden_size}, Number of Epochs: {n_epochs}, Learning Rate: {learning_rate}"
     )  # Print extracted values for confirmation
-    rid_of_top = 1 # REDEFINED BE CAREFUL / # Now you can use these variables in your script
+    rid_of_top = (
+        1  # REDEFINED BE CAREFUL / # Now you can use these variables in your script
+    )
     num_pred = 12
 
     if test_AR == 11698:
@@ -167,19 +178,22 @@ def eval_AR_emergence_with_plots(test_AR):
 
     # Preprocessing
     power_maps = np.load(
-        path + "SAR_EMERGENCE_RESEARCH/data/AR{}/mean_pmdop{}_flat.npz".format(
+        path
+        + "SAR_EMERGENCE_RESEARCH/data/AR{}/mean_pmdop{}_flat.npz".format(
             test_AR, test_AR
         ),
         allow_pickle=True,
     )
     mag_flux = np.load(
-        path + "SAR_EMERGENCE_RESEARCH/data/AR{}/mean_mag{}_flat.npz".format(
+        path
+        + "SAR_EMERGENCE_RESEARCH/data/AR{}/mean_mag{}_flat.npz".format(
             test_AR, test_AR
         ),
         allow_pickle=True,
     )
     intensities = np.load(
-        path + "SAR_EMERGENCE_RESEARCH/data/AR{}/mean_int{}_flat.npz".format(
+        path
+        + "SAR_EMERGENCE_RESEARCH/data/AR{}/mean_int{}_flat.npz".format(
             test_AR, test_AR
         ),
         allow_pickle=True,
@@ -229,7 +243,7 @@ def eval_AR_emergence_with_plots(test_AR):
 
     # Initialize the LSTM and move it to GPU
     lstm = LSTM(input_size, hidden_size, num_layers, num_pred).to(device)
-    saved_state_dict = torch.load(filename, map_location=device)
+    saved_state_dict = state_dict or torch.load(filename, map_location=device)
     new_state_dict = OrderedDict()
     for k, v in saved_state_dict.items():
         name = k[7:] if k.startswith("module.") else k  # remove 'module.' prefix
@@ -254,7 +268,6 @@ def eval_AR_emergence_with_plots(test_AR):
         print("Tile {}".format(starting_tile + 10 + i))
 
         ### Validation
-        print(starting_tile, i)
         X_test, y_test = lstm_ready(
             starting_tile + i, size, inputs, mag_flux, num_in, num_pred
         )  # ,min_p,max_p,min_i,max_i)
@@ -288,14 +301,14 @@ def eval_AR_emergence_with_plots(test_AR):
 
         # Main plot
         ax0 = plt.subplot(gs[0])
-        ax0.plot(time_cut_mpl, np.concatenate((nan_array, pred)), color='black')
-        ax0.plot(time_cut_mpl, np.concatenate((mag_before_pred, true)))
+        ax0.plot(time_cut_mpl, np.concatenate((nan_array, pred)), color="black")
+        ax0.plot(time_cut_mpl, np.concatenate((mag_before_pred, true)), color="red")
         ax0.plot(
             time_cut_mpl,
             smooth_with_numpy(np.concatenate((mag_before_pred, true))),
             color="black",
             alpha=0.25,
-        ) 
+        )
         ax0.set_ylabel(
             f"Tile {starting_tile + 10 + i}"
         )  # Title for each plot (optional)
@@ -497,21 +510,26 @@ def eval_AR_emergence_with_plots(test_AR):
         ),
         y=0.99,
     )
-    save_path = path + "SAR_EMERGENCE_RESEARCH/lstm/results/AR{}_{}.png".format(
-        test_AR, os.path.splitext(os.path.basename(pth_files[0]))[0]
+
+    score = mean_squared_error(
+        np.concatenate((mag_before_pred, true)), np.concatenate((zeros_array, pred))
     )
-    plt.savefig(save_path)
-    print("Results saved at: " + save_path)
+
+    if save_fig:
+        save_path = path + "SAR_EMERGENCE_RESEARCH/lstm/results/AR{}_{}.png".format(
+            test_AR, os.path.splitext(os.path.basename(pth_files[0]))[0]
+        )
+        plt.savefig(save_path)
+        print("Results saved at: " + save_path)
+    else:
+        return (score**0.5, fig)
 
 
 if __name__ == "__main__":
-    test_AR = 11698
-    eval_AR_emergence_with_plots(test_AR)
-    test_AR = 11726
-    eval_AR_emergence_with_plots(test_AR)
-    test_AR = 13165
-    eval_AR_emergence_with_plots(test_AR)
-    test_AR = 13179
-    eval_AR_emergence_with_plots(test_AR)
-    test_AR = 13183
-    eval_AR_emergence_with_plots(test_AR)
+    device = torch.device(
+        "cuda" if torch.cuda.is_available() else "cpu"
+    )  # Define the device (either 'cuda' for GPU or 'cpu' for CPU)
+    print("Runs on: {}".format(device), " / Using", torch.cuda.device_count(), "GPUs!")
+
+    for AR in [11698, 11726, 13165, 13179, 13183]:
+        score, fig = eval_AR_emergence_with_plots(device, AR, True, '../')

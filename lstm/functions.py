@@ -172,7 +172,6 @@ def lstm_ready(
     tile, size, power_maps, mag_flux, num_in, num_pred
 ):  # ,min_p,max_p,min_i,max_i):
     # Read AR and create lstm ready data
-    print(power_maps.size)
     final_maps = np.transpose(power_maps, axes=(2, 1, 0))
     final_flux = np.transpose(mag_flux, axes=(1, 0))
     X_trans = final_maps[:, :, tile]
@@ -203,11 +202,11 @@ def training_loop(n_epochs, lstm, optimiser, loss_fn, X_train, y_train, X_test, 
         ):  # Turn off gradients for validation, saves memory and computations
             test_preds = lstm(X_test)
             test_loss = loss_fn(test_preds, y_test)
-        if epoch % int(n_epochs / 10) == 0:
-            print(
-                "Epoch: %d, train loss: %1.5f, test loss: %1.5f"
-                % (epoch, loss.item(), test_loss.item())
-            )
+        # if epoch % int(n_epochs / 10) == 0:
+        #     print(
+        #         "Epoch: %d, train loss: %1.5f, test loss: %1.5f"
+        #         % (epoch, loss.item(), test_loss.item())
+        #     )
         scheduler.step()
 
 
@@ -239,10 +238,10 @@ def training_loop_w_stats(
 
         # if epoch % int(n_epochs/100) == 0:
         learning_rate = scheduler.get_last_lr()[0]
-        print(
-            "Epoch: %d, train loss: %1.5f, test loss: %1.5f, learning rate: %1.5f"
-            % (epoch, loss.item(), test_loss.item(), learning_rate)
-        )
+        # print(
+        #     "Epoch: %d, train loss: %1.5f, test loss: %1.5f, learning rate: %1.5f"
+        #     % (epoch, loss.item(), test_loss.item(), learning_rate)
+        # )
         results.append(
             (epoch, loss.item(), test_loss.item(), learning_rate)
         )  # Collect results for saving
