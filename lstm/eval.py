@@ -34,7 +34,6 @@ from PIL import Image
 import numpy as np
 import warnings
 import torch
-import sys
 import glob
 import re
 import os
@@ -687,7 +686,6 @@ def eval_AR_emergence(
     all_metrics = []
 
     for i in range(7):
-        print()
         print("Tile {}".format(starting_tile + 10 + i))
 
         ### Validation
