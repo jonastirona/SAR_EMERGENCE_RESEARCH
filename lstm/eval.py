@@ -47,15 +47,15 @@ def eval_AR_emergence_with_plots(
     test_AR,
     save_fig,
     path,
-    state_dict,
-    num_pred,
-    rid_of_top,
-    num_in,
-    num_layers,
-    hidden_size,
-    n_epochs,
-    learning_rate,
-    dropout,
+    state_dict=None,
+    num_pred=None,
+    rid_of_top=None,
+    num_in=None,
+    num_layers=None,
+    hidden_size=None,
+    n_epochs=None,
+    learning_rate=None,
+    dropout=None,
 ):
     if not state_dict:
         pth_files = glob.glob(
@@ -81,45 +81,37 @@ def eval_AR_emergence_with_plots(
     print(
         f"Extracted from filename: Time Window: {num_pred}, Rid of Top: {rid_of_top}, Number of Inputs: {num_in}, Number of Layers: {num_layers}, Hidden Size: {hidden_size}, Number of Epochs: {n_epochs}, Learning Rate: {learning_rate}"
     )  # Print extracted values for confirmation
-    rid_of_top = (
-        1  # REDEFINED BE CAREFUL / # Now you can use these variables in your script
-    )
-    num_pred = 12
+    
 
     if test_AR == 11698:
         starting_tile = 46 - rid_of_top * 9
         before_plot = 50
-        num_in = 96
         NOAA_first = datetime(2013, 3, 15, 0, 0, 0)
         NOAA_second = datetime(2013, 3, 17, 0, 0, 0)
     elif test_AR == 11726:
         starting_tile = 37 - rid_of_top * 9
         before_plot = 50
-        num_in = 72
         NOAA_first = datetime(2013, 4, 20, 0, 0, 0)
         NOAA_second = datetime(2013, 4, 22, 0, 0, 0)
     elif test_AR == 13165:
         starting_tile = 28 - rid_of_top * 9
         before_plot = 40
-        num_in = 96
         NOAA_first = datetime(2022, 12, 12, 0, 0, 0)
         NOAA_second = datetime(2022, 12, 14, 0, 0, 0)
     elif test_AR == 13179:
         starting_tile = 37 - rid_of_top * 9
         before_plot = 40
-        num_in = 96
         NOAA_first = datetime(2022, 12, 30, 0, 0, 0)
         NOAA_second = datetime(2023, 1, 1, 0, 0, 0)
     elif test_AR == 13183:
         starting_tile = 37 - rid_of_top * 9
         before_plot = 40
-        num_in = 96
         NOAA_first = datetime(2023, 1, 6, 0, 0, 0)
         NOAA_second = datetime(2023, 1, 8, 0, 0, 0)
     else:
         print("Invalid test_AR value. Please use 11698, 11726, 13165, 13179, or 13183.")
         return
-
+    starting_tile = 1
     # Define the AR information
     ARs = [
         11130,
@@ -523,20 +515,21 @@ def eval_AR_emergence_with_plots(
     else:
         return (score**0.5, fig)
 
+
 def eval_AR_emergence(
     device,
     test_AR,
     save_fig,
     path,
-    state_dict,
-    num_pred,
-    rid_of_top,
-    num_in,
-    num_layers,
-    hidden_size,
-    n_epochs,
-    learning_rate,
-    dropout,
+    state_dict=None,
+    num_pred=None,
+    rid_of_top=None,
+    num_in=None,
+    num_layers=None,
+    hidden_size=None,
+    n_epochs=None,
+    learning_rate=None,
+    dropout=None,
 ):
     if not state_dict:
         pth_files = glob.glob(
@@ -685,6 +678,7 @@ def eval_AR_emergence(
     print(mae_string)
     return means[2]
 
+
 if __name__ == "__main__":
     device = torch.device(
         "cuda" if torch.cuda.is_available() else "cpu"
@@ -692,4 +686,4 @@ if __name__ == "__main__":
     print("Runs on: {}".format(device), " / Using", torch.cuda.device_count(), "GPUs!")
 
     for AR in [11698, 11726, 13165, 13179, 13183]:
-        score, fig = eval_AR_emergence_with_plots(device, AR, True, '../')
+        eval_AR_emergence_with_plots(device, AR, True, "../")
