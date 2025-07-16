@@ -28,12 +28,41 @@ from transformer.functions import (
 from transformer.models.st_transformer import SpatioTemporalTransformer
 
 
+def lstm_ready(tile, size, power_maps, intensities, num_in, num_pred, model_seq_len=None):
+    """Enhanced version with sequence length padding for model compatibility."""
+    # Use training-style data preprocessing for consistency
+    final_maps = np.transpose(power_maps, axes=(2, 1, 0))  # (time, features, tiles)
+    final_ints = np.transpose(intensities, axes=(1,0))     # (time, tiles)
+    X_trans = final_maps[:,:,tile]  # (time, features)
+    y_trans = final_ints[:,tile]    # (time,)
+    
+    available_time_steps = len(X_trans)
+    max_possible_num_in = available_time_steps - num_pred
+    
+    if max_possible_num_in <= 0:
+        raise ValueError(f"Not enough data for tile {tile}")
+    
+    effective_num_in = min(num_in, max_possible_num_in)
+    X_ss, y_mm = split_sequences(X_trans, y_trans, effective_num_in, num_pred)
+    
+    # If model expects a different sequence length, pad accordingly
+    target_seq_len = model_seq_len if model_seq_len is not None else effective_num_in
+    if effective_num_in < target_seq_len and len(X_ss) > 0:
+        padding_length = target_seq_len - effective_num_in
+        padding_shape = (len(X_ss), padding_length, X_ss.shape[2])
+        padding = np.zeros(padding_shape)
+        X_ss = np.concatenate([padding, X_ss], axis=1)
+    
+    X = torch.Tensor(X_ss)
+    y = torch.Tensor(y_mm)
+    return X, y
+
 def get_ar_settings(test_AR, rid_of_top):
     """Get AR-specific settings."""
     if test_AR == 11698:
         starting_tile = 46 - rid_of_top * 9
         before_plot = 50
-        num_in = 96
+        num_in = 110
         NOAA_first = datetime(2013, 3, 15)
         NOAA_second = datetime(2013, 3, 17)
     elif test_AR == 11726:
@@ -46,19 +75,19 @@ def get_ar_settings(test_AR, rid_of_top):
         rid_of_top = 1  # Force rid_of_top to 1 for AR 13165
         starting_tile = 28 - rid_of_top * 9
         before_plot = 40
-        num_in = 96
+        num_in = 110
         NOAA_first = datetime(2022, 12, 12)
         NOAA_second = datetime(2022, 12, 14)
     elif test_AR == 13179:
         starting_tile = 37 - rid_of_top * 9
         before_plot = 40
-        num_in = 96
+        num_in = 110
         NOAA_first = datetime(2022, 12, 30)
         NOAA_second = datetime(2023, 1, 1)
     elif test_AR == 13183:
         starting_tile = 37 - rid_of_top * 9
         before_plot = 40
-        num_in = 96
+        num_in = 110
         NOAA_first = datetime(2023, 1, 6)
         NOAA_second = datetime(2023, 1, 8)
     else:
@@ -239,38 +268,6 @@ def create_emergence_metrics_table(ax, metrics):
             cell.set_text_props(fontsize=8)
 
 
-def lstm_ready(tile, size, power_maps, intensities, num_in, num_pred, model_seq_len=None):
-    X_trans = power_maps[tile]
-    y_trans = intensities[tile]
-    
-    X_trans = X_trans.T
-    
-    available_time_steps = len(X_trans)
-
-    max_possible_num_in = available_time_steps - num_pred
-    
-    if max_possible_num_in <= 0:
-        raise ValueError(f"Not enough data for tile {tile}. Available: {available_time_steps}, Need at least: {num_pred + 1}")
-    
-    effective_num_in = min(num_in, max_possible_num_in)
-    
-    X_ss, y_mm = split_sequences(X_trans, y_trans, effective_num_in, num_pred)
-    
-    # If model expects a different sequence length, pad accordingly
-    target_seq_len = model_seq_len if model_seq_len is not None else effective_num_in
-    if effective_num_in < target_seq_len and len(X_ss) > 0:
-        padding_length = target_seq_len - effective_num_in
-        padding_shape = (len(X_ss), padding_length, X_ss.shape[2])
-        padding = np.zeros(padding_shape)
-        X_ss = np.concatenate([padding, X_ss], axis=1)
-    
-    # Convert to tensors
-    X = torch.Tensor(X_ss)
-    y = torch.Tensor(y_mm)
-    
-    return X, y
-
-
 def evaluate_models_for_ar(test_AR, lstm_path, transformer_path, transformer_params, output_dir):
     """Evaluate LSTM and Transformer models for a specific AR and return the saved plot path."""
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -354,7 +351,10 @@ def evaluate_models_for_ar(test_AR, lstm_path, transformer_path, transformer_par
             ff_dim=transformer_params['ff_dim'],
             num_layers=transformer_params['num_layers'],
             output_dim=transformer_params['num_pred'],
-            dropout=transformer_params['dropout']
+            dropout=transformer_params['dropout'],
+            use_cls_token=True,        # Enable for saved model
+            use_attention_pool=True,   # Enable for saved model  
+            use_pre_mlp_norm=True     # Disable for saved model
         ).to(device)
         trfm.load_state_dict(torch.load(transformer_path,map_location=device)); trfm.eval()
 

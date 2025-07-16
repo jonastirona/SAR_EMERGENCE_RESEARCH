@@ -131,36 +131,37 @@ def plot_frame_difference_metric(frame_diffs,cor_file):
 def min_max_scaling(arr, min_val, max_val):
     return (arr - min_val) / (max_val - min_val)
 
-def lstm_ready(tile, size, power_maps, intensities, num_in, num_pred):
-    """Prepare data for a specific tile.
+def lstm_ready(tile, size, power_maps, intensities, num_in, num_pred, model_seq_len=None):
+    """Enhanced version with sequence length padding for model compatibility."""
+    # Use training-style data preprocessing for consistency
+    final_maps = np.transpose(power_maps, axes=(2, 1, 0))  # (time, features, tiles)
+    final_ints = np.transpose(intensities, axes=(1,0))     # (time, tiles)
+    X_trans = final_maps[:,:,tile]  # (time, features)
+    y_trans = final_ints[:,tile]    # (time,)
     
-    Args:
-        tile: Tile index
-        size: Size of the grid
-        power_maps: Power maps data of shape (tiles, features, time)
-        intensities: Intensity data of shape (tiles, time)
-        num_in: Number of input time steps
-        num_pred: Number of prediction time steps
-        
-    Returns:
-        X: Input tensor of shape (batch, seq_len, input_dim)
-        y: Target tensor of shape (batch, output_dim)
-    """
-    # Get data for specific tile
-    X_trans = power_maps[tile]  # (features, time)
-    y_trans = intensities[tile]  # (time,)
+    available_time_steps = len(X_trans)
+    max_possible_num_in = available_time_steps - num_pred
     
-    # Transpose to get time as first dimension
-    X_trans = X_trans.T  # (time, features)
+    if max_possible_num_in <= 0:
+        raise ValueError(f"Not enough data for tile {tile}")
     
-    # Split into sequences
-    X_ss, y_mm = split_sequences(X_trans, y_trans, num_in, num_pred)
+    effective_num_in = min(num_in, max_possible_num_in)
+    X_ss, y_mm = split_sequences(X_trans, y_trans, effective_num_in, num_pred)
     
-    # Convert to tensors
-    X = torch.Tensor(X_ss)  # (batch, seq_len, input_dim)
-    y = torch.Tensor(y_mm)  # (batch, output_dim)
+    # If model expects a different sequence length, pad accordingly
+    target_seq_len = model_seq_len if model_seq_len is not None else effective_num_in
+    if effective_num_in < target_seq_len and len(X_ss) > 0:
+        padding_length = target_seq_len - effective_num_in
+        padding_shape = (len(X_ss), padding_length, X_ss.shape[2])
+        padding = np.zeros(padding_shape)
+        X_ss = np.concatenate([padding, X_ss], axis=1)
     
+    X = torch.Tensor(X_ss)
+    y = torch.Tensor(y_mm)
     return X, y
+
+
+
 
 def training_loop(n_epochs, lstm, optimiser, loss_fn, X_train, y_train, X_test, y_test):
     scheduler = StepLR(optimiser, step_size=n_epochs//10, gamma=0.9)
