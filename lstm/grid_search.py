@@ -328,7 +328,6 @@ tuner = tune.Tuner(  # ③
         scheduler=scheduler,
         num_samples=20,
         trial_dirname_creator=lambda trial: str(trial.trial_id),
-        resources_per_trial={"cpu": 4, "gpu": 1},
     ),
     run_config=tune.RunConfig(
         stop={"training_iteration": 500},
