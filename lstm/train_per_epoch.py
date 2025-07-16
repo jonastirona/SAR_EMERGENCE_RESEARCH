@@ -28,7 +28,7 @@ def main(
     learning_rate,
     dropout,
 ):
-    path = "../"
+    path = "/mmfs1/project/mx6/ebd/"
 
     # Now you can use these variables in your script
     ARs = [
@@ -201,6 +201,7 @@ def main(
             optimiser.zero_grad()  # Calculate the gradient, manually setting to 0
             loss = loss_fn(outputs, y_train)
             loss.backward()  # Calculates the loss of the loss function
+            torch.nn.utils.clip_grad_norm_(lstm.parameters(), max_norm=1.0)
             train_loss.append(loss.item())
             optimiser.step()  # Improve from loss, i.e., backprop
 
@@ -220,34 +221,6 @@ def main(
         learning_rate = scheduler.get_last_lr()[0]
         scheduler.step()
 
-        scores = []
-        for AR in [11698, 11726, 13165, 13179, 13183]:
-            score, fig = eval(
-                device,
-                AR,
-                False,
-                lstm.state_dict(),
-                config["num_pred"],
-                config["rid_of_top"],
-                config["num_in"],
-                config["num_layers"],
-                config["hidden_size"],
-                config["n_epochs"],
-                config["learning_rate"],
-                config["dropout"],
-            )
-            wandb.log({f"Predictions/AR{AR}": wandb.Image(fig)})
-            plt.close(fig)
-            scores.append(score)
-        val_rmse = float(np.mean(scores))
-        print(f"Score: {val_rmse:.8f}")
-        tune.report(
-            epoch=epoch,
-            train_loss=float(np.mean(train_loss)),
-            test_loss=float(np.mean(test_losses)),
-            score=val_rmse,
-            lr=learning_rate,
-        )
 
     # Save the model weights
     model_name = "t{}_r{}_i{}_n{}_h{}_e{}_l{}_d{}.pth".format(
@@ -283,3 +256,82 @@ def main(
     wandb.log_artifact(model_artifact)
 
     return lstm.state_dict()
+
+
+if __name__ == "__main__":
+    # Check if the correct number of arguments is provided
+    if len(sys.argv) != 9:
+        print(
+            "Usage: script.py num_pred rid_of_top num_in num_layers hidden_size n_epochs learning_rate dropout"
+        )
+        sys.exit(1)
+    try:  # Extract arguments and convert them to the appropriate types  #python3 train_w_stats.py 12 4 120 3 64 500 0.01 0.1
+        num_pred = int(sys.argv[1])
+        print("Time Windows:", num_pred)
+        rid_of_top = int(sys.argv[2])
+        print("Rid of Top:", rid_of_top)
+        num_in = int(sys.argv[3])
+        print("Number of Inputs:", num_in)
+        num_layers = int(sys.argv[4])
+        print("Number of Layers:", num_layers)
+        hidden_size = int(sys.argv[5])
+        print("Hidden Size:", hidden_size)
+        n_epochs = int(sys.argv[6])
+        print("Number of Epochs:", n_epochs)
+        learning_rate = float(sys.argv[7])
+        print("Learning Rate:", learning_rate)
+        dropout = float(sys.argv[8])
+        print("Dropout:", dropout)
+    except ValueError as e:
+        print("Error: Please ensure that all arguments are numbers.")
+        sys.exit(1)
+
+    start_time = time.time()
+    device = torch.device(
+        "cuda" if torch.cuda.is_available() else "cpu"
+    )  # Define the device (either 'cuda' for GPU or 'cpu' for CPU)
+    print("Runs on: {}".format(device))
+    print("Using", torch.cuda.device_count(), "GPUs!")
+
+    # Login to wandb first
+    # print("2")
+    # wandb.login(key=wandb_api_key, relogin=True, host="https://api.wandb.ai")
+    # print("1")
+    wandb_api_key = os.environ.get("WANDB_API_KEY")
+    wandb_entity = os.environ.get("WANDB_ENTITY")
+    wandb_project = "sar"
+
+    config = {
+        "num_pred": num_pred,
+        "num_in": num_in,
+        "num_layers": num_layers,  # Fixed to 3 layers
+        "dropout": dropout,  # Set dropout to 0.3
+        "n_epochs": n_epochs,
+        "time_window": 12,
+        "rid_of_top": rid_of_top,
+        "learning_rate": learning_rate,  # Set learning rate to 0.001
+        # batch_size will be varied in the experiment
+    }
+    # Initialize wandb run (one run for the sweep, each trial will be a group)
+    wandb.init(
+        project=wandb_project,
+        entity=wandb_entity,
+        config=config,
+        name="LSTM_" + str(config),
+        notes=f"Grid search comparing transformer performance across batch sizes (64, 128, 256, 512) with constant learning rate {learning_rate} , dropout {dropout}, fixed attention head count (4), and {num_layers} layers",
+    )
+
+    main(
+        device,
+        config,
+        num_pred,
+        rid_of_top,
+        num_in,
+        num_layers,
+        hidden_size,
+        n_epochs,
+        learning_rate,
+        dropout,
+    )
+    end_time = time.time()
+    print("Elapsed time: {} minutes".format((end_time - start_time) / 60))

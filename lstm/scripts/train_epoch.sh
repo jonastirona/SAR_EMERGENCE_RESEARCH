@@ -8,7 +8,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
-#SBATCH --gres=gpu:3
+#SBATCH --gres=gpu:2
 #SBATCH --time=08:00:00
 #SBATCH --output=%x_%j.out
 #SBATCH --error=%x_%j.err
@@ -23,4 +23,4 @@ source sar/bin/activate
 pip -V
 echo 'Done loading environment'
 
-python -u lstm/train_w_stats.py 12 4 110 5 140 500 0.01 0.1
+python -u lstm/train_per_epoch.py 6 4 220 5 140 500 0.0173901 0.1
