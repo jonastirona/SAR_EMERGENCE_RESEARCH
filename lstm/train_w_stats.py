@@ -201,6 +201,8 @@ def main(
                 test_losses.append(test_loss)
                 lrs.append(lr)
 
+            
+
             images = {}
             for name, data in [
                 ("epoch", epochs),

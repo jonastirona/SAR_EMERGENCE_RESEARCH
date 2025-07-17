@@ -63,7 +63,7 @@ def eval_AR_emergence_with_plots(
         )  # Assuming there's only one .pth file and its naming follows the specific pattern
         filename = pth_files[0]
         matches = re.findall(
-            r"t(\d+)_r(\d+)_i(\d+)_n(\d+)_h(\d+)_e(\d+)_l([0-9.]+)_d([0-9.]+)\.pth",
+            r"pred(\d+)_r(\d+)_i(\d+)_n(\d+)_h(\d+)_e(\d+)_lr([0-9.]+)_d([0-9.]+)\.pth",
             filename,
         )  # Extract numbers from the filename
         (
