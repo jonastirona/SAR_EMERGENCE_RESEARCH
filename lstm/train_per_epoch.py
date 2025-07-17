@@ -24,7 +24,7 @@ warnings.filterwarnings("ignore")
 
 # --- Configuration ---
 # Define constants and configurations at the top level for clarity.
-BASE_PATH = "/mmfs1/project/mx6/ebd/SAR_EMERGENCE_RESEARCH/"
+BASE_PATH = "/mmfs1/project/mx6/ebd/"
 DATA_PATH = BASE_PATH + "SAR_EMERGENCE_RESEARCH/data"
 RESULTS_PATH = BASE_PATH + "SAR_EMERGENCE_RESEARCH/lstm/results"
 os.makedirs(RESULTS_PATH, exist_ok=True)  # Ensure the results directory exists
