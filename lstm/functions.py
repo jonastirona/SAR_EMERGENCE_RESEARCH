@@ -256,35 +256,45 @@ class LSTM(nn.Module):
         self.hidden_size = hidden_size
         self.num_layers = num_layers
         self.output_length = output_length
-        # Encoder
+        
+        # Encoder remains the same
         self.encoder_lstm = nn.LSTM(
             input_size, hidden_size, num_layers, batch_first=True, dropout=dropout
         )
-        # Decoder
+        
+        # --- CORRECTED DECODER ---
+        # The decoder's input should be the size of the value we are predicting (1).
         self.decoder_lstm = nn.LSTM(
-            hidden_size, hidden_size, num_layers, batch_first=True, dropout=dropout
+            1, hidden_size, num_layers, batch_first=True, dropout=dropout
         )
         self.decoder_fc = nn.Linear(
             hidden_size, 1
-        )  # Only outputting 1 value for each time step
+        )
 
     def forward(self, x):
-        # Encoder
+        # Encoder: Get the context vector (hidden and cell states)
         _, (hidden, cell) = self.encoder_lstm(x)
-        # Initial input for the decoder can be zeros with shape [batch_size, 1, hidden_size]
-        decoder_input = torch.zeros(x.size(0), 1, self.hidden_size).to(x.device)
+        
+        # --- CORRECTED DECODER LOOP ---
+        # Initialize the first input to the decoder. A tensor of zeros is a common start.
+        # Shape should be [batch_size, 1, 1] to reflect one time step with one feature.
+        decoder_input = torch.zeros(x.size(0), 1, 1).to(x.device)
+
         outputs = []
-        for t in range(self.output_length):
-            # Decoder
+        for _ in range(self.output_length):
+            # Pass the input and previous states to the decoder
             out_dec, (hidden, cell) = self.decoder_lstm(decoder_input, (hidden, cell))
+            
+            # Get the actual prediction
             out = self.decoder_fc(out_dec)
             outputs.append(out)
-            # For the next iteration, use the decoder output as input
-            decoder_input = out_dec
+            
+            # Use the current prediction as the input for the next time step
+            decoder_input = out 
+            
         outputs = torch.cat(outputs, dim=1)
-        outputs = outputs.squeeze(
-            -1
-        )  # This removes the last dimension to ensure shape is [batch_size, output_length]
+        outputs = outputs.squeeze(-1) # Shape: [batch_size, output_length]
+        
         return outputs
 
 

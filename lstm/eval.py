@@ -233,6 +233,7 @@ def eval_AR_emergence_with_plots(
     # rid_of_top = 1  # As redefined in the code
 
     # Initialize the LSTM and move it to GPU
+    print(input_size, hidden_size, num_layers, num_pred)
     lstm = LSTM(input_size, hidden_size, num_layers, num_pred).to(device)
     saved_state_dict = state_dict or torch.load(filename, map_location=device)
     new_state_dict = OrderedDict()
@@ -240,7 +241,7 @@ def eval_AR_emergence_with_plots(
         name = k[7:] if k.startswith("module.") else k  # remove 'module.' prefix
         new_state_dict[name] = v
     lstm.load_state_dict(new_state_dict)
-    lstm.eval()  # Set the model to evaluation mode
+    lstm.eval()  # Set the model to evaluation model
 
     # Assuming prediction, y_test_tensors, ARs, learning_rate, and n_epochs are already defined
     fig = plt.figure(figsize=(12, 10))  # Adjust the figure size if necessary
@@ -293,7 +294,11 @@ def eval_AR_emergence_with_plots(
         # Main plot
         ax0 = plt.subplot(gs[0])
         ax0.plot(time_cut_mpl, np.concatenate((nan_array, pred)), color="black")
+        print(pred)
+        print(nan_array)
         ax0.plot(time_cut_mpl, np.concatenate((mag_before_pred, true)), color="red")
+        print(true.shape)
+        print(true)
         ax0.plot(
             time_cut_mpl,
             smooth_with_numpy(np.concatenate((mag_before_pred, true))),
