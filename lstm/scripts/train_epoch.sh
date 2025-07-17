@@ -1,4 +1,6 @@
 #!/bin/bash
+sbatch <<EOT
+#!/bin/bash
 
 #SBATCH --requeue
 #SBATCH --job-name=train_lstm
@@ -24,3 +26,5 @@ pip -V
 echo 'Done loading environment'
 
 python -u lstm/train_per_epoch.py 6 4 220 5 140 500 0.0173901 0.1 $1
+
+EOT
