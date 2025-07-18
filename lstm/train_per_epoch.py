@@ -15,6 +15,7 @@ import ray
 from ray.tune.search.optuna import OptunaSearch
 from ray.tune.schedulers import ASHAScheduler
 from eval import eval_AR_emergence as eval
+import re
 
 
 
@@ -25,7 +26,10 @@ warnings.filterwarnings("ignore")
 
 # --- Configuration ---
 # Define constants and configurations at the top level for clarity.
-BASE_PATH = "C:/Projects/"
+
+l = re.split(r'[\\/]', os.path.abspath(os.getcwd()))
+BASE_PATH = "\\".join(l[:-1])+'\\'
+
 DATA_PATH = BASE_PATH + "SAR_EMERGENCE_RESEARCH/data"
 RESULTS_PATH = BASE_PATH + "SAR_EMERGENCE_RESEARCH/lstm/results"
 os.makedirs(RESULTS_PATH, exist_ok=True)  # Ensure the results directory exists
