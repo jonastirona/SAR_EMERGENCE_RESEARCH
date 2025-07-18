@@ -9,14 +9,19 @@ import wandb
 from torch import nn
 from torch.optim.lr_scheduler import StepLR, ReduceLROnPlateau
 from torch.utils.data import DataLoader, TensorDataset
-from functions import LSTM, lstm_ready, min_max_scaling, training_loop_w_stats, PlateauStopper
+from functions import (
+    LSTM,
+    lstm_ready,
+    min_max_scaling,
+    training_loop_w_stats,
+    PlateauStopper,
+)
 from ray import tune
 import ray
 from ray.tune.search.optuna import OptunaSearch
 from ray.tune.schedulers import ASHAScheduler
 from eval import eval_AR_emergence as eval
 import re
-
 
 
 # Assume these are defined in a 'functions.py' file or similar
@@ -27,8 +32,8 @@ warnings.filterwarnings("ignore")
 # --- Configuration ---
 # Define constants and configurations at the top level for clarity.
 
-l = re.split(r'[\\/]', os.path.abspath(os.getcwd()))
-BASE_PATH = "/".join(l[:-1])+'/'
+l = re.split(r"[\\/]", os.path.abspath(os.getcwd()))
+BASE_PATH = "/".join(l[:-1]) + "/"
 
 DATA_PATH = BASE_PATH + "SAR_EMERGENCE_RESEARCH/data"
 RESULTS_PATH = BASE_PATH + "SAR_EMERGENCE_RESEARCH/lstm/results"
@@ -155,7 +160,6 @@ def evaluate_model(model, dataloader, loss_fn, device):
             total_loss += loss.item()
 
     return total_loss / len(dataloader)
-
 
 
 # --- Main Execution ---
@@ -317,7 +321,7 @@ def main_w_tune(config):
         project=config1["wandb_project"],
         entity=config1["wandb_entity"],
         config=config,
-        name=f"LSTM_pred{config['num_pred']}_in{config['num_in']}_n{config['num_layers']}_h{config['hidden_size']}",
+        name=f"LSTM_pred{config['num_pred']}_r{config['rid_of_top']}_i{config['num_in']}_n{config['num_layers']}_e{config['n_epochs']}_l{config['learning_rate']:.5f}_d{config['dropout']:.2f}",
         notes=f"LSTM training with lr={config['learning_rate']}, dropout={config['dropout']}",
     )
 
@@ -431,11 +435,12 @@ def main_w_tune(config):
             "train_loss": train_loss,
             "test_loss": test_loss,
             "learning_rate": lr,
+            "RMSE": val_rmse,
             "score": val_rmse,
         }
         print(log_metrics)
-        tune.report(log_metrics)
         wandb.log(log_metrics)
+        tune.report(log_metrics)
 
     # --- Save Model & Artifacts ---
     model_name = f"pred{config['num_pred']}_r{config['rid_of_top']}_i{config['num_in']}_n{config['num_layers']}_h{config['hidden_size']}_e{config['n_epochs']}_lr{config['learning_rate']}_d{config['dropout']}.pth"
@@ -459,29 +464,41 @@ def main_w_tune(config):
 
 def parse_args():
     """Parses command-line arguments."""
-    if len(sys.argv) != 10:
+    if len(sys.argv) < 9 or len(sys.argv) > 10:
         print(
-            "Usage: python train_one_epoch.py <num_pred> <rid_of_top> <num_in> <num_layers> <hidden_size> <n_epochs> <learning_rate> <dropout> <grid_search (y | n)>"
+            "Usage: python train_one_epoch.py <num_pred> <rid_of_top> <num_in> <num_layers> <hidden_size> <n_epochs> <learning_rate> <dropout> <grid_search sample_size>"
         )
         sys.exit(1)
 
     try:
-        config = {
-            "num_pred": int(sys.argv[1]),
-            "rid_of_top": int(sys.argv[2]),
-            "num_in": int(sys.argv[3]),
-            "num_layers": int(sys.argv[4]),
-            "hidden_size": int(sys.argv[5]),
-            "n_epochs": int(sys.argv[6]),
-            "learning_rate": float(sys.argv[7]),
-            "dropout": float(sys.argv[8]),
-            "grid_search": sys.argv[9] == "y",
-            # Add other static configurations here
-            "size": 9,
-            "batch_size": 64,
-            "wandb_project": os.environ.get("WANDB_PROJECT", "sar"),
-            "wandb_entity": os.environ.get("WANDB_ENTITY"),
-        }
+        if len(sys.argv) == 9:
+            config = {
+                "num_pred": int(sys.argv[1]),
+                "rid_of_top": int(sys.argv[2]),
+                "num_in": int(sys.argv[3]),
+                "num_layers": int(sys.argv[4]),
+                "hidden_size": int(sys.argv[5]),
+                "n_epochs": int(sys.argv[6]),
+                "learning_rate": float(sys.argv[7]),
+                "dropout": float(sys.argv[8]),
+                # Add other static configurations here
+                "size": 9,
+                "batch_size": 64,
+                "wandb_project": os.environ.get("WANDB_PROJECT", "sar"),
+                "wandb_entity": os.environ.get("WANDB_ENTITY"),
+            }
+        else:
+            config = {
+                "num_pred": int(sys.argv[1]),
+                "rid_of_top": int(sys.argv[2]),
+                "num_in": int(sys.argv[3]),
+                "num_layers": int(sys.argv[4]),
+                "hidden_size": int(sys.argv[5]),
+                "n_epochs": int(sys.argv[6]),
+                "learning_rate": float(sys.argv[7]),
+                "dropout": float(sys.argv[8]),
+                "sample_size": int(sys.argv[9]),
+            }
         return config
     except (ValueError, IndexError) as e:
         print(f"Error parsing arguments: {e}")
@@ -492,20 +509,22 @@ if __name__ == "__main__":
     # For this refactoring to be fully functional, you must provide
     # the implementations for these functions from your 'functions.py' file.
     config = parse_args()
-    if config["grid_search"]:
+    if config["sample_size"]:
         search_space = {
-            "num_pred": tune.choice([6, 12, 24]),
+            "num_pred": tune.choice([3, 6, 9, 12, 15, 18, 24]),
             "rid_of_top": tune.choice([4]),
-            "num_in": tune.choice([50, 110, 200]),
-            "num_layers": tune.choice([3, 5, 7]),
+            "num_in": tune.choice([30, 50, 80, 110, 130, 150, 175, 200]),
+            "num_layers": tune.choice([1, 2, 3, 4, 5, 6, 7]),
             "hidden_size": tune.choice([64, 140, 256]),
             "n_epochs": tune.choice([500]),
             "learning_rate": tune.loguniform(1e-5, 1e-3),
-            "dropout": tune.choice([0.0, 0.1, 0.3]),
+            "dropout": tune.choice([0.0, 0.01, 0.1, 0.3]),
         }
         algo = OptunaSearch()
         scheduler = ASHAScheduler(max_t=500, grace_period=10, reduction_factor=3)
-        custom_stopper = PlateauStopper("train_loss", min_epochs=10, patience=5, min_improvement=1e-5)
+        custom_stopper = PlateauStopper(
+            "train_loss", min_epochs=10, patience=5, min_improvement=1e-5
+        )
 
         ray.init(num_cpus=4, num_gpus=2, include_dashboard=False)
         tuner = tune.Tuner(  # ③
@@ -515,7 +534,7 @@ if __name__ == "__main__":
                 mode="min",
                 search_alg=algo,
                 scheduler=scheduler,
-                num_samples=30,
+                num_samples=config["sample_size"],
                 trial_dirname_creator=lambda trial: str(trial.trial_id),
             ),
             run_config=tune.RunConfig(
@@ -527,5 +546,3 @@ if __name__ == "__main__":
         print("Best config is:", results.get_best_result().config)
     else:
         main(config)
-
-
