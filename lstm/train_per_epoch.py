@@ -254,9 +254,7 @@ def main(config):
     ).to(device)
     loss_fn = nn.MSELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=config["learning_rate"])
-    scheduler = ReduceLROnPlateau(
-        optimizer, "min", factor=0.2, patience=10, verbose=True
-    )
+    scheduler = ReduceLROnPlateau(optimizer, "min", factor=0.2, patience=10)
 
     # --- Training Loop ---
     print("Starting training...")
