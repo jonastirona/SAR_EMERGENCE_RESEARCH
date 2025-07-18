@@ -641,7 +641,7 @@ def eval_AR_emergence(
     all_metrics = []
 
     for i in range(7):
-        print("Tile {}".format(starting_tile + i))
+        # print("Tile {}".format(starting_tile + i))
 
         ### Validation
         X_test, y_test = lstm_ready(
@@ -661,7 +661,7 @@ def eval_AR_emergence(
         all_metrics.append(metrics)
         # print(f"MAE: {metrics[0]}")
         # print(f"MSE: {metrics[1]}")
-        print(f"RMSE: {metrics[2]}")
+        # print(f"RMSE: {metrics[2]}")
         # print(f"RMSLE: {metrics[3]}")
         # print(f"R-squared: {metrics[4]}")
 

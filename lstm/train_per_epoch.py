@@ -9,12 +9,13 @@ import wandb
 from torch import nn
 from torch.optim.lr_scheduler import StepLR, ReduceLROnPlateau
 from torch.utils.data import DataLoader, TensorDataset
-from functions import LSTM, lstm_ready, min_max_scaling, training_loop_w_stats
+from functions import LSTM, lstm_ready, min_max_scaling, training_loop_w_stats, PlateauStopper
 from ray import tune
 import ray
 from ray.tune.search.optuna import OptunaSearch
 from ray.tune.schedulers import ASHAScheduler
 from eval import eval_AR_emergence as eval
+
 
 
 # Assume these are defined in a 'functions.py' file or similar
@@ -24,7 +25,7 @@ warnings.filterwarnings("ignore")
 
 # --- Configuration ---
 # Define constants and configurations at the top level for clarity.
-BASE_PATH = "/mmfs1/project/mx6/ebd/"
+BASE_PATH = "C:/Projects/"
 DATA_PATH = BASE_PATH + "SAR_EMERGENCE_RESEARCH/data"
 RESULTS_PATH = BASE_PATH + "SAR_EMERGENCE_RESEARCH/lstm/results"
 os.makedirs(RESULTS_PATH, exist_ok=True)  # Ensure the results directory exists
@@ -150,6 +151,7 @@ def evaluate_model(model, dataloader, loss_fn, device):
             total_loss += loss.item()
 
     return total_loss / len(dataloader)
+
 
 
 # --- Main Execution ---
@@ -427,8 +429,8 @@ def main_w_tune(config):
             "learning_rate": lr,
             "score": val_rmse,
         }
-        tune.report(log_metrics)
         print(log_metrics)
+        tune.report(log_metrics)
         wandb.log(log_metrics)
 
     # --- Save Model & Artifacts ---
@@ -499,6 +501,7 @@ if __name__ == "__main__":
         }
         algo = OptunaSearch()
         scheduler = ASHAScheduler(max_t=500, grace_period=10, reduction_factor=3)
+        custom_stopper = PlateauStopper("train_loss", min_epochs=10, patience=5, min_improvement=1e-5)
 
         ray.init(num_cpus=4, num_gpus=2, include_dashboard=False)
         tuner = tune.Tuner(  # ③
@@ -512,7 +515,7 @@ if __name__ == "__main__":
                 trial_dirname_creator=lambda trial: str(trial.trial_id),
             ),
             run_config=tune.RunConfig(
-                stop={"training_iteration": 500},
+                stop=custom_stopper,
             ),
             param_space=search_space,
         )
@@ -520,3 +523,5 @@ if __name__ == "__main__":
         print("Best config is:", results.get_best_result().config)
     else:
         main(config)
+
+

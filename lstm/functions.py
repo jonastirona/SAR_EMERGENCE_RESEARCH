@@ -17,6 +17,8 @@ from sklearn.preprocessing import StandardScaler, MinMaxScaler
 from scipy.signal import detrend
 import warnings
 from datetime import datetime, timedelta
+import random
+from ray import tune
 
 warnings.filterwarnings("ignore")
 
@@ -249,52 +251,42 @@ def training_loop_w_stats(
 
     return results
 
-
 class LSTM(nn.Module):
+    # __init__ stays the same...
     def __init__(self, input_size, hidden_size, num_layers, output_length, dropout=0.0):
         super(LSTM, self).__init__()
         self.hidden_size = hidden_size
         self.num_layers = num_layers
         self.output_length = output_length
-        
-        # Encoder remains the same
-        self.encoder_lstm = nn.LSTM(
-            input_size, hidden_size, num_layers, batch_first=True, dropout=dropout
-        )
-        
-        # --- CORRECTED DECODER ---
-        # The decoder's input should be the size of the value we are predicting (1).
-        self.decoder_lstm = nn.LSTM(
-            1, hidden_size, num_layers, batch_first=True, dropout=dropout
-        )
-        self.decoder_fc = nn.Linear(
-            hidden_size, 1
-        )
+        self.encoder_lstm = nn.LSTM(input_size, hidden_size, num_layers, batch_first=True, dropout=dropout)
+        self.decoder_lstm = nn.LSTM(1, hidden_size, num_layers, batch_first=True, dropout=dropout)
+        self.decoder_fc = nn.Linear(hidden_size, 1)
 
-    def forward(self, x):
-        # Encoder: Get the context vector (hidden and cell states)
+    # The forward pass now accepts the target tensor 'y' for teacher forcing
+    def forward(self, x, y=None, teacher_forcing_ratio=0.5):
+        # Encoder
         _, (hidden, cell) = self.encoder_lstm(x)
         
-        # --- CORRECTED DECODER LOOP ---
-        # Initialize the first input to the decoder. A tensor of zeros is a common start.
-        # Shape should be [batch_size, 1, 1] to reflect one time step with one feature.
+        # Decoder
         decoder_input = torch.zeros(x.size(0), 1, 1).to(x.device)
-
         outputs = []
-        for _ in range(self.output_length):
-            # Pass the input and previous states to the decoder
+
+        for t in range(self.output_length):
             out_dec, (hidden, cell) = self.decoder_lstm(decoder_input, (hidden, cell))
-            
-            # Get the actual prediction
             out = self.decoder_fc(out_dec)
             outputs.append(out)
             
-            # Use the current prediction as the input for the next time step
-            decoder_input = out 
+            # Decide whether to use teacher forcing for the next step
+            use_teacher_forcing = (y is not None) and (random.random() < teacher_forcing_ratio)
             
-        outputs = torch.cat(outputs, dim=1)
-        outputs = outputs.squeeze(-1) # Shape: [batch_size, output_length]
-        
+            if use_teacher_forcing:
+                # Use the actual ground-truth value as the next input
+                decoder_input = y[:, t].unsqueeze(1).unsqueeze(1)
+            else:
+                # Use the model's own prediction as the next input
+                decoder_input = out
+                
+        outputs = torch.cat(outputs, dim=1).squeeze(-1)
         return outputs
 
 
@@ -556,3 +548,60 @@ def calculate_extended_metrics(
         "RMSE@1": RMSE_1,
         "RMSE@5": RMSE_5,
     }
+
+class PlateauStopper(tune.stopper.Stopper):
+    """Stops trials when the metric has plateaued."""
+
+    def __init__(
+        self,
+        metric: str,
+        min_epochs: int = 20,
+        patience: int = 10,
+        min_improvement: float = 1e-5,
+    ):
+        """
+        Args:
+            metric: The metric to monitor.
+            min_epochs: Minimum number of epochs to run before stopping is considered.
+            patience: Number of recent epochs to check for improvement.
+            min_improvement: The minimum improvement required to not stop the trial.
+        """
+        self._metric = metric
+        self._min_epochs = min_epochs
+        self._patience = patience
+        self._min_improvement = min_improvement
+        self._trial_history = {}  # To store the history of each trial
+
+    def __call__(self, trial_id: str, result: dict) -> bool:
+        """This is called after each tune.report() call."""
+        # Initialize history for a new trial
+        if trial_id not in self._trial_history:
+            self._trial_history[trial_id] = []
+        
+        history = self._trial_history[trial_id]
+        history.append(result[self._metric])
+
+        # Don't stop if we haven't reached the minimum number of epochs
+        if len(history) <= self._min_epochs:
+            return False
+
+        # Check for improvement over the patience window
+        # We look at the best value in the last `patience` epochs
+        # and compare it to the best value before that window.
+        window = history[-self._patience:]
+        previous_best = min(history[: -self._patience])
+        current_best = min(window)
+
+        # If there's no meaningful improvement, stop the trial
+        if previous_best - current_best < self._min_improvement:
+            print(
+                f"Stopping trial {trial_id}: "
+                f"No improvement of {self._min_improvement} in the last {self._patience} epochs."
+            )
+            return True
+        
+        return False
+
+    def stop_all(self) -> bool:
+        """This function is used to stop all trials at once. We don't need it here."""
+        return False
