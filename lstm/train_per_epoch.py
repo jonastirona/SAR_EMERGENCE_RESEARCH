@@ -309,7 +309,7 @@ def main_w_tune(config):
     config1 = {
         "size": 9,
         "batch_size": 64,
-        "wandb_project": "PARAMETER_SEARCH",
+        "wandb_project": "PARAMETER_SEARCH_H64,128,192,SCORE_PLATEAU",
         "wandb_entity": os.environ.get("WANDB_ENTITY"),
     }
     start_time = time.time()
@@ -514,16 +514,15 @@ if __name__ == "__main__":
             "num_pred": tune.choice([3, 6, 9, 12, 15, 18, 24]),
             "rid_of_top": tune.choice([4]),
             "num_in": tune.choice([30, 50, 80, 110, 130, 150, 175, 200]),
-            "num_layers": tune.choice([2, 3, 4]),  # Changed
-            "hidden_size": tune.choice([64, 128, 192]),  # Changed
+            "num_layers": tune.choice([2, 3, 4]), 
+            "hidden_size": tune.choice([32, 64, 128]),
             "n_epochs": tune.choice([500]),
             "learning_rate": tune.loguniform(1e-5, 1e-3),
-            "dropout": tune.choice([0.2, 0.3, 0.4, 0.5]),  # Changed
+            "dropout": tune.choice([0.2, 0.3, 0.4, 0.5]), 
         }
         algo = OptunaSearch()
         scheduler = ASHAScheduler(max_t=500, grace_period=10, reduction_factor=3)
 
-        # Changed to monitor the validation score
         custom_stopper = PlateauStopper(
             "score", min_epochs=30, patience=15, min_improvement=1e-5
         )
