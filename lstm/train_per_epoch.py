@@ -309,7 +309,7 @@ def main_w_tune(config):
     config1 = {
         "size": 9,
         "batch_size": 64,
-        "wandb_project": "PARAMETER_SEARCH_H64,128,192,SCORE_PLATEAU",
+        "wandb_project": "PARAMETER_SEARCH,H64_128_192,SCORE_PLATEAU,VanillaLSTM",
         "wandb_entity": os.environ.get("WANDB_ENTITY"),
     }
     start_time = time.time()
