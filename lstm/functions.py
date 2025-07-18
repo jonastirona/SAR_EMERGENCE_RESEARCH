@@ -260,7 +260,8 @@ class LSTM(nn.Module):
         self.output_length = output_length
         self.encoder_lstm = nn.LSTM(input_size, hidden_size, num_layers, batch_first=True, dropout=dropout)
         self.decoder_lstm = nn.LSTM(1, hidden_size, num_layers, batch_first=True, dropout=dropout)
-        self.decoder_fc = nn.Linear(hidden_size, 1)
+        
+        self.decoder_fc = nn.Linear(hidden_size, output_length)
 
     # The forward pass now accepts the target tensor 'y' for teacher forcing
     def forward(self, x, y=None, teacher_forcing_ratio=0.5):
@@ -289,7 +290,37 @@ class LSTM(nn.Module):
         outputs = torch.cat(outputs, dim=1).squeeze(-1)
         return outputs
 
+class VanillaLSTM(nn.Module):
+    def __init__(self, input_size, hidden_size, num_layers, output_length, dropout=0.0):
+        super(VanillaLSTM, self).__init__()
+        
+        # A single LSTM layer that processes the entire input sequence
+        self.lstm = nn.LSTM(
+            input_size=input_size,
+            hidden_size=hidden_size,
+            num_layers=num_layers,
+            batch_first=True, # Input tensor shape: [batch_size, seq_length, input_size]
+            dropout=dropout
+        )
+        
+        # A single linear layer to map the final LSTM state to the desired output length
+        self.fc = nn.Linear(hidden_size, output_length)
 
+    def forward(self, x):
+        # Pass the input sequence through the LSTM layer
+        # We don't need the final hidden and cell states, just the output sequence
+        lstm_out, _ = self.lstm(x)
+        
+        # We only need the output from the very last time step of the sequence
+        # lstm_out has shape [batch_size, seq_length, hidden_size]
+        # We take the last time step: lstm_out[:, -1, :]
+        last_time_step_out = lstm_out[:, -1, :]
+        
+        # Pass the last time step's output to the linear layer to get the final prediction
+        prediction = self.fc(last_time_step_out)
+        
+        return prediction
+    
 # split a multivariate sequence past, future samples (X and y)
 def split_sequences(input_sequences, output_sequences, n_steps_in, n_steps_out):
     X, y = list(), list()  # instantiate X and y

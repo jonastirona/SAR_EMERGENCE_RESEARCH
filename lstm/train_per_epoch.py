@@ -10,12 +10,12 @@ from torch import nn
 from torch.optim.lr_scheduler import StepLR, ReduceLROnPlateau
 from torch.utils.data import DataLoader, TensorDataset
 from functions import (
-    LSTM,
     lstm_ready,
     min_max_scaling,
     training_loop_w_stats,
     PlateauStopper,
 )
+from functions import VanillaLSTM as LSTM
 from ray import tune
 import ray
 from ray.tune.search.optuna import OptunaSearch
@@ -434,7 +434,7 @@ def main_w_tune(config):
             "epoch": epoch,
             "train_loss": train_loss,
             "test_loss": test_loss,
-            "learning_rate": lr,
+            "learning_rate": float(lr),
             "RMSE": val_rmse,
             "score": val_rmse,
         }
@@ -509,7 +509,7 @@ if __name__ == "__main__":
     # For this refactoring to be fully functional, you must provide
     # the implementations for these functions from your 'functions.py' file.
     config = parse_args()
-    if config["sample_size"]:
+    if 'sample_size' in config.keys():
         search_space = {
             "num_pred": tune.choice([3, 6, 9, 12, 15, 18, 24]),
             "rid_of_top": tune.choice([4]),

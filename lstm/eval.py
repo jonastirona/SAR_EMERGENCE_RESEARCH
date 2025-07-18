@@ -4,7 +4,6 @@ from functions import (
     dtws,
     lstm_ready,
     training_loop,
-    LSTM,
     split_sequences,
     min_max_scaling,
     amplify_fluctuations,
@@ -17,6 +16,7 @@ from functions import (
     highlight_tile,
     emergence_indication2,
 )
+from functions import VanillaLSTM as LSTM
 from torch.optim.lr_scheduler import StepLR, ExponentialLR, ReduceLROnPlateau
 from torch.utils.data import Dataset, TensorDataset, DataLoader
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
