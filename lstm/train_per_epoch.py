@@ -321,7 +321,7 @@ def main_w_tune(config):
         project=config1["wandb_project"],
         entity=config1["wandb_entity"],
         config=config,
-        name=f"LSTM_pred{config['num_pred']}_r{config['rid_of_top']}_i{config['num_in']}_n{config['num_layers']}_e{config['n_epochs']}_l{config['learning_rate']:.5f}_d{config['dropout']:.2f}",
+        name=f"LSTM_pred{config['num_pred']}_r{config['rid_of_top']}_i{config['num_in']}_n{config['num_layers']}_h{config['hidden_size']}_e{config['n_epochs']}_l{config['learning_rate']:.5f}_d{config['dropout']:.2f}",
         notes=f"LSTM training with lr={config['learning_rate']}, dropout={config['dropout']}",
     )
 
@@ -514,16 +514,18 @@ if __name__ == "__main__":
             "num_pred": tune.choice([3, 6, 9, 12, 15, 18, 24]),
             "rid_of_top": tune.choice([4]),
             "num_in": tune.choice([30, 50, 80, 110, 130, 150, 175, 200]),
-            "num_layers": tune.choice([1, 2, 3, 4, 5, 6, 7]),
-            "hidden_size": tune.choice([64, 140, 256]),
+            "num_layers": tune.choice([2, 3, 4]),  # Changed
+            "hidden_size": tune.choice([64, 128, 192]),  # Changed
             "n_epochs": tune.choice([500]),
             "learning_rate": tune.loguniform(1e-5, 1e-3),
-            "dropout": tune.choice([0.0, 0.01, 0.1, 0.3]),
+            "dropout": tune.choice([0.2, 0.3, 0.4, 0.5]),  # Changed
         }
         algo = OptunaSearch()
         scheduler = ASHAScheduler(max_t=500, grace_period=10, reduction_factor=3)
+
+        # Changed to monitor the validation score
         custom_stopper = PlateauStopper(
-            "train_loss", min_epochs=10, patience=5, min_improvement=1e-5
+            "score", min_epochs=30, patience=15, min_improvement=1e-5
         )
 
         ray.init(num_cpus=4, num_gpus=2, include_dashboard=False)
