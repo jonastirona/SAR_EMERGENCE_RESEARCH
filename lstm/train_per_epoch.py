@@ -28,7 +28,7 @@ warnings.filterwarnings("ignore")
 # Define constants and configurations at the top level for clarity.
 
 l = re.split(r'[\\/]', os.path.abspath(os.getcwd()))
-BASE_PATH = "\\".join(l[:-1])+'\\'
+BASE_PATH = "/".join(l[:-1])+'/'
 
 DATA_PATH = BASE_PATH + "SAR_EMERGENCE_RESEARCH/data"
 RESULTS_PATH = BASE_PATH + "SAR_EMERGENCE_RESEARCH/lstm/results"
