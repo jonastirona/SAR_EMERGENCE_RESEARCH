@@ -16,7 +16,7 @@ from functions import (
     highlight_tile,
     emergence_indication2,
 )
-from functions import VanillaLSTM as LSTM
+from functions import LSTM as LSTM
 from torch.optim.lr_scheduler import StepLR, ExponentialLR, ReduceLROnPlateau
 from torch.utils.data import Dataset, TensorDataset, DataLoader
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
