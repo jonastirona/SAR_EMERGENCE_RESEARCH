@@ -512,10 +512,10 @@ if __name__ == "__main__":
             "rid_of_top": tune.choice([4]),
             "num_in": tune.choice([110]),
             "num_layers": tune.choice([2, 3, 4]), 
-            "hidden_size": tune.choice([32, 64, 128]),
+            "hidden_size": tune.choice([32, 64, 128, 256]),
             "n_epochs": tune.choice([500]),
             "learning_rate": tune.loguniform(1e-5, 1e-3),
-            "dropout": tune.choice([0.2, 0.3, 0.4, 0.5]), 
+            "dropout": tune.choice([0, 0.01, 0.1, 0.2, 0.3, 0.4, 0.5]), 
             "batch_size": tune.choice([32,64,128,256])
         }
         algo = OptunaSearch()
