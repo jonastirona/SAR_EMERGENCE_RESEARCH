@@ -81,23 +81,37 @@ def eval_AR_emergence_with_plots(
     print(
         f"Extracted from filename: Time Window: {num_pred}, Rid of Top: {rid_of_top}, Number of Inputs: {num_in}, Number of Layers: {num_layers}, Hidden Size: {hidden_size}, Number of Epochs: {n_epochs}, Learning Rate: {learning_rate}"
     )  # Print extracted values for confirmation
-    
 
     if test_AR == 11698:
-        starting_tile = 46-rid_of_top; before_plot = 50; num_in = 96
-        NOAA_first = datetime(2013, 3, 15, 0, 0, 0); NOAA_second = datetime(2013, 3, 17, 0, 0, 0)
-    elif test_AR == 11726: 
-        starting_tile = 37-rid_of_top; before_plot = 50; num_in = 72
-        NOAA_first = datetime(2013, 4, 20, 0, 0, 0); NOAA_second = datetime(2013, 4, 22, 0, 0, 0) 
+        starting_tile = 46 - rid_of_top
+        before_plot = 50
+        num_in = 96
+        NOAA_first = datetime(2013, 3, 15, 0, 0, 0)
+        NOAA_second = datetime(2013, 3, 17, 0, 0, 0)
+    elif test_AR == 11726:
+        starting_tile = 37 - rid_of_top
+        before_plot = 50
+        num_in = 72
+        NOAA_first = datetime(2013, 4, 20, 0, 0, 0)
+        NOAA_second = datetime(2013, 4, 22, 0, 0, 0)
     elif test_AR == 13165:
-        starting_tile = 28-rid_of_top; before_plot = 40; num_in = 96
-        NOAA_first = datetime(2022, 12, 12, 0, 0, 0); NOAA_second = datetime(2022, 12, 14, 0, 0, 0) 
+        starting_tile = 28 - rid_of_top
+        before_plot = 40
+        num_in = 96
+        NOAA_first = datetime(2022, 12, 12, 0, 0, 0)
+        NOAA_second = datetime(2022, 12, 14, 0, 0, 0)
     elif test_AR == 13179:
-        starting_tile = 37-rid_of_top; before_plot = 40; num_in = 96
-        NOAA_first = datetime(2022, 12, 30, 0, 0, 0); NOAA_second = datetime(2023, 1, 1, 0, 0, 0)
+        starting_tile = 37 - rid_of_top
+        before_plot = 40
+        num_in = 96
+        NOAA_first = datetime(2022, 12, 30, 0, 0, 0)
+        NOAA_second = datetime(2023, 1, 1, 0, 0, 0)
     elif test_AR == 13183:
-        starting_tile = 37-rid_of_top*9; before_plot = 40; num_in = 96
-        NOAA_first = datetime(2023, 1, 6, 0, 0, 0); NOAA_second = datetime(2023, 1, 8, 0, 0, 0)
+        starting_tile = 37 - rid_of_top * 9
+        before_plot = 40
+        num_in = 96
+        NOAA_first = datetime(2023, 1, 6, 0, 0, 0)
+        NOAA_second = datetime(2023, 1, 8, 0, 0, 0)
     else:
         print("Invalid test_AR value. Please use 11698, 11726, 13165, 13179, or 13183.")
         return
@@ -233,20 +247,20 @@ def eval_AR_emergence_with_plots(
 
     for i in range(7):
         print()
-        print("Tile {}".format(starting_tile +  i))
+        print("Tile {}".format(starting_tile + i))
 
         ### Validation
         X_test, y_test = lstm_ready(
             starting_tile + i, size, inputs, mag_flux, num_in, num_pred
         )  # ,min_p,max_p,min_i,max_i)
         X_test = X_test.to(device)
-        print('x_test shape:', X_test.shape)
+        print("x_test shape:", X_test.shape)
 
         all_predictions = lstm(X_test)
         print("all predictions shape:", all_predictions.shape)
         pred = all_predictions[:, future].detach().cpu().numpy()
-        print('pred:', pred.shape)
-        print('y_test:', y_test.shape)
+        print("pred:", pred.shape)
+        print("y_test:", y_test.shape)
         true = y_test[:, future].numpy()
 
         last_known_idx = (
@@ -282,9 +296,7 @@ def eval_AR_emergence_with_plots(
             color="black",
             alpha=0.25,
         )
-        ax0.set_ylabel(
-            f"Tile {starting_tile + i}"
-        )  # Title for each plot (optional)
+        ax0.set_ylabel(f"Tile {starting_tile + i}")  # Title for each plot (optional)
         # ax0.axvline(x=first_pred_time, color='darkturquoise', linestyle='--')
         ### ax0.axvline(x=NOAA_first_record, color='magenta', linestyle='--')  # Adjust color, linestyle, linewidth as needed
         ### ax0.axvline(x=NOAA_second_record, color='darkmagenta', linestyle='--')
@@ -512,6 +524,7 @@ def eval_AR_emergence(
     n_epochs=None,
     learning_rate=None,
     dropout=None,
+    batch_size=None,
 ):
     if not state_dict:
         pth_files = glob.glob(
@@ -539,24 +552,39 @@ def eval_AR_emergence(
     )  # Print extracted values for confirmation
 
     if test_AR == 11698:
-        starting_tile = 46-rid_of_top; before_plot = 50; num_in = 96
-        NOAA_first = datetime(2013, 3, 15, 0, 0, 0); NOAA_second = datetime(2013, 3, 17, 0, 0, 0)
-    elif test_AR == 11726: 
-        starting_tile = 37-rid_of_top; before_plot = 50; num_in = 72
-        NOAA_first = datetime(2013, 4, 20, 0, 0, 0); NOAA_second = datetime(2013, 4, 22, 0, 0, 0) 
+        starting_tile = 46 - rid_of_top
+        before_plot = 50
+        num_in = 96
+        NOAA_first = datetime(2013, 3, 15, 0, 0, 0)
+        NOAA_second = datetime(2013, 3, 17, 0, 0, 0)
+    elif test_AR == 11726:
+        starting_tile = 37 - rid_of_top
+        before_plot = 50
+        num_in = 72
+        NOAA_first = datetime(2013, 4, 20, 0, 0, 0)
+        NOAA_second = datetime(2013, 4, 22, 0, 0, 0)
     elif test_AR == 13165:
-        starting_tile = 28-rid_of_top; before_plot = 40; num_in = 96
-        NOAA_first = datetime(2022, 12, 12, 0, 0, 0); NOAA_second = datetime(2022, 12, 14, 0, 0, 0) 
+        starting_tile = 28 - rid_of_top
+        before_plot = 40
+        num_in = 96
+        NOAA_first = datetime(2022, 12, 12, 0, 0, 0)
+        NOAA_second = datetime(2022, 12, 14, 0, 0, 0)
     elif test_AR == 13179:
-        starting_tile = 37-rid_of_top; before_plot = 40; num_in = 96
-        NOAA_first = datetime(2022, 12, 30, 0, 0, 0); NOAA_second = datetime(2023, 1, 1, 0, 0, 0)
+        starting_tile = 37 - rid_of_top
+        before_plot = 40
+        num_in = 96
+        NOAA_first = datetime(2022, 12, 30, 0, 0, 0)
+        NOAA_second = datetime(2023, 1, 1, 0, 0, 0)
     elif test_AR == 13183:
-        starting_tile = 37-rid_of_top*9; before_plot = 40; num_in = 96
-        NOAA_first = datetime(2023, 1, 6, 0, 0, 0); NOAA_second = datetime(2023, 1, 8, 0, 0, 0)
+        starting_tile = 37 - rid_of_top * 9
+        before_plot = 40
+        num_in = 96
+        NOAA_first = datetime(2023, 1, 6, 0, 0, 0)
+        NOAA_second = datetime(2023, 1, 8, 0, 0, 0)
     else:
         print("Invalid test_AR value. Please use 11698, 11726, 13165, 13179, or 13183.")
         return
-    
+
     starting_tile = 1
 
     # Define the AR information
