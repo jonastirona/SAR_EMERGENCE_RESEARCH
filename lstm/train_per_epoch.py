@@ -79,7 +79,7 @@ def load_ar_data(ar_num, size, rid_of_top):
         return None, None, None
 
 
-def prepare_dataset(ar_list, size, rid_of_top, num_in, num_pred, batch_size):
+def prepare_dataset(ar_list, size, rid_of_top, num_in, num_pred):
     """Builds a complete dataset (X, y) for a list of ARs."""
     all_inputs_list, all_flux_list = [], []
 
