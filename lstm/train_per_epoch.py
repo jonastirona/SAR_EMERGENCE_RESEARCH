@@ -308,7 +308,7 @@ def main_w_tune(config):
     """Main function to run the experiment."""
     config1 = {
         "size": 9,
-        "wandb_project": "PARAMETER_SEARCH,VanillaLSTM,Future_12",
+        "wandb_project": "PARAMETER_SEARCH,LSTM,Future_12",
         "wandb_entity": os.environ.get("WANDB_ENTITY"),
     }
     start_time = time.time()
