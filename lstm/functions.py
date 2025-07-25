@@ -177,6 +177,7 @@ def lstm_ready(
     final_maps = np.transpose(power_maps, axes=(2, 1, 0))
     final_flux = np.transpose(mag_flux, axes=(1, 0))
     X_trans = final_maps[:, :, tile]
+    print(X_trans.shape)
     y_trans = final_flux[:, tile]
     X_ss, y_mm = split_sequences(X_trans, y_trans, num_in, num_pred)
     return torch.Tensor(X_ss), torch.Tensor(y_mm)
@@ -261,7 +262,7 @@ class LSTM(nn.Module):
         self.encoder_lstm = nn.LSTM(input_size, hidden_size, num_layers, batch_first=True, dropout=dropout)
         self.decoder_lstm = nn.LSTM(1, hidden_size, num_layers, batch_first=True, dropout=dropout)
         
-        self.decoder_fc = nn.Linear(hidden_size, output_length)
+        self.decoder_fc = nn.Linear(hidden_size, 1)
 
     # The forward pass now accepts the target tensor 'y' for teacher forcing
     def forward(self, x, y=None, teacher_forcing_ratio=0.5):

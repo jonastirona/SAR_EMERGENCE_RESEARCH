@@ -79,7 +79,7 @@ def load_ar_data(ar_num, size, rid_of_top):
         return None, None, None
 
 
-def prepare_dataset(ar_list, size, rid_of_top, num_in, num_pred):
+def prepare_dataset(ar_list, size, rid_of_top, num_in, num_pred, batch_size):
     """Builds a complete dataset (X, y) for a list of ARs."""
     all_inputs_list, all_flux_list = [], []
 
@@ -308,8 +308,7 @@ def main_w_tune(config):
     """Main function to run the experiment."""
     config1 = {
         "size": 9,
-        "batch_size": 64,
-        "wandb_project": "PARAMETER_SEARCH,H64_128_192,SCORE_PLATEAU,VanillaLSTM",
+        "wandb_project": "PARAMETER_SEARCH,VanillaLSTM,Future_12",
         "wandb_entity": os.environ.get("WANDB_ENTITY"),
     }
     start_time = time.time()
@@ -393,10 +392,10 @@ def main_w_tune(config):
         return
 
     train_loader = DataLoader(
-        TensorDataset(x_train, y_train), batch_size=config1["batch_size"], shuffle=True
+        TensorDataset(x_train, y_train), batch_size=config["batch_size"], shuffle=True
     )
     test_loader = DataLoader(
-        TensorDataset(x_test, y_test), batch_size=config1["batch_size"], shuffle=False
+        TensorDataset(x_test, y_test), batch_size=config["batch_size"], shuffle=False
     )
 
     # --- Model & Optimizer ---
@@ -420,7 +419,6 @@ def main_w_tune(config):
         lr = scheduler.get_last_lr()[0]
         scheduler.step(test_loss)
 
-        # val_rmse = -1.0  # Default score
         if (
             epoch % 10 == 0 or epoch == config["n_epochs"] - 1
         ):  # Evaluate every 10 epochs and on the last epoch
@@ -436,14 +434,13 @@ def main_w_tune(config):
             "test_loss": test_loss,
             "learning_rate": float(lr),
             "RMSE": val_rmse,
-            "score": val_rmse,
         }
         print(log_metrics)
         wandb.log(log_metrics)
         tune.report(log_metrics)
 
     # --- Save Model & Artifacts ---
-    model_name = f"pred{config['num_pred']}_r{config['rid_of_top']}_i{config['num_in']}_n{config['num_layers']}_h{config['hidden_size']}_e{config['n_epochs']}_lr{config['learning_rate']}_d{config['dropout']}.pth"
+    model_name = f"pred{config['num_pred']}_r{config['rid_of_top']}_i{config['num_in']}_n{config['num_layers']}_h{config['hidden_size']}_e{config['n_epochs']}_lr{config['learning_rate']:.8f}_d{config['dropout']}.pth"
     model_path = os.path.join(RESULTS_PATH, model_name)
     torch.save(model.state_dict(), model_path)
     print(f"Model saved to {model_path}")
@@ -511,27 +508,28 @@ if __name__ == "__main__":
     config = parse_args()
     if 'sample_size' in config.keys():
         search_space = {
-            "num_pred": tune.choice([3, 6, 9, 12, 15, 18, 24]),
+            "num_pred": tune.choice([72]),
             "rid_of_top": tune.choice([4]),
-            "num_in": tune.choice([30, 50, 80, 110, 130, 150, 175, 200]),
+            "num_in": tune.choice([110]),
             "num_layers": tune.choice([2, 3, 4]), 
             "hidden_size": tune.choice([32, 64, 128]),
             "n_epochs": tune.choice([500]),
             "learning_rate": tune.loguniform(1e-5, 1e-3),
             "dropout": tune.choice([0.2, 0.3, 0.4, 0.5]), 
+            "batch_size": tune.choice([32,64,128,256])
         }
         algo = OptunaSearch()
         scheduler = ASHAScheduler(max_t=500, grace_period=10, reduction_factor=3)
 
         custom_stopper = PlateauStopper(
-            "score", min_epochs=30, patience=15, min_improvement=1e-5
+            "RMSE", min_epochs=30, patience=15, min_improvement=1e-5
         )
 
         ray.init(num_cpus=4, num_gpus=2, include_dashboard=False)
         tuner = tune.Tuner(  # ③
             tune.with_resources(main_w_tune, {"gpu": 1}),
             tune_config=tune.TuneConfig(
-                metric="score",
+                metric="RMSE",
                 mode="min",
                 search_alg=algo,
                 scheduler=scheduler,

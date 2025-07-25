@@ -84,30 +84,20 @@ def eval_AR_emergence_with_plots(
     
 
     if test_AR == 11698:
-        starting_tile = 46 - rid_of_top * 9
-        before_plot = 50
-        NOAA_first = datetime(2013, 3, 15, 0, 0, 0)
-        NOAA_second = datetime(2013, 3, 17, 0, 0, 0)
-    elif test_AR == 11726:
-        starting_tile = 37 - rid_of_top * 9
-        before_plot = 50
-        NOAA_first = datetime(2013, 4, 20, 0, 0, 0)
-        NOAA_second = datetime(2013, 4, 22, 0, 0, 0)
+        starting_tile = 46-rid_of_top; before_plot = 50; num_in = 96
+        NOAA_first = datetime(2013, 3, 15, 0, 0, 0); NOAA_second = datetime(2013, 3, 17, 0, 0, 0)
+    elif test_AR == 11726: 
+        starting_tile = 37-rid_of_top; before_plot = 50; num_in = 72
+        NOAA_first = datetime(2013, 4, 20, 0, 0, 0); NOAA_second = datetime(2013, 4, 22, 0, 0, 0) 
     elif test_AR == 13165:
-        starting_tile = 28 - rid_of_top * 9
-        before_plot = 40
-        NOAA_first = datetime(2022, 12, 12, 0, 0, 0)
-        NOAA_second = datetime(2022, 12, 14, 0, 0, 0)
+        starting_tile = 28-rid_of_top; before_plot = 40; num_in = 96
+        NOAA_first = datetime(2022, 12, 12, 0, 0, 0); NOAA_second = datetime(2022, 12, 14, 0, 0, 0) 
     elif test_AR == 13179:
-        starting_tile = 37 - rid_of_top * 9
-        before_plot = 40
-        NOAA_first = datetime(2022, 12, 30, 0, 0, 0)
-        NOAA_second = datetime(2023, 1, 1, 0, 0, 0)
+        starting_tile = 37-rid_of_top; before_plot = 40; num_in = 96
+        NOAA_first = datetime(2022, 12, 30, 0, 0, 0); NOAA_second = datetime(2023, 1, 1, 0, 0, 0)
     elif test_AR == 13183:
-        starting_tile = 37 - rid_of_top * 9
-        before_plot = 40
-        NOAA_first = datetime(2023, 1, 6, 0, 0, 0)
-        NOAA_second = datetime(2023, 1, 8, 0, 0, 0)
+        starting_tile = 37-rid_of_top*9; before_plot = 40; num_in = 96
+        NOAA_first = datetime(2023, 1, 6, 0, 0, 0); NOAA_second = datetime(2023, 1, 8, 0, 0, 0)
     else:
         print("Invalid test_AR value. Please use 11698, 11726, 13165, 13179, or 13183.")
         return
@@ -159,14 +149,6 @@ def eval_AR_emergence_with_plots(
     flatten = True
     size = 9
     tiles = size**2 - 2 * size * rid_of_top
-    ### intensity_files = glob.glob(os.path.join("/nobackup/skasapis/AR{}/cont_intensity/".format(test_AR), "*.fits")) # get a list of all files with a .fits extension in the directory
-    ### NOAA_first_record = mdates.date2num(NOAA_first) # Convert to matplotlib date format
-    ### NOAA_second_record = mdates.date2num(NOAA_second) # Convert to matplotlib date format
-    ### NOAA_first_int_map = find_closest_fits_frame_to_NOAA_record(intensity_files, NOAA_first)
-    ### NOAA_second_int_map = find_closest_fits_frame_to_NOAA_record(intensity_files, NOAA_second)
-    # NOAA_first_int_map = np.random.rand(512, 512)  # Random noise image
-    # NOAA_second_int_map = np.random.rand(512, 512)  # Another random noise image
-
     # Preprocessing
     power_maps = np.load(
         path
@@ -222,15 +204,9 @@ def eval_AR_emergence_with_plots(
 
     # Reshape int to have an extra dimension and then put it with pmaps
     int_reshaped = np.expand_dims(intensities, axis=1)
+
     inputs = np.concatenate([stacked_maps, int_reshaped], axis=1)
     input_size = np.shape(inputs)[1]
-
-    # # Initialize the LSTM with the correct architecture from the saved checkpoint
-    # input_size = 5  # Fixed input size (4 power maps + 1 magnetic flux)
-    # hidden_size = 64  # Original hidden size
-    # num_layers = 3  # Original number of layers
-    # num_pred = 12  # Number of time steps to predict
-    # rid_of_top = 1  # As redefined in the code
 
     # Initialize the LSTM and move it to GPU
     print(input_size, hidden_size, num_layers, num_pred)
@@ -250,24 +226,29 @@ def eval_AR_emergence_with_plots(
     )  # Create a GridSpec with 4 rows and 2 columns
 
     # Loop to create 8 plots
-    future = num_pred - 1
+    future = 12
     all_metrics = []
     threshold = -0.01  # -0.006
     sust_time = 4
 
     for i in range(7):
         print()
-        print("Tile {}".format(starting_tile + 10 + i))
+        print("Tile {}".format(starting_tile +  i))
 
         ### Validation
         X_test, y_test = lstm_ready(
             starting_tile + i, size, inputs, mag_flux, num_in, num_pred
         )  # ,min_p,max_p,min_i,max_i)
         X_test = X_test.to(device)
+        print('x_test shape:', X_test.shape)
 
         all_predictions = lstm(X_test)
+        print("all predictions shape:", all_predictions.shape)
         pred = all_predictions[:, future].detach().cpu().numpy()
+        print('pred:', pred.shape)
+        print('y_test:', y_test.shape)
         true = y_test[:, future].numpy()
+
         last_known_idx = (
             np.shape(mag_flux[starting_tile + i, :])[0] - np.shape(true)[0] - 1
         )  # the index in the timeline before we start predicting
@@ -294,11 +275,7 @@ def eval_AR_emergence_with_plots(
         # Main plot
         ax0 = plt.subplot(gs[0])
         ax0.plot(time_cut_mpl, np.concatenate((nan_array, pred)), color="black")
-        print(pred)
-        print(nan_array)
-        ax0.plot(time_cut_mpl, np.concatenate((mag_before_pred, true)), color="red")
-        print(true.shape)
-        print(true)
+        ax0.plot(time_cut_mpl, np.concatenate((nan_array, true)), color="red")
         ax0.plot(
             time_cut_mpl,
             smooth_with_numpy(np.concatenate((mag_before_pred, true))),
@@ -306,7 +283,7 @@ def eval_AR_emergence_with_plots(
             alpha=0.25,
         )
         ax0.set_ylabel(
-            f"Tile {starting_tile + 10 + i}"
+            f"Tile {starting_tile + i}"
         )  # Title for each plot (optional)
         # ax0.axvline(x=first_pred_time, color='darkturquoise', linestyle='--')
         ### ax0.axvline(x=NOAA_first_record, color='magenta', linestyle='--')  # Adjust color, linestyle, linewidth as needed
@@ -443,7 +420,7 @@ def eval_AR_emergence_with_plots(
     add_grid_lines(ax_image1)  # Add grid lines to the first image
     for tile_num in range(starting_tile, starting_tile + 7):
         highlight_tile(
-            ax_image1, tile_num + 10
+            ax_image1, tile_num
         )  # Loop to highlight tiles from starting_tile to starting_tile + 7
     ax_image1.set_xlabel("{}".format(NOAA_first.strftime("%d/%m/%y %H:%M")))
     ax_image1.tick_params(
@@ -463,7 +440,7 @@ def eval_AR_emergence_with_plots(
     add_grid_lines(ax_image2)  # Add grid lines to the first image
     for tile_num in range(starting_tile, starting_tile + 7):
         highlight_tile(
-            ax_image2, tile_num + 10
+            ax_image2, tile_num
         )  # Loop to highlight tiles from starting_tile to starting_tile + 7
     ax_image1.set_title("Magnetic Flux", fontsize=10)
     ax_image2.set_title("Magnetic Flux", fontsize=10)
@@ -561,6 +538,25 @@ def eval_AR_emergence(
         f"Extracted from filename: Time Window: {num_pred}, Rid of Top: {rid_of_top}, Number of Inputs: {num_in}, Number of Layers: {num_layers}, Hidden Size: {hidden_size}, Number of Epochs: {n_epochs}, Learning Rate: {learning_rate}"
     )  # Print extracted values for confirmation
 
+    if test_AR == 11698:
+        starting_tile = 46-rid_of_top; before_plot = 50; num_in = 96
+        NOAA_first = datetime(2013, 3, 15, 0, 0, 0); NOAA_second = datetime(2013, 3, 17, 0, 0, 0)
+    elif test_AR == 11726: 
+        starting_tile = 37-rid_of_top; before_plot = 50; num_in = 72
+        NOAA_first = datetime(2013, 4, 20, 0, 0, 0); NOAA_second = datetime(2013, 4, 22, 0, 0, 0) 
+    elif test_AR == 13165:
+        starting_tile = 28-rid_of_top; before_plot = 40; num_in = 96
+        NOAA_first = datetime(2022, 12, 12, 0, 0, 0); NOAA_second = datetime(2022, 12, 14, 0, 0, 0) 
+    elif test_AR == 13179:
+        starting_tile = 37-rid_of_top; before_plot = 40; num_in = 96
+        NOAA_first = datetime(2022, 12, 30, 0, 0, 0); NOAA_second = datetime(2023, 1, 1, 0, 0, 0)
+    elif test_AR == 13183:
+        starting_tile = 37-rid_of_top*9; before_plot = 40; num_in = 96
+        NOAA_first = datetime(2023, 1, 6, 0, 0, 0); NOAA_second = datetime(2023, 1, 8, 0, 0, 0)
+    else:
+        print("Invalid test_AR value. Please use 11698, 11726, 13165, 13179, or 13183.")
+        return
+    
     starting_tile = 1
 
     # Define the AR information
@@ -637,7 +633,7 @@ def eval_AR_emergence(
 
     # Assuming prediction, y_test_tensors, ARs, learning_rate, and n_epochs are already defined
     # Loop to create 8 plots
-    future = num_pred - 1
+    future = 12
     all_metrics = []
 
     for i in range(7):
