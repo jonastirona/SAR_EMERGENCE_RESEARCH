@@ -385,23 +385,23 @@ def calculate_metrics(timeline_true, timeline_predicted):
 
 def emergence_indication(d_true, threshold, sust_time):
     d_true = smooth_with_numpy(d_true)
-    indicator = np.zeros(d_true.shape)  # Initialize with 0s (red)
+    indicator = np.zeros(d_true.shape)  # Initialize with 0s (green)
     # Populate the indicator array
     for j in range(len(d_true)):
-        if d_true[j] <= threshold:
-            indicator[j] = 1  # Mark as green
+        if d_true[j] >= threshold:
+            indicator[j] = 1  # Mark as red
     # Enforce the sustained condition
     sustained = True
     if sustained:
         start_idx = None
         for i in range(len(indicator)):
             if indicator[i] == 1 and start_idx is None:
-                start_idx = i  # Start of a green sequence
+                start_idx = i  # Start of a red sequence
             elif (
                 indicator[i] == 0 and start_idx is not None
-            ):  # End of a green sequence, check its length
+            ):  # End of a red sequence, check its length
                 if i - start_idx < sust_time:
-                    indicator[start_idx:i] = 0  # Sequence too short, revert to red
+                    indicator[start_idx:i] = 0  # Sequence too short, revert to green
                 start_idx = None  # Reset start index for the next sequence
         # Check for a sequence that goes till the end of the array
         if start_idx is not None and len(indicator) - start_idx < sust_time:

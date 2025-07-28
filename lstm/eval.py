@@ -16,7 +16,7 @@ from functions import (
     highlight_tile,
     emergence_indication2,
 )
-from functions import LSTM as LSTM
+from functions import VanillaLSTM as LSTM
 from torch.optim.lr_scheduler import StepLR, ExponentialLR, ReduceLROnPlateau
 from torch.utils.data import Dataset, TensorDataset, DataLoader
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
@@ -91,7 +91,7 @@ def eval_AR_emergence_with_plots(
     elif test_AR == 11726:
         starting_tile = 37 - rid_of_top
         before_plot = 50
-        num_in = 72
+        num_in = 72 #decrease even more -> 60
         NOAA_first = datetime(2013, 4, 20, 0, 0, 0)
         NOAA_second = datetime(2013, 4, 22, 0, 0, 0)
     elif test_AR == 13165:
@@ -223,7 +223,6 @@ def eval_AR_emergence_with_plots(
     input_size = np.shape(inputs)[1]
 
     # Initialize the LSTM and move it to GPU
-    print(input_size, hidden_size, num_layers, num_pred)
     lstm = LSTM(input_size, hidden_size, num_layers, num_pred).to(device)
     saved_state_dict = state_dict or torch.load(filename, map_location=device)
     new_state_dict = OrderedDict()
@@ -240,9 +239,9 @@ def eval_AR_emergence_with_plots(
     )  # Create a GridSpec with 4 rows and 2 columns
 
     # Loop to create 8 plots
-    future = 12
+    future = 11
     all_metrics = []
-    threshold = -0.01  # -0.006
+    threshold = 0.01  # -0.006
     sust_time = 4
 
     for i in range(7):
@@ -250,6 +249,7 @@ def eval_AR_emergence_with_plots(
         print("Tile {}".format(starting_tile + i))
 
         ### Validation
+        print("Inputs shape;", inputs.shape, "Mag flux shape:", mag_flux.shape)
         X_test, y_test = lstm_ready(
             starting_tile + i, size, inputs, mag_flux, num_in, num_pred
         )  # ,min_p,max_p,min_i,max_i)
@@ -276,7 +276,7 @@ def eval_AR_emergence_with_plots(
             3, 1, subplot_spec=main_gs[i], height_ratios=[4, 1, 1], hspace=0.05
         )  # Define GridSpec for this iteration
         mag_before_pred = mag_flux[
-            starting_tile + i, last_known_idx - before_plot : last_known_idx
+            starting_tile + i, last_known_idx - before_plot -num_pred-future: last_known_idx -num_pred-future
         ]
         time_cut = time[
             last_known_idx - before_plot : last_known_idx + np.shape(pred)[0]
@@ -289,7 +289,7 @@ def eval_AR_emergence_with_plots(
         # Main plot
         ax0 = plt.subplot(gs[0])
         ax0.plot(time_cut_mpl, np.concatenate((nan_array, pred)), color="black")
-        ax0.plot(time_cut_mpl, np.concatenate((nan_array, true)), color="red")
+        ax0.plot(time_cut_mpl, np.concatenate((mag_before_pred, true)), color="red")
         ax0.plot(
             time_cut_mpl,
             smooth_with_numpy(np.concatenate((mag_before_pred, true))),
@@ -547,40 +547,22 @@ def eval_AR_emergence(
         ) = [
             float(val) if i >= 6 else int(val) for i, val in enumerate(matches[0])
         ]  # Unpack the matched values into variables
-    print(
-        f"Extracted from filename: Time Window: {num_pred}, Rid of Top: {rid_of_top}, Number of Inputs: {num_in}, Number of Layers: {num_layers}, Hidden Size: {hidden_size}, Number of Epochs: {n_epochs}, Learning Rate: {learning_rate}"
-    )  # Print extracted values for confirmation
 
     if test_AR == 11698:
         starting_tile = 46 - rid_of_top
-        before_plot = 50
         num_in = 96
-        NOAA_first = datetime(2013, 3, 15, 0, 0, 0)
-        NOAA_second = datetime(2013, 3, 17, 0, 0, 0)
     elif test_AR == 11726:
         starting_tile = 37 - rid_of_top
-        before_plot = 50
         num_in = 72
-        NOAA_first = datetime(2013, 4, 20, 0, 0, 0)
-        NOAA_second = datetime(2013, 4, 22, 0, 0, 0)
     elif test_AR == 13165:
         starting_tile = 28 - rid_of_top
-        before_plot = 40
         num_in = 96
-        NOAA_first = datetime(2022, 12, 12, 0, 0, 0)
-        NOAA_second = datetime(2022, 12, 14, 0, 0, 0)
     elif test_AR == 13179:
         starting_tile = 37 - rid_of_top
-        before_plot = 40
         num_in = 96
-        NOAA_first = datetime(2022, 12, 30, 0, 0, 0)
-        NOAA_second = datetime(2023, 1, 1, 0, 0, 0)
     elif test_AR == 13183:
         starting_tile = 37 - rid_of_top * 9
-        before_plot = 40
         num_in = 96
-        NOAA_first = datetime(2023, 1, 6, 0, 0, 0)
-        NOAA_second = datetime(2023, 1, 8, 0, 0, 0)
     else:
         print("Invalid test_AR value. Please use 11698, 11726, 13165, 13179, or 13183.")
         return
@@ -589,7 +571,6 @@ def eval_AR_emergence(
 
     # Define the AR information
     size = 9
-    tiles = size**2 - 2 * size * rid_of_top
 
     # Preprocessing
     power_maps = np.load(
@@ -661,7 +642,7 @@ def eval_AR_emergence(
 
     # Assuming prediction, y_test_tensors, ARs, learning_rate, and n_epochs are already defined
     # Loop to create 8 plots
-    future = 12
+    future = 11
     all_metrics = []
 
     for i in range(7):
@@ -683,11 +664,6 @@ def eval_AR_emergence(
         # Evaluation metrics
         metrics = calculate_metrics(true, pred)
         all_metrics.append(metrics)
-        # print(f"MAE: {metrics[0]}")
-        # print(f"MSE: {metrics[1]}")
-        # print(f"RMSE: {metrics[2]}")
-        # print(f"RMSLE: {metrics[3]}")
-        # print(f"R-squared: {metrics[4]}")
 
     # Print the metrics at the bottom
     all_metrics_np = np.array(

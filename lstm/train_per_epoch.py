@@ -15,7 +15,7 @@ from functions import (
     training_loop_w_stats,
     PlateauStopper,
 )
-from functions import LSTM as LSTM
+from functions import VanillaLSTM as LSTM
 from ray import tune
 import ray
 from ray.tune.search.optuna import OptunaSearch
@@ -312,7 +312,7 @@ def main_w_tune(config):
 
     # Initialize wandb
     wandb.init(
-        project="PARAMETER_SEARCH_V2,VanillaLSTM,Future_12",
+        project="VanillaLSTM,Future_11,NUM_IN_110,pred_12",
         entity=os.environ.get("WANDB_ENTITY"),
         config=config,
 
@@ -504,7 +504,7 @@ if __name__ == "__main__":
     config = parse_args()
     if 'sample_size' in config.keys():
         search_space = {
-            "num_pred": tune.choice([72]),
+            "num_pred": tune.choice([12]),
             "rid_of_top": tune.choice([4]),
             "num_in": tune.choice([110]),
             "num_layers": tune.choice([2, 3, 4]), 
