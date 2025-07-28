@@ -15,7 +15,7 @@ from functions import (
     training_loop_w_stats,
     PlateauStopper,
 )
-from functions import VanillaLSTM as LSTM
+from functions import LSTM as LSTM
 from ray import tune
 import ray
 from ray.tune.search.optuna import OptunaSearch
