@@ -306,20 +306,16 @@ def main(config):
 
 def main_w_tune(config):
     """Main function to run the experiment."""
-    config1 = {
-        "size": 9,
-        "wandb_project": "PARAMETER_SEARCH,LSTM,Future_12",
-        "wandb_entity": os.environ.get("WANDB_ENTITY"),
-    }
     start_time = time.time()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Runs on: {device}")
 
     # Initialize wandb
     wandb.init(
-        project=config1["wandb_project"],
-        entity=config1["wandb_entity"],
+        project="PARAMETER_SEARCH_V2,LSTM,Future_12",
+        entity=os.environ.get("WANDB_ENTITY"),
         config=config,
+
         name=f"LSTM_pred{config['num_pred']}_r{config['rid_of_top']}_i{config['num_in']}_n{config['num_layers']}_h{config['hidden_size']}_e{config['n_epochs']}_l{config['learning_rate']:.5f}_d{config['dropout']:.2f}",
         notes=f"LSTM training with lr={config['learning_rate']}, dropout={config['dropout']}",
     )
@@ -371,7 +367,7 @@ def main_w_tune(config):
     ]
     x_train, y_train, input_size = prepare_dataset(
         train_ars,
-        config1["size"],
+        9,
         config["rid_of_top"],
         config["num_in"],
         config["num_pred"],
@@ -381,7 +377,7 @@ def main_w_tune(config):
     test_ars = [11462, 11521, 11907, 12219, 12271, 12275, 12567]
     x_test, y_test, _ = prepare_dataset(
         test_ars,
-        config1["size"],
+        9,
         config["rid_of_top"],
         config["num_in"],
         config["num_pred"],
