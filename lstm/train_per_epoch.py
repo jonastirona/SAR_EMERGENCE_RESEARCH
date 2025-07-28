@@ -15,7 +15,7 @@ from functions import (
     training_loop_w_stats,
     PlateauStopper,
 )
-from functions import VanillaLSTM as LSTM
+from functions import LSTM as LSTM
 from ray import tune
 import ray
 from ray.tune.search.optuna import OptunaSearch
@@ -312,11 +312,11 @@ def main_w_tune(config):
 
     # Initialize wandb
     wandb.init(
-        project="VanillaLSTM,Future_11,NUM_IN_110,pred_12",
+        project="LSTM,Future_11,NUM_IN_110,pred_12",
         entity=os.environ.get("WANDB_ENTITY"),
         config=config,
 
-        name=f"VanillaLSTM_pred{config['num_pred']}_r{config['rid_of_top']}_i{config['num_in']}_n{config['num_layers']}_h{config['hidden_size']}_e{config['n_epochs']}_l{config['learning_rate']:.5f}_d{config['dropout']:.2f}",
+        name=f"LSTM_pred{config['num_pred']}_r{config['rid_of_top']}_i{config['num_in']}_n{config['num_layers']}_h{config['hidden_size']}_e{config['n_epochs']}_l{config['learning_rate']:.5f}_d{config['dropout']:.2f}",
         notes=f"LSTM training with lr={config['learning_rate']}, dropout={config['dropout']}",
     )
 
