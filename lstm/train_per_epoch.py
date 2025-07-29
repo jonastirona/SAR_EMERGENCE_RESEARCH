@@ -15,7 +15,7 @@ from functions import (
     training_loop_w_stats,
     PlateauStopper,
 )
-from functions import LSTM as LSTM
+from functions import VanillaLSTM as LSTM
 from ray import tune
 import ray
 from ray.tune.search.optuna import OptunaSearch
@@ -172,13 +172,14 @@ def main(config):
     print(f"Runs on: {device}")
 
     # Initialize wandb
-    wandb.init(
-        project=config["wandb_project"],
-        entity=config["wandb_entity"],
-        config=config,
-        name=f"LSTM_pred{config['num_pred']}_in{config['num_in']}_n{config['num_layers']}_h{config['hidden_size']}",
-        notes=f"LSTM training with lr={config['learning_rate']}, dropout={config['dropout']}",
-    )
+    # wandb.init(
+    #     project="LSTM,Future_11,NUM_IN_110,pred_12",
+    #     entity=os.environ.get("WANDB_ENTITY"),
+    #     config=config,
+
+    #     name=f"LSTM_pred{config['num_pred']}_r{config['rid_of_top']}_i{config['num_in']}_n{config['num_layers']}_h{config['hidden_size']}_e{config['n_epochs']}_l{config['learning_rate']:.5f}_d{config['dropout']:.2f}",
+    #     notes=f"LSTM training with lr={config['learning_rate']}, dropout={config['dropout']}",
+    # )
 
     # --- Data Loading ---
     print("Loading and preparing training data...")
@@ -227,7 +228,7 @@ def main(config):
     ]
     x_train, y_train, input_size = prepare_dataset(
         train_ars,
-        config["size"],
+        9,
         config["rid_of_top"],
         config["num_in"],
         config["num_pred"],
@@ -237,7 +238,7 @@ def main(config):
     test_ars = [11462, 11521, 11907, 12219, 12271, 12275, 12567]
     x_test, y_test, _ = prepare_dataset(
         test_ars,
-        config["size"],
+        9,
         config["rid_of_top"],
         config["num_in"],
         config["num_pred"],
@@ -275,33 +276,43 @@ def main(config):
         lr = scheduler.get_last_lr()[0]
         scheduler.step(test_loss)
 
+        if (
+            epoch % 10 == 0 or epoch == config["n_epochs"] - 1
+        ):  # Evaluate every 10 epochs and on the last epoch
+            scores = []
+            for AR in [11698, 11726, 13165, 13179, 13183]:
+                score = eval(device, AR, False, BASE_PATH, model.state_dict(), **config)
+                scores.append(score)
+            val_rmse = float(np.mean(scores))
+
         log_metrics = {
             "epoch": epoch,
             "train_loss": train_loss,
             "test_loss": test_loss,
-            "learning_rate": lr,
+            "learning_rate": float(lr),
+            "RMSE": val_rmse,
         }
         print(log_metrics)
-        wandb.log(log_metrics)
+        # wandb.log(log_metrics)
 
     # --- Save Model & Artifacts ---
-    model_name = f"pred{config['num_pred']}_r{config['rid_of_top']}_i{config['num_in']}_n{config['num_layers']}_h{config['hidden_size']}_e{config['n_epochs']}_lr{config['learning_rate']}_d{config['dropout']}.pth"
+    model_name = f"pred{config['num_pred']}_r{config['rid_of_top']}_i{config['num_in']}_n{config['num_layers']}_h{config['hidden_size']}_e{config['n_epochs']}_lr{config['learning_rate']:.8f}_d{config['dropout']}.pth"
     model_path = os.path.join(RESULTS_PATH, model_name)
     torch.save(model.state_dict(), model_path)
     print(f"Model saved to {model_path}")
 
-    model_artifact = wandb.Artifact(
-        name=f"lstm-model-{wandb.run.id}",
-        type="model",
-        description="LSTM Model for SAR emergence prediction",
-        metadata=config,
-    )
-    model_artifact.add_file(model_path)
-    wandb.log_artifact(model_artifact)
+    # model_artifact = wandb.Artifact(
+    #     name=f"lstm-model-{wandb.run.id}",
+    #     type="model",
+    #     description="LSTM Model for SAR emergence prediction",
+    #     metadata=config,
+    # )
+    # model_artifact.add_file(model_path)
+    # wandb.log_artifact(model_artifact)
 
     end_time = time.time()
     print(f"Elapsed time: {(end_time - start_time) / 60:.2f} minutes")
-    wandb.finish()
+    # wandb.finish()
 
 
 def main_w_tune(config):
@@ -312,11 +323,11 @@ def main_w_tune(config):
 
     # Initialize wandb
     wandb.init(
-        project="LSTM,Future_11,NUM_IN_110,pred_12",
+        project="VanillaLSTM,Future_11,NUM_IN_110,pred_12",
         entity=os.environ.get("WANDB_ENTITY"),
         config=config,
 
-        name=f"LSTM_pred{config['num_pred']}_r{config['rid_of_top']}_i{config['num_in']}_n{config['num_layers']}_h{config['hidden_size']}_e{config['n_epochs']}_l{config['learning_rate']:.5f}_d{config['dropout']:.2f}",
+        name=f"VanillaLSTM_pred{config['num_pred']}_r{config['rid_of_top']}_i{config['num_in']}_n{config['num_layers']}_h{config['hidden_size']}_e{config['n_epochs']}_l{config['learning_rate']:.5f}_d{config['dropout']:.2f}",
         notes=f"LSTM training with lr={config['learning_rate']}, dropout={config['dropout']}",
     )
 
@@ -474,11 +485,7 @@ def parse_args():
                 "n_epochs": int(sys.argv[6]),
                 "learning_rate": float(sys.argv[7]),
                 "dropout": float(sys.argv[8]),
-                # Add other static configurations here
-                "size": 9,
-                "batch_size": 64,
-                "wandb_project": os.environ.get("WANDB_PROJECT", "sar"),
-                "wandb_entity": os.environ.get("WANDB_ENTITY"),
+                "batch_size": 256,
             }
         else:
             config = {
