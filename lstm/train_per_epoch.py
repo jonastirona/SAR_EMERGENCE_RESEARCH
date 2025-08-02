@@ -322,7 +322,7 @@ def main_w_tune(config):
 
     # Initialize wandb
     wandb.init(
-        project="VanillaLSTM,Future_11,NUM_IN_110,pred_12",
+        project="VanillaLSTM,Plateau_percent",
         entity=os.environ.get("WANDB_ENTITY"),
         config=config,
 
