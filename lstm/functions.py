@@ -641,10 +641,6 @@ class PlateauStopper(tune.stopper.Stopper):
                 f"Stopping trial {trial_id}: "
                 f"No improvement of {improvement_needed} in the last {self._patience} epochs."
             )
-            wandb.log(
-                f"Stopping trial {trial_id}: "
-                f"No improvement of {improvement_needed} in the last {self._patience} epochs."
-            )
             return True
 
         return False
