@@ -680,7 +680,7 @@ def eval_AR_emergence(
         round(means[3], 3),
         round(means[4], 3),
     )
-    print(mae_string)
+    # print(mae_string)
     return means[2]
 
 

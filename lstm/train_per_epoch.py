@@ -182,6 +182,7 @@ def main(config):
     # )
 
     # --- Data Loading ---
+    print("Batch size:", config['batch_size'])
     print("Loading and preparing training data...")
     train_ars = [
         11130,
@@ -276,14 +277,12 @@ def main(config):
         lr = scheduler.get_last_lr()[0]
         scheduler.step(test_loss)
 
-        if (
-            epoch % 10 == 0 or epoch == config["n_epochs"] - 1
-        ):  # Evaluate every 10 epochs and on the last epoch
-            scores = []
-            for AR in [11698, 11726, 13165, 13179, 13183]:
-                score = eval(device, AR, False, BASE_PATH, model.state_dict(), **config)
-                scores.append(score)
-            val_rmse = float(np.mean(scores))
+        # Evaluate every 10 epochs and on the last epoch
+        scores = []
+        for AR in [11698, 11726, 13165, 13179, 13183]:
+            score = eval(device, AR, False, BASE_PATH, model.state_dict(), **config)
+            scores.append(score)
+        val_rmse = float(np.mean(scores))
 
         log_metrics = {
             "epoch": epoch,
@@ -426,14 +425,12 @@ def main_w_tune(config):
         lr = scheduler.get_last_lr()[0]
         scheduler.step(test_loss)
 
-        if (
-            epoch % 10 == 0 or epoch == config["n_epochs"] - 1
-        ):  # Evaluate every 10 epochs and on the last epoch
-            scores = []
-            for AR in [11698, 11726, 13165, 13179, 13183]:
-                score = eval(device, AR, False, BASE_PATH, model.state_dict(), **config)
-                scores.append(score)
-            val_rmse = float(np.mean(scores))
+      # Evaluate every 10 epochs and on the last epoch
+        scores = []
+        for AR in [11698, 11726, 13165, 13179, 13183]:
+            score = eval(device, AR, False, BASE_PATH, model.state_dict(), **config)
+            scores.append(score)
+        val_rmse = float(np.mean(scores))
 
         log_metrics = {
             "epoch": epoch,
@@ -485,7 +482,7 @@ def parse_args():
                 "n_epochs": int(sys.argv[6]),
                 "learning_rate": float(sys.argv[7]),
                 "dropout": float(sys.argv[8]),
-                "batch_size": 256,
+                "batch_size": 32,
             }
         else:
             config = {
@@ -525,7 +522,7 @@ if __name__ == "__main__":
         scheduler = ASHAScheduler(max_t=500, grace_period=10, reduction_factor=3)
 
         custom_stopper = PlateauStopper(
-            "RMSE", min_epochs=30, patience=15, min_improvement=1e-5
+            "RMSE", min_epochs=21, patience=10, min_improvement_percent=0.5
         )
 
         ray.init(num_cpus=4, num_gpus=2, include_dashboard=False)
