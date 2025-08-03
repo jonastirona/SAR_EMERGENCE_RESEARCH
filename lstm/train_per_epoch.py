@@ -15,13 +15,21 @@ from functions import (
     training_loop_w_stats,
     PlateauStopper,
 )
-from functions import LSTM as LSTM
 from ray import tune
 import ray
 from ray.tune.search.optuna import OptunaSearch
 from ray.tune.schedulers import ASHAScheduler
 from eval import eval_AR_emergence as eval
 import re
+
+isVanillaLSTM = False
+
+if isVanillaLSTM:
+    from functions import VanillaLSTM as LSTM
+    model_type = "VanillaLSTM"
+else:
+    from functions import LSTM as LSTM
+    model_type = "LSTM"
 
 
 # Assume these are defined in a 'functions.py' file or similar
@@ -322,11 +330,11 @@ def main_w_tune(config):
 
     # Initialize wandb
     wandb.init(
-        project="VanillaLSTM,Plateau_percent",
+        project=f"{model_type},Plateau_percent",
         entity=os.environ.get("WANDB_ENTITY"),
         config=config,
-        name=f"VanillaLSTM_pred{config['num_pred']}_r{config['rid_of_top']}_i{config['num_in']}_n{config['num_layers']}_h{config['hidden_size']}_e{config['n_epochs']}_l{config['learning_rate']:.5f}_d{config['dropout']:.2f}",
-        notes=f"LSTM training with lr={config['learning_rate']}, dropout={config['dropout']}",
+        name=f"{model_type}_pred{config['num_pred']}_r{config['rid_of_top']}_i{config['num_in']}_n{config['num_layers']}_h{config['hidden_size']}_e{config['n_epochs']}_l{config['learning_rate']:.5f}_d{config['dropout']:.2f}",
+        notes=f"{model_type} training with lr={config['learning_rate']}, dropout={config['dropout']}",
     )
 
     # --- Data Loading ---
@@ -414,7 +422,7 @@ def main_w_tune(config):
     loss_fn = nn.MSELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=config["learning_rate"])
     scheduler = ReduceLROnPlateau(optimizer, "min", factor=0.2, patience=10)
-    model_name = f"pred{config['num_pred']}_r{config['rid_of_top']}_i{config['num_in']}_n{config['num_layers']}_h{config['hidden_size']}_e{config['n_epochs']}_lr{config['learning_rate']:.8f}_d{config['dropout']}.pth"
+    model_name = f"{model_type}pred{config['num_pred']}_r{config['rid_of_top']}_i{config['num_in']}_n{config['num_layers']}_h{config['hidden_size']}_e{config['n_epochs']}_lr{config['learning_rate']:.8f}_d{config['dropout']}.pth"
 
     # --- Training Loop ---
     print("Starting training...")
@@ -447,9 +455,9 @@ def main_w_tune(config):
             print(f"Model saved to {model_path}")
 
             model_artifact = wandb.Artifact(
-                name=f"lstm-model-{wandb.run.id}-RMSE-{val_rmse:.8f}",
+                name=f"{model_type}-model-{wandb.run.id}-RMSE-{val_rmse:.8f}",
                 type="model",
-                description="LSTM Model for SAR emergence prediction",
+                description=f"{model_type} Model for SAR emergence prediction",
                 metadata=config,
             )
             model_artifact.add_file(model_path)

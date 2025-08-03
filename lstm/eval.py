@@ -16,7 +16,6 @@ from functions import (
     highlight_tile,
     emergence_indication2,
 )
-from functions import LSTM as LSTM
 from torch.optim.lr_scheduler import StepLR, ExponentialLR, ReduceLROnPlateau
 from torch.utils.data import Dataset, TensorDataset, DataLoader
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
@@ -38,6 +37,12 @@ import glob
 import re
 import os
 import wandb
+from train_per_epoch import isVanillaLSTM
+
+if isVanillaLSTM:
+    from functions import VanillaLSTM as LSTM
+else:
+    from functions import LSTM as LSTM
 
 warnings.filterwarnings("ignore")
 
