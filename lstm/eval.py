@@ -37,8 +37,8 @@ import glob
 import re
 import os
 import wandb
-from train_per_epoch import isVanillaLSTM
 
+isVanillaLSTM = False
 if isVanillaLSTM:
     from functions import VanillaLSTM as LSTM
 else:
