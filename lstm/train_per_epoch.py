@@ -15,7 +15,7 @@ from functions import (
     training_loop_w_stats,
     PlateauStopper,
 )
-from functions import VanillaLSTM as LSTM
+from functions import LSTM as LSTM
 from ray import tune
 import ray
 from ray.tune.search.optuna import OptunaSearch
@@ -182,7 +182,7 @@ def main(config):
     # )
 
     # --- Data Loading ---
-    print("Batch size:", config['batch_size'])
+    print("Batch size:", config["batch_size"])
     print("Loading and preparing training data...")
     train_ars = [
         11130,
@@ -325,7 +325,6 @@ def main_w_tune(config):
         project="VanillaLSTM,Plateau_percent",
         entity=os.environ.get("WANDB_ENTITY"),
         config=config,
-
         name=f"VanillaLSTM_pred{config['num_pred']}_r{config['rid_of_top']}_i{config['num_in']}_n{config['num_layers']}_h{config['hidden_size']}_e{config['n_epochs']}_l{config['learning_rate']:.5f}_d{config['dropout']:.2f}",
         notes=f"LSTM training with lr={config['learning_rate']}, dropout={config['dropout']}",
     )
@@ -415,6 +414,7 @@ def main_w_tune(config):
     loss_fn = nn.MSELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=config["learning_rate"])
     scheduler = ReduceLROnPlateau(optimizer, "min", factor=0.2, patience=10)
+    model_name = f"pred{config['num_pred']}_r{config['rid_of_top']}_i{config['num_in']}_n{config['num_layers']}_h{config['hidden_size']}_e{config['n_epochs']}_lr{config['learning_rate']:.8f}_d{config['dropout']}.pth"
 
     # --- Training Loop ---
     print("Starting training...")
@@ -425,7 +425,7 @@ def main_w_tune(config):
         lr = scheduler.get_last_lr()[0]
         scheduler.step(test_loss)
 
-      # Evaluate every 10 epochs and on the last epoch
+        # Evaluate every 10 epochs and on the last epoch
         scores = []
         for AR in [11698, 11726, 13165, 13179, 13183]:
             score = eval(device, AR, False, BASE_PATH, model.state_dict(), **config)
@@ -439,6 +439,21 @@ def main_w_tune(config):
             "learning_rate": float(lr),
             "RMSE": val_rmse,
         }
+        if val_rmse <= 0.07:
+            result = BASE_PATH + f"SAR_EMERGENCE_RESEARCH/lstm/results/{val_rmse:.8f}"
+            os.makedirs(result, exist_ok=True)  # Ensure the results directory exists
+            model_path = os.path.join(result, model_name)
+            torch.save(model.state_dict(), model_path)
+            print(f"Model saved to {model_path}")
+
+            model_artifact = wandb.Artifact(
+                name=f"lstm-model-{wandb.run.id}-RMSE-{val_rmse:.8f}",
+                type="model",
+                description="LSTM Model for SAR emergence prediction",
+                metadata=config,
+            )
+            model_artifact.add_file(model_path)
+            wandb.log_artifact(model_artifact)
         print(log_metrics)
         wandb.log(log_metrics)
         tune.report(log_metrics)
@@ -482,7 +497,7 @@ def parse_args():
                 "n_epochs": int(sys.argv[6]),
                 "learning_rate": float(sys.argv[7]),
                 "dropout": float(sys.argv[8]),
-                "batch_size": 32,
+                "batch_size": 64,
             }
         else:
             config = {
@@ -506,17 +521,17 @@ if __name__ == "__main__":
     # For this refactoring to be fully functional, you must provide
     # the implementations for these functions from your 'functions.py' file.
     config = parse_args()
-    if 'sample_size' in config.keys():
+    if "sample_size" in config.keys():
         search_space = {
             "num_pred": tune.choice([12]),
             "rid_of_top": tune.choice([4]),
             "num_in": tune.choice([110]),
-            "num_layers": tune.choice([2, 3, 4]), 
+            "num_layers": tune.choice([2, 3, 4]),
             "hidden_size": tune.choice([32, 64, 128, 256]),
             "n_epochs": tune.choice([500]),
             "learning_rate": tune.loguniform(1e-5, 1e-3),
-            "dropout": tune.choice([0, 0.01, 0.1, 0.2, 0.3, 0.4, 0.5]), 
-            "batch_size": tune.choice([32,64,128,256])
+            "dropout": tune.choice([0, 0.01, 0.1, 0.2, 0.3, 0.4, 0.5]),
+            "batch_size": tune.choice([32, 64, 128, 256]),
         }
         algo = OptunaSearch()
         scheduler = ASHAScheduler(max_t=500, grace_period=10, reduction_factor=3)
