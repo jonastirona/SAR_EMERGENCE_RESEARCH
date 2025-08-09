@@ -1,50 +1,49 @@
 from functions import (
-    split_image,
-    get_piece_means,
-    dtws,
     lstm_ready,
-    training_loop,
-    split_sequences,
-    min_max_scaling,
-    amplify_fluctuations,
     calculate_metrics,
     emergence_indication,
     smooth_with_numpy,
     recalibrate,
-    find_closest_fits_frame_to_NOAA_record,
     add_grid_lines,
     highlight_tile,
-    emergence_indication2,
+    process_data,
+    get_params,
+    AR_defs,
+    isVanillaLSTM
 )
-from torch.optim.lr_scheduler import StepLR, ExponentialLR, ReduceLROnPlateau
-from torch.utils.data import Dataset, TensorDataset, DataLoader
-from sklearn.preprocessing import StandardScaler, MinMaxScaler
-from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_squared_error
-from datetime import datetime, timedelta
-from collections import OrderedDict
+from datetime import timedelta
 import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 from matplotlib import gridspec
-from datetime import datetime
-import torch.optim as optim
-import torch.nn as nn
-from PIL import Image
 import numpy as np
 import warnings
 import torch
-import glob
-import re
 import os
-import wandb
+from collections import OrderedDict
 
-isVanillaLSTM = False
 if isVanillaLSTM:
     from functions import VanillaLSTM as LSTM
 else:
     from functions import LSTM as LSTM
 
 warnings.filterwarnings("ignore")
+
+def initialize_lstm(
+    inputs, hidden_size, num_layers, num_pred, state_dict, filename, device
+):
+    input_size = np.shape(inputs)[1]
+
+    # Initialize the LSTM and move it to GPU
+    lstm = LSTM(input_size, hidden_size, num_layers, num_pred).to(device)
+    saved_state_dict = state_dict or torch.load(filename, map_location=device)
+    new_state_dict = OrderedDict()
+    for k, v in saved_state_dict.items():
+        name = k[7:] if k.startswith("module.") else k  # remove 'module.' prefix
+        new_state_dict[name] = v
+    lstm.load_state_dict(new_state_dict)
+    lstm.eval()  # Set the model to evaluation model
+    return lstm
 
 
 def eval_AR_emergence_with_plots(
@@ -62,15 +61,8 @@ def eval_AR_emergence_with_plots(
     learning_rate=None,
     dropout=None,
 ):
+    filename = None
     if not state_dict:
-        pth_files = glob.glob(
-            path + "SAR_EMERGENCE_RESEARCH/lstm/results/*.pth"
-        )  # Assuming there's only one .pth file and its naming follows the specific pattern
-        filename = pth_files[0]
-        matches = re.findall(
-            r"pred(\d+)_r(\d+)_i(\d+)_n(\d+)_h(\d+)_e(\d+)_lr([0-9.]+)_d([0-9.]+)\.pth",
-            filename,
-        )  # Extract numbers from the filename
         (
             num_pred,
             rid_of_top,
@@ -80,162 +72,25 @@ def eval_AR_emergence_with_plots(
             n_epochs,
             learning_rate,
             dropout,
-        ) = [
-            float(val) if i >= 6 else int(val) for i, val in enumerate(matches[0])
-        ]  # Unpack the matched values into variables
-    print(
-        f"Extracted from filename: Time Window: {num_pred}, Rid of Top: {rid_of_top}, Number of Inputs: {num_in}, Number of Layers: {num_layers}, Hidden Size: {hidden_size}, Number of Epochs: {n_epochs}, Learning Rate: {learning_rate}"
-    )  # Print extracted values for confirmation
+            filename,
+        ) = get_params(state_dict, path)
+    # print(
+    #     f"Extracted from filename: Time Window: {num_pred}, Rid of Top: {rid_of_top}, Number of Inputs: {num_in}, Number of Layers: {num_layers}, Hidden Size: {hidden_size}, Number of Epochs: {n_epochs}, Learning Rate: {learning_rate}"
+    # )  # Print extracted values for confirmation
 
-    if test_AR == 11698:
-        starting_tile = 46 - rid_of_top
-        before_plot = 50
-        num_in = 96
-        NOAA_first = datetime(2013, 3, 15, 0, 0, 0)
-        NOAA_second = datetime(2013, 3, 17, 0, 0, 0)
-    elif test_AR == 11726:
-        starting_tile = 37 - rid_of_top
-        before_plot = 50
-        num_in = 72 #decrease even more -> 60
-        NOAA_first = datetime(2013, 4, 20, 0, 0, 0)
-        NOAA_second = datetime(2013, 4, 22, 0, 0, 0)
-    elif test_AR == 13165:
-        starting_tile = 28 - rid_of_top
-        before_plot = 40
-        num_in = 96
-        NOAA_first = datetime(2022, 12, 12, 0, 0, 0)
-        NOAA_second = datetime(2022, 12, 14, 0, 0, 0)
-    elif test_AR == 13179:
-        starting_tile = 37 - rid_of_top
-        before_plot = 40
-        num_in = 96
-        NOAA_first = datetime(2022, 12, 30, 0, 0, 0)
-        NOAA_second = datetime(2023, 1, 1, 0, 0, 0)
-    elif test_AR == 13183:
-        starting_tile = 37 - rid_of_top * 9
-        before_plot = 40
-        num_in = 96
-        NOAA_first = datetime(2023, 1, 6, 0, 0, 0)
-        NOAA_second = datetime(2023, 1, 8, 0, 0, 0)
-    else:
-        print("Invalid test_AR value. Please use 11698, 11726, 13165, 13179, or 13183.")
+    before_plot, num_in, NOAA_first, NOAA_second = AR_defs(test_AR)
+    if not before_plot:
         return
-    starting_tile = 1
+    
     # Define the AR information
-    ARs = [
-        11130,
-        11149,
-        11158,
-        11162,
-        11199,
-        11327,
-        11344,
-        11387,
-        11393,
-        11416,
-        11422,
-        11455,
-        11619,
-        11640,
-        11660,
-        11678,
-        11682,
-        11765,
-        11768,
-        11776,
-        11916,
-        11928,
-        12036,
-        12051,
-        12085,
-        12089,
-        12144,
-        12175,
-        12203,
-        12257,
-        12331,
-        12494,
-        12659,
-        12778,
-        12864,
-        12877,
-        12900,
-        12929,
-        13004,
-        13085,
-        13098,
-    ]
-    flatten = True
+    starting_tile = 1
     size = 9
-    tiles = size**2 - 2 * size * rid_of_top
-    # Preprocessing
-    power_maps = np.load(
-        path
-        + "SAR_EMERGENCE_RESEARCH/data/AR{}/mean_pmdop{}_flat.npz".format(
-            test_AR, test_AR
-        ),
-        allow_pickle=True,
-    )
-    mag_flux = np.load(
-        path
-        + "SAR_EMERGENCE_RESEARCH/data/AR{}/mean_mag{}_flat.npz".format(
-            test_AR, test_AR
-        ),
-        allow_pickle=True,
-    )
-    intensities = np.load(
-        path
-        + "SAR_EMERGENCE_RESEARCH/data/AR{}/mean_int{}_flat.npz".format(
-            test_AR, test_AR
-        ),
-        allow_pickle=True,
-    )
-    power_maps23 = power_maps["arr_0"]
-    power_maps34 = power_maps["arr_1"]
-    power_maps45 = power_maps["arr_2"]
-    power_maps56 = power_maps["arr_3"]
-    time = power_maps["arr_4"]
-    mag_flux = mag_flux["arr_0"]
-    intensities = intensities["arr_0"]
-    # Trim array to get rid of top and bottom 0 tiles
-    power_maps23 = power_maps23[rid_of_top * size : -rid_of_top * size, :]
-    power_maps34 = power_maps34[rid_of_top * size : -rid_of_top * size, :]
-    power_maps45 = power_maps45[rid_of_top * size : -rid_of_top * size, :]
-    power_maps56 = power_maps56[rid_of_top * size : -rid_of_top * size, :]
-    mag_flux = mag_flux[rid_of_top * size : -rid_of_top * size, :]
-    mag_flux[np.isnan(mag_flux)] = 0
-    intensities = intensities[rid_of_top * size : -rid_of_top * size, :]
-    intensities[np.isnan(intensities)] = 0
-    # stack inputs and normalize
-    stacked_maps = np.stack(
-        [power_maps23, power_maps34, power_maps45, power_maps56], axis=1
-    )
-    stacked_maps[np.isnan(stacked_maps)] = 0
-    min_p = np.min(stacked_maps)
-    max_p = np.max(stacked_maps)
-    min_m = np.min(mag_flux)
-    max_m = np.max(mag_flux)
-    min_i = np.min(intensities)
-    max_i = np.max(intensities)
-    stacked_maps = min_max_scaling(stacked_maps, min_p, max_p)
-    mag_flux = min_max_scaling(mag_flux, min_m, max_m)
-    intensities = min_max_scaling(intensities, min_i, max_i)
+    rid_of_top = 4
 
-    # Reshape int to have an extra dimension and then put it with pmaps
-    int_reshaped = np.expand_dims(intensities, axis=1)
-
-    inputs = np.concatenate([stacked_maps, int_reshaped], axis=1)
-    input_size = np.shape(inputs)[1]
-
-    # Initialize the LSTM and move it to GPU
-    lstm = LSTM(input_size, hidden_size, num_layers, num_pred).to(device)
-    saved_state_dict = state_dict or torch.load(filename, map_location=device)
-    new_state_dict = OrderedDict()
-    for k, v in saved_state_dict.items():
-        name = k[7:] if k.startswith("module.") else k  # remove 'module.' prefix
-        new_state_dict[name] = v
-    lstm.load_state_dict(new_state_dict)
-    lstm.eval()  # Set the model to evaluation model
+    inputs, mag_flux, time = process_data(test_AR, size, rid_of_top)
+    lstm = initialize_lstm(
+        inputs, hidden_size, num_layers, num_pred, state_dict, filename, device
+    )
 
     # Assuming prediction, y_test_tensors, ARs, learning_rate, and n_epochs are already defined
     fig = plt.figure(figsize=(12, 10))  # Adjust the figure size if necessary
@@ -248,7 +103,7 @@ def eval_AR_emergence_with_plots(
     all_metrics = []
     threshold = 0.01  # -0.006
     sust_time = 4
-
+    window_start, window_end = before_plot, before_plot + 72
     for i in range(7):
         print()
         print("Tile {}".format(starting_tile + i))
@@ -281,7 +136,10 @@ def eval_AR_emergence_with_plots(
             3, 1, subplot_spec=main_gs[i], height_ratios=[4, 1, 1], hspace=0.05
         )  # Define GridSpec for this iteration
         mag_before_pred = mag_flux[
-            starting_tile + i, last_known_idx - before_plot -num_pred-future: last_known_idx -num_pred-future
+            starting_tile + i,
+            last_known_idx - before_plot - num_pred - future : last_known_idx
+            - num_pred
+            - future,
         ]
         time_cut = time[
             last_known_idx - before_plot : last_known_idx + np.shape(pred)[0]
@@ -293,15 +151,35 @@ def eval_AR_emergence_with_plots(
 
         # Main plot
         ax0 = plt.subplot(gs[0])
-        ax0.plot(time_cut_mpl, np.concatenate((nan_array, pred)), color="black")
-        ax0.plot(time_cut_mpl, np.concatenate((mag_before_pred, true)), color="red")
+        ax0.plot(
+            time_cut_mpl,
+            np.concatenate((nan_array, pred)),
+            color="red",
+            label="Predicted",
+        )
+        ax0.plot(
+            time_cut_mpl,
+            np.concatenate((mag_before_pred, true)),
+            color="black",
+            label="Observed",
+        )
         ax0.plot(
             time_cut_mpl,
             smooth_with_numpy(np.concatenate((mag_before_pred, true))),
             color="black",
             alpha=0.25,
+            label="Smooth Obs.",
         )
-        ax0.set_ylabel(f"Tile {starting_tile + i}")  # Title for each plot (optional)
+        ax0.axvspan(
+            time_cut_mpl[window_start],
+            time_cut_mpl[window_end],
+            color="yellow",
+            alpha=0.25,
+        )
+        ax0.legend(loc="upper left")
+        ax0.set_ylabel(
+            f"Tile {starting_tile + i + size * rid_of_top}"
+        )  # Title for each plot (optional)
         # ax0.axvline(x=first_pred_time, color='darkturquoise', linestyle='--')
         ### ax0.axvline(x=NOAA_first_record, color='magenta', linestyle='--')  # Adjust color, linestyle, linewidth as needed
         ### ax0.axvline(x=NOAA_second_record, color='darkmagenta', linestyle='--')
@@ -419,7 +297,9 @@ def eval_AR_emergence_with_plots(
         ax2.set_ylabel(r"$\frac{d Pred}{dt}$")
 
         # Evaluation metrics
-        metrics = calculate_metrics(true, pred)
+        metrics = calculate_metrics(
+            true[window_start:window_end], pred[window_start:window_end]
+        )
         all_metrics.append(metrics)
         # print(f"MAE: {metrics[0]}")
         # print(f"MSE: {metrics[1]}")
@@ -507,7 +387,7 @@ def eval_AR_emergence_with_plots(
 
     if save_fig:
         save_path = path + "SAR_EMERGENCE_RESEARCH/lstm/results/AR{}_{}.png".format(
-            test_AR, os.path.splitext(os.path.basename(pth_files[0]))[0]
+            test_AR, os.path.splitext(os.path.basename(filename))[0]
         )
         plt.savefig(save_path)
         print("Results saved at: " + save_path)
@@ -531,15 +411,8 @@ def eval_AR_emergence(
     dropout=None,
     batch_size=None,
 ):
+    filename = None
     if not state_dict:
-        pth_files = glob.glob(
-            path + "SAR_EMERGENCE_RESEARCH/lstm/results/*.pth"
-        )  # Assuming there's only one .pth file and its naming follows the specific pattern
-        filename = pth_files[0]
-        matches = re.findall(
-            r"t(\d+)_r(\d+)_i(\d+)_n(\d+)_h(\d+)_e(\d+)_l([0-9.]+)_d([0-9.]+)\.pth",
-            filename,
-        )  # Extract numbers from the filename
         (
             num_pred,
             rid_of_top,
@@ -549,106 +422,31 @@ def eval_AR_emergence(
             n_epochs,
             learning_rate,
             dropout,
-        ) = [
-            float(val) if i >= 6 else int(val) for i, val in enumerate(matches[0])
-        ]  # Unpack the matched values into variables
+            filename,
+        ) = get_params(state_dict, path)
+    print(
+        f"Extracted from filename: Time Window: {num_pred}, Rid of Top: {rid_of_top}, Number of Inputs: {num_in}, Number of Layers: {num_layers}, Hidden Size: {hidden_size}, Number of Epochs: {n_epochs}, Learning Rate: {learning_rate}"
+    )  # Print extracted values for confirmation
 
-    if test_AR == 11698:
-        starting_tile = 46 - rid_of_top
-        num_in = 96
-    elif test_AR == 11726:
-        starting_tile = 37 - rid_of_top
-        num_in = 72
-    elif test_AR == 13165:
-        starting_tile = 28 - rid_of_top
-        num_in = 96
-    elif test_AR == 13179:
-        starting_tile = 37 - rid_of_top
-        num_in = 96
-    elif test_AR == 13183:
-        starting_tile = 37 - rid_of_top * 9
-        num_in = 96
-    else:
-        print("Invalid test_AR value. Please use 11698, 11726, 13165, 13179, or 13183.")
+    before_plot, num_in, _, _ = AR_defs(test_AR)
+    if not before_plot:
         return
-
-    starting_tile = 1
-
+    
     # Define the AR information
+    starting_tile = 1
     size = 9
+    rid_of_top = 4
 
-    # Preprocessing
-    power_maps = np.load(
-        path
-        + "SAR_EMERGENCE_RESEARCH/data/AR{}/mean_pmdop{}_flat.npz".format(
-            test_AR, test_AR
-        ),
-        allow_pickle=True,
+    inputs, mag_flux, time = process_data(test_AR, size, rid_of_top)
+    lstm = initialize_lstm(
+        inputs, hidden_size, num_layers, num_pred, state_dict, filename, device
     )
-    mag_flux = np.load(
-        path
-        + "SAR_EMERGENCE_RESEARCH/data/AR{}/mean_mag{}_flat.npz".format(
-            test_AR, test_AR
-        ),
-        allow_pickle=True,
-    )
-    intensities = np.load(
-        path
-        + "SAR_EMERGENCE_RESEARCH/data/AR{}/mean_int{}_flat.npz".format(
-            test_AR, test_AR
-        ),
-        allow_pickle=True,
-    )
-    power_maps23 = power_maps["arr_0"]
-    power_maps34 = power_maps["arr_1"]
-    power_maps45 = power_maps["arr_2"]
-    power_maps56 = power_maps["arr_3"]
-    time = power_maps["arr_4"]
-    mag_flux = mag_flux["arr_0"]
-    intensities = intensities["arr_0"]
-    # Trim array to get rid of top and bottom 0 tiles
-    power_maps23 = power_maps23[rid_of_top * size : -rid_of_top * size, :]
-    power_maps34 = power_maps34[rid_of_top * size : -rid_of_top * size, :]
-    power_maps45 = power_maps45[rid_of_top * size : -rid_of_top * size, :]
-    power_maps56 = power_maps56[rid_of_top * size : -rid_of_top * size, :]
-    mag_flux = mag_flux[rid_of_top * size : -rid_of_top * size, :]
-    mag_flux[np.isnan(mag_flux)] = 0
-    intensities = intensities[rid_of_top * size : -rid_of_top * size, :]
-    intensities[np.isnan(intensities)] = 0
-    # stack inputs and normalize
-    stacked_maps = np.stack(
-        [power_maps23, power_maps34, power_maps45, power_maps56], axis=1
-    )
-    stacked_maps[np.isnan(stacked_maps)] = 0
-    min_p = np.min(stacked_maps)
-    max_p = np.max(stacked_maps)
-    min_m = np.min(mag_flux)
-    max_m = np.max(mag_flux)
-    min_i = np.min(intensities)
-    max_i = np.max(intensities)
-    stacked_maps = min_max_scaling(stacked_maps, min_p, max_p)
-    mag_flux = min_max_scaling(mag_flux, min_m, max_m)
-    intensities = min_max_scaling(intensities, min_i, max_i)
-
-    # Reshape int to have an extra dimension and then put it with pmaps
-    int_reshaped = np.expand_dims(intensities, axis=1)
-    inputs = np.concatenate([stacked_maps, int_reshaped], axis=1)
-    input_size = np.shape(inputs)[1]
-
-    # Initialize the LSTM and move it to GPU
-    lstm = LSTM(input_size, hidden_size, num_layers, num_pred).to(device)
-    saved_state_dict = state_dict or torch.load(filename, map_location=device)
-    new_state_dict = OrderedDict()
-    for k, v in saved_state_dict.items():
-        name = k[7:] if k.startswith("module.") else k  # remove 'module.' prefix
-        new_state_dict[name] = v
-    lstm.load_state_dict(new_state_dict)
-    lstm.eval()  # Set the model to evaluation mode
 
     # Assuming prediction, y_test_tensors, ARs, learning_rate, and n_epochs are already defined
     # Loop to create 8 plots
     future = 11
     all_metrics = []
+    window_start, window_end = before_plot, before_plot + 72
 
     for i in range(7):
         # print("Tile {}".format(starting_tile + i))
@@ -667,7 +465,9 @@ def eval_AR_emergence(
         )  # the index in the timeline before we start predicting
         pred = recalibrate(pred, mag_flux[starting_tile + i, last_known_idx])
         # Evaluation metrics
-        metrics = calculate_metrics(true, pred)
+        metrics = calculate_metrics(
+            true[window_start:window_end], pred[window_start:window_end]
+        )
         all_metrics.append(metrics)
 
     # Print the metrics at the bottom

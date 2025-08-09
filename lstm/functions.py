@@ -1,27 +1,30 @@
 # functions to be used in pipeline
 
 import matplotlib.pyplot as plt
-from datetime import datetime
+from datetime import datetime, timedelta
 import numpy as np
 from astropy.io import fits
 import sys
 from PIL import Image
 import os
-import matplotlib.dates as mdates
 import torch
 import torch.nn as nn
-import torch.optim as optim
-from torch.optim.lr_scheduler import StepLR, ExponentialLR, ReduceLROnPlateau
-from torch.utils.data import Dataset, TensorDataset, DataLoader
-from sklearn.preprocessing import StandardScaler, MinMaxScaler
+from torch.optim.lr_scheduler import StepLR
 from scipy.signal import detrend
 import warnings
-from datetime import datetime, timedelta
 import random
 from ray import tune
-import wandb
+import re
+from collections import OrderedDict
+import glob
 
+isVanillaLSTM = True
 warnings.filterwarnings("ignore")
+l = re.split(r"[\\/]", os.path.abspath(os.getcwd()))
+BASE_PATH = "/".join(l[:-1]) + "/"
+
+DATA_PATH = BASE_PATH + "SAR_EMERGENCE_RESEARCH/data"
+RESULTS_PATH = BASE_PATH + "SAR_EMERGENCE_RESEARCH/lstm/results"
 
 
 # Splitting Image Function
@@ -589,6 +592,206 @@ def calculate_extended_metrics(
         "RMSE@1": RMSE_1,
         "RMSE@5": RMSE_5,
     }
+
+
+def load_ar_data(ar_num, size, rid_of_top):
+    """Loads and preprocesses data for a single Active Region (AR)."""
+    try:
+        # Load data from .npz files
+        pm_path = os.path.join(DATA_PATH, f"AR{ar_num}", f"mean_pmdop{ar_num}_flat.npz")
+        mag_path = os.path.join(DATA_PATH, f"AR{ar_num}", f"mean_mag{ar_num}_flat.npz")
+        int_path = os.path.join(DATA_PATH, f"AR{ar_num}", f"mean_int{ar_num}_flat.npz")
+
+        power_maps = np.load(pm_path, allow_pickle=True)
+        mag_flux_data = np.load(mag_path, allow_pickle=True)
+        intensities_data = np.load(int_path, allow_pickle=True)
+        time = power_maps["arr_4"]
+
+        # Unpack arrays
+        power_maps = [power_maps[f"arr_{i}"] for i in range(4)]
+        mag_flux = mag_flux_data["arr_0"]
+        intensities = intensities_data["arr_0"]
+
+        # Trim, stack, and handle NaNs
+        trim_slice = slice(
+            rid_of_top * size, -rid_of_top * size if rid_of_top > 0 else None
+        )
+        power_maps = [pm[trim_slice, :] for pm in power_maps]
+        mag_flux = mag_flux[trim_slice, :]
+        intensities = intensities[trim_slice, :]
+
+        stacked_maps = np.stack(power_maps, axis=1)
+        stacked_maps[np.isnan(stacked_maps)] = 0
+        mag_flux[np.isnan(mag_flux)] = 0
+        intensities[np.isnan(intensities)] = 0
+
+        return stacked_maps, mag_flux, intensities, time
+
+    except FileNotFoundError:
+        print(f"Warning: Data files for AR {ar_num} not found. Skipping.")
+        return None, None, None
+
+
+def process_data(
+    test_AR,
+    size,
+    rid_of_top,
+):
+    stacked_maps, mag_flux, intensities, time = load_ar_data(test_AR, size, rid_of_top)
+
+    min_p = np.min(stacked_maps)
+    max_p = np.max(stacked_maps)
+    min_m = np.min(mag_flux)
+    max_m = np.max(mag_flux)
+    min_i = np.min(intensities)
+    max_i = np.max(intensities)
+    stacked_maps = min_max_scaling(stacked_maps, min_p, max_p)
+    mag_flux = min_max_scaling(mag_flux, min_m, max_m)
+    intensities = min_max_scaling(intensities, min_i, max_i)
+
+    # Reshape int to have an extra dimension and then put it with pmaps
+    int_reshaped = np.expand_dims(intensities, axis=1)
+
+    inputs = np.concatenate([stacked_maps, int_reshaped], axis=1)
+
+    return inputs, mag_flux, time
+
+
+def get_params(state_dict, path):
+    pth_files = glob.glob(
+        path + "SAR_EMERGENCE_RESEARCH/lstm/results/*.pth"
+    )  # Assuming there's only one .pth file and its naming follows the specific pattern
+    filename = pth_files[0]
+    matches = re.findall(
+        r"pred(\d+)_r(\d+)_i(\d+)_n(\d+)_h(\d+)_e(\d+)_lr([0-9.]+)_d([0-9.]+)\.pth",
+        filename,
+    )  # Extract numbers from the filename
+    (
+        num_pred,
+        rid_of_top,
+        num_in,
+        num_layers,
+        hidden_size,
+        n_epochs,
+        learning_rate,
+        dropout,
+    ) = [
+        float(val) if i >= 6 else int(val) for i, val in enumerate(matches[0])
+    ]  # Unpack the matched values into variables
+    return (
+        num_pred,
+        rid_of_top,
+        num_in,
+        num_layers,
+        hidden_size,
+        n_epochs,
+        learning_rate,
+        dropout,
+        filename,
+    )
+
+
+def AR_defs(test_AR):
+    before_plot, num_in, NOAA_first, NOAA_second = None, None, None, None
+    if test_AR == 11698:
+        before_plot = 50
+        num_in = 96
+        NOAA_first = datetime(2013, 3, 15, 0, 0, 0)
+        NOAA_second = datetime(2013, 3, 17, 0, 0, 0)
+    elif test_AR == 11726:
+        before_plot = 50
+        num_in = 72  # decrease even more -> 60
+        NOAA_first = datetime(2013, 4, 20, 0, 0, 0)
+        NOAA_second = datetime(2013, 4, 22, 0, 0, 0)
+    elif test_AR == 13165:
+        before_plot = 40
+        num_in = 96
+        NOAA_first = datetime(2022, 12, 12, 0, 0, 0)
+        NOAA_second = datetime(2022, 12, 14, 0, 0, 0)
+    elif test_AR == 13179:
+        before_plot = 40
+        num_in = 96
+        NOAA_first = datetime(2022, 12, 30, 0, 0, 0)
+        NOAA_second = datetime(2023, 1, 1, 0, 0, 0)
+    elif test_AR == 13183:
+        before_plot = 40
+        num_in = 96
+        NOAA_first = datetime(2023, 1, 6, 0, 0, 0)
+        NOAA_second = datetime(2023, 1, 8, 0, 0, 0)
+    else:
+        print("Invalid test_AR value. Please use 11698, 11726, 13165, 13179, or 13183.")
+    return before_plot, num_in, NOAA_first, NOAA_second
+
+# --- Data Loading & Preparation ---
+def prepare_dataset(ar_list, size, rid_of_top, num_in, num_pred):
+    """Builds a complete dataset (X, y) for a list of ARs."""
+    all_inputs_list, all_flux_list = [], []
+
+    # Load data for all ARs
+    for ar in ar_list:
+        combined_inputs, flux, _ = process_data(ar,size, rid_of_top)
+        all_inputs_list.append(combined_inputs)
+        all_flux_list.append(flux)
+
+    if not all_inputs_list:
+        print("all_inputs_list does not exist")
+        return None, None, 0
+
+    # Create sequences for the LSTM
+    x_list, y_list = [], []
+    tiles = size**2 - 2 * size * rid_of_top
+
+    for inputs, flux in zip(all_inputs_list, all_flux_list):
+        for tile in range(tiles):
+            x_seq, y_seq = lstm_ready(tile, size, inputs, flux, num_in, num_pred)
+            if x_seq.shape[0] > 0:
+                x_seq = torch.reshape(x_seq, (x_seq.shape[0], num_in, x_seq.shape[2]))
+                x_list.append(x_seq)
+                y_list.append(y_seq)
+
+    if not x_list:
+        print("X_list does not exist")
+        return None, None, 0
+
+    x_all = torch.cat(x_list, dim=0)
+    y_all = torch.cat(y_list, dim=0)
+    input_feature_size = x_all.shape[2]
+
+    return x_all, y_all, input_feature_size
+
+
+# --- Model Training & Evaluation ---
+def train_epoch(model, dataloader, loss_fn, optimizer, device):
+    """Runs a single training epoch."""
+    model.train()
+    total_loss = 0
+    for x, y in dataloader:
+        x, y = x.to(device), y.to(device)
+
+        optimizer.zero_grad()
+        outputs = model(x)
+        loss = loss_fn(outputs, y)
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+        optimizer.step()
+
+        total_loss += loss.item()
+
+    return total_loss / len(dataloader)
+
+
+def evaluate_model(model, dataloader, loss_fn, device):
+    """Evaluates the model on a given dataset."""
+    model.eval()
+    total_loss = 0
+    with torch.no_grad():
+        for x, y in dataloader:
+            x, y = x.to(device), y.to(device)
+            preds = model(x)
+            loss = loss_fn(preds, y)
+            total_loss += loss.item()
+
+    return total_loss / len(dataloader)
 
 
 class PlateauStopper(tune.stopper.Stopper):

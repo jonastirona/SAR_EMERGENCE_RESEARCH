@@ -7,10 +7,12 @@ import numpy as np
 import torch
 import wandb
 from torch import nn
-from torch.optim.lr_scheduler import ReduceLROnPlateau
+from torch.optim.lr_scheduler import StepLR, ReduceLROnPlateau
 from torch.utils.data import DataLoader, TensorDataset
 from functions import (
+    lstm_ready,
     PlateauStopper,
+    process_data,
     prepare_dataset,
     train_epoch,
     evaluate_model,
@@ -23,6 +25,7 @@ import ray
 from ray.tune.search.optuna import OptunaSearch
 from ray.tune.schedulers import ASHAScheduler
 from eval import eval_AR_emergence as eval
+import re
 
 if isVanillaLSTM:
     from functions import VanillaLSTM as LSTM
