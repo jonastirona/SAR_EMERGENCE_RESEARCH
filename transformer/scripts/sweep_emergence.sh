@@ -1,13 +1,14 @@
 #!/bin/bash
 
-#SBATCH --job-name=lr_search
+#SBATCH --job-name=sweep_emergence
 #SBATCH --partition=gpu
 #SBATCH --account=mx6
 #SBATCH --qos=standard
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
-#SBATCH --gres=gpu:3
+#SBATCH --gres=gpu:1
+#SBATCH --array=1-100%10
 #SBATCH --time=24:00:00
 #SBATCH --output=%x_%j.out
 #SBATCH --error=%x_%j.err
@@ -24,7 +25,9 @@ source /mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/.env
 
 # Set up wandb environment variables
 export WANDB_ENTITY="jonastirona-new-jersey-institute-of-technology"
-export WANDB_PROJECT="sar-emergence"
+export WANDB_PROJECT="transformer_emergence_optimization"
 
-# Run comprehensive constant lr grid search
-python -u train_lr.py
+SWEEP_ID="jonastirona-new-jersey-institute-of-technology/transformer_emergence_optimization/wk70qb6m"
+
+echo "Starting smart agent for job $SLURM_ARRAY_TASK_ID in sweep $SWEEP_ID"
+wandb agent --count=1 ${SWEEP_ID} 

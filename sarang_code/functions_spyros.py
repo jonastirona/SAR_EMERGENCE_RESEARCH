@@ -17,7 +17,6 @@ from sklearn.preprocessing import StandardScaler, MinMaxScaler
 from scipy.signal import detrend
 import warnings
 from datetime import datetime, timedelta
-from tqdm import tqdm,trange
 warnings.filterwarnings('ignore')
 
 # Splitting Image Function
@@ -131,36 +130,14 @@ def plot_frame_difference_metric(frame_diffs,cor_file):
 def min_max_scaling(arr, min_val, max_val):
     return (arr - min_val) / (max_val - min_val)
 
-def lstm_ready(tile, size, power_maps, intensities, num_in, num_pred):
-    """Prepare data for a specific tile.
-    
-    Args:
-        tile: Tile index
-        size: Size of the grid
-        power_maps: Power maps data of shape (tiles, features, time)
-        intensities: Intensity data of shape (tiles, time)
-        num_in: Number of input time steps
-        num_pred: Number of prediction time steps
-        
-    Returns:
-        X: Input tensor of shape (batch, seq_len, input_dim)
-        y: Target tensor of shape (batch, output_dim)
-    """
-    # Get data for specific tile
-    X_trans = power_maps[tile]  # (features, time)
-    y_trans = intensities[tile]  # (time,)
-    
-    # Transpose to get time as first dimension
-    X_trans = X_trans.T  # (time, features)
-    
-    # Split into sequences
-    X_ss, y_mm = split_sequences(X_trans, y_trans, num_in, num_pred)
-    
-    # Convert to tensors
-    X = torch.Tensor(X_ss)  # (batch, seq_len, input_dim)
-    y = torch.Tensor(y_mm)  # (batch, output_dim)
-    
-    return X, y
+def lstm_ready(tile,size,power_maps,intensities,num_in,num_pred):#,min_p,max_p,min_i,max_i):
+    # Read AR and create lstm ready data
+    final_maps = np.transpose(power_maps, axes=(2, 1, 0))
+    final_ints = np.transpose(intensities, axes=(1,0))
+    X_trans = final_maps[:,:,tile]
+    y_trans = final_ints[:,tile]
+    X_ss, y_mm = split_sequences(X_trans, y_trans, num_in,num_pred)
+    return torch.Tensor(X_ss), torch.Tensor(y_mm)
 
 def training_loop(n_epochs, lstm, optimiser, loss_fn, X_train, y_train, X_test, y_test):
     scheduler = StepLR(optimiser, step_size=n_epochs//10, gamma=0.9)
@@ -185,29 +162,10 @@ def training_loop(n_epochs, lstm, optimiser, loss_fn, X_train, y_train, X_test, 
         if epoch % int(n_epochs/10) == 0: print("Epoch: %d, train loss: %1.5f, test loss: %1.5f" % (epoch, loss.item(), test_loss.item())) 
         scheduler.step()
 
-def training_loop_w_stats(n_epochs, lstm, optimiser, loss_fn, X_train, y_train, X_test, y_test, use_scheduler=True):
-    # Warmup scheduler setup
-    warmup_epochs = n_epochs // 10  # 10% of total epochs for warmup
-    
-    if use_scheduler:
-        # Linear warmup scheduler
-        def warmup_lambda(epoch):
-            if epoch < warmup_epochs:
-                return float(epoch) / float(max(1, warmup_epochs))
-            return 1.0
-        
-        warmup_scheduler = torch.optim.lr_scheduler.LambdaLR(optimiser, warmup_lambda)
-        # Cosine annealing scheduler
-        cosine_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-            optimiser, 
-            T_max=n_epochs - warmup_epochs,
-            eta_min=0.0
-        )
-
+def training_loop_w_stats(n_epochs, lstm, optimiser, loss_fn, X_train, y_train, X_test, y_test):
+    scheduler = StepLR(optimiser, step_size=n_epochs//10, gamma=0.9)
     results = []
-    pbar = trange(n_epochs, desc="Training", leave=True)
-    
-    for epoch in pbar:
+    for epoch in range(n_epochs):
         lstm.train()
         # Shuffle
         indices = torch.randperm(int(np.shape(X_train)[0]))
@@ -226,23 +184,11 @@ def training_loop_w_stats(n_epochs, lstm, optimiser, loss_fn, X_train, y_train, 
             test_preds = lstm(X_test)
             test_loss = loss_fn(test_preds, y_test)
         
-        if use_scheduler:
-            if epoch < warmup_epochs:
-                warmup_scheduler.step()
-                learning_rate = warmup_scheduler.get_last_lr()[0]
-            else:
-                cosine_scheduler.step()
-                learning_rate = cosine_scheduler.get_last_lr()[0]
-        else:
-            learning_rate = optimiser.param_groups[0]['lr']
-            
-        pbar.set_description(f"Epoch {epoch}")
-        pbar.set_postfix({
-            "train_loss": f"{loss.item():.5f}",
-            "test_loss": f"{test_loss.item():.5f}",
-            "lr": f"{learning_rate:.5f}"
-        })
+        #if epoch % int(n_epochs/100) == 0:
+        learning_rate = scheduler.get_last_lr()[0]
+        print("Epoch: %d, train loss: %1.5f, test loss: %1.5f, learning rate: %1.5f" % (epoch, loss.item(), test_loss.item(), learning_rate))
         results.append((epoch, loss.item(), test_loss.item(), learning_rate)) # Collect results for saving
+        scheduler.step()
     
     return results
 
@@ -291,35 +237,16 @@ class LSTM(nn.Module):
 
 # split a multivariate sequence past, future samples (X and y)
 def split_sequences(input_sequences, output_sequences, n_steps_in, n_steps_out):
-    """Split sequences into input/output pairs.
-    
-    Args:
-        input_sequences: Input data of shape (time, features)
-        output_sequences: Output data of shape (time,)
-        n_steps_in: Number of input time steps
-        n_steps_out: Number of output time steps
-        
-    Returns:
-        X: Input sequences of shape (batch, seq_len, input_dim)
-        y: Output sequences of shape (batch, output_dim)
-    """
-    X, y = list(), list()
+    X, y = list(), list() # instantiate X and y
     for i in range(len(input_sequences)):
-        # Find the end of the input sequence
+        # find the end of the input, output sequence
         end_ix = i + n_steps_in
         out_end_ix = end_ix + n_steps_out - 1
-        
-        # Check if we are beyond the dataset
-        if out_end_ix > len(input_sequences):
-            break
-            
-        # Gather input and output parts of the pattern
-        seq_x = input_sequences[i:end_ix]  # (n_steps_in, features)
-        seq_y = output_sequences[end_ix-1:out_end_ix]  # (n_steps_out,)
-        
-        X.append(seq_x)
-        y.append(seq_y)
-        
+        # check if we are beyond the dataset
+        if out_end_ix > len(input_sequences): break
+        # gather input and output of the pattern
+        seq_x, seq_y = input_sequences[i:end_ix], output_sequences[end_ix-1:out_end_ix]
+        X.append(seq_x), y.append(seq_y)
     return np.array(X), np.array(y)
 
 
@@ -485,51 +412,6 @@ def highlight_tile(ax, tile_number, divisions=9, color='r', linewidth=2):
     from matplotlib.patches import Rectangle
     rect = Rectangle((x, y), tile_width, tile_height, linewidth=linewidth, edgecolor=color, facecolor='none')
     ax.add_patch(rect)
-
-def calculate_extended_metrics(model, timeline_true, timeline_predicted, training_time=None):
-    """Calculate extended metrics including RMSE@1, RMSE@5, parameter count, and training time."""
-    # Basic metrics
-    MAE, MSE, RMSE, RMSLE, R_squared = calculate_metrics(timeline_true, timeline_predicted)
-    
-    # Calculate RMSE@1 (RMSE for 1-hour prediction)
-    if len(timeline_true.shape) > 1:
-        RMSE_1 = np.sqrt(np.mean(np.square(timeline_predicted[:, 0] - timeline_true[:, 0])))
-        # Calculate RMSE@5 (RMSE for 5-hour prediction)
-        if timeline_true.shape[1] >= 5:
-            RMSE_5 = np.sqrt(np.mean(np.square(timeline_predicted[:, 4] - timeline_true[:, 4])))
-        else:
-            RMSE_5 = None
-    else:
-        RMSE_1 = RMSE
-        RMSE_5 = None
-    
-    # Calculate parameter count
-    param_count = sum(p.numel() for p in model.parameters())
-    
-    return {
-        'MAE': MAE,
-        'RMSE': RMSE,
-        'R2': R_squared,
-        'params': param_count,
-        'train_time': training_time,
-        'RMSE@1': RMSE_1,
-        'RMSE@5': RMSE_5
-    }
-
-def get_neighbor_tiles(tile, size):
-    """Get valid neighboring tile indices in 8-connected neighborhood"""
-    row, col = tile // size, tile % size
-    neighbors = []
-    
-    for dr in [-1, 0, 1]:
-        for dc in [-1, 0, 1]:
-            if dr == 0 and dc == 0:
-                continue
-            new_row, new_col = row + dr, col + dc
-            if 0 <= new_row < size and 0 <= new_col < size:
-                neighbors.append(new_row * size + new_col)
-    
-    return neighbors
 
 
 

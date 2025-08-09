@@ -1,14 +1,14 @@
 #!/bin/bash
 
-#SBATCH --job-name=lr_search
+#SBATCH --job-name=save_ars_tiles
 #SBATCH --partition=gpu
 #SBATCH --account=mx6
 #SBATCH --qos=standard
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
-#SBATCH --gres=gpu:3
-#SBATCH --time=24:00:00
+#SBATCH --gres=gpu:1
+#SBATCH --time=01:00:00
 #SBATCH --output=%x_%j.out
 #SBATCH --error=%x_%j.err
 #SBATCH --mail-type=ALL
@@ -22,9 +22,5 @@ cd /mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/transformer/
 
 source /mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/.env
 
-# Set up wandb environment variables
-export WANDB_ENTITY="jonastirona-new-jersey-institute-of-technology"
-export WANDB_PROJECT="sar-emergence"
-
-# Run comprehensive constant lr grid search
-python -u train_lr.py
+# Run the script to save all ARs' tile data
+python -u /project/mx6/jst26/SAR_EMERGENCE_RESEARCH/transformer/save_all_training_ars_tiles.py 

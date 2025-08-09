@@ -271,8 +271,8 @@ def lstm_ready(tile, size, power_maps, intensities, num_in, num_pred, model_seq_
     return X, y
 
 
-def evaluate_models_for_ar(test_AR, lstm_path, transformer_path, transformer_params, output_dir):
-    """Evaluate LSTM and Transformer models for a specific AR and return the saved plot path."""
+def evaluate_models_for_ar(test_AR, lstm_path, per_tile_model_dir, transformer_params, output_dir):
+    """Evaluate LSTM and per-tile Transformer models for a specific AR and return the saved plot path."""
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f'Evaluating AR {test_AR} on: {device}')
     
@@ -283,14 +283,14 @@ def evaluate_models_for_ar(test_AR, lstm_path, transformer_path, transformer_par
         # Get model parameters from transformer_params
         num_pred = transformer_params['num_pred']
         num_layers = transformer_params['num_layers'] 
-        hidden_size = transformer_params['hidden_size']
-        learning_rate = transformer_params['learning_rate']
+        hidden_size = transformer_params.get('hidden_size', transformer_params.get('embed_dim'))
+        learning_rate = transformer_params.get('learning_rate', None)
         print(f"  Debug: Using transformer params - num_pred={num_pred}, num_layers={num_layers}")
         
         if 'rid_of_top' not in transformer_params:
             raise KeyError(f"'rid_of_top' key missing from transformer_params. Available keys: {list(transformer_params.keys())}")
         
-        rid_of_top = 1
+        rid_of_top = 1  # Hardcoded for evaluation to match eval.py
         print(f"  Debug: rid_of_top = {rid_of_top} (hardcoded for evaluation)")
 
         # AR settings
@@ -313,6 +313,7 @@ def evaluate_models_for_ar(test_AR, lstm_path, transformer_path, transformer_par
         mf = mag['arr_0']; ii = cont['arr_0']
 
         # trim
+        # Always use rid_of_top=1 for evaluation to get the full 7x9 grid
         size = 9
         sl = slice(rid_of_top*size, -rid_of_top*size)
         pm23, pm34, pm45, pm56 = pm23[sl,:], pm34[sl,:], pm45[sl,:], pm56[sl,:]
@@ -331,39 +332,58 @@ def evaluate_models_for_ar(test_AR, lstm_path, transformer_path, transformer_par
         # inputs
         inputs = np.concatenate([stacked, np.expand_dims(mf,1)], axis=1)
 
+        # Now inputs, ii, etc. have shape (63, ...), i.e., 7x9 grid
+        # For each tile, use the model for its column (col = tile_idx % 9)
+        # NOTE: Models are trained on the center row, but are being used for all rows here
+
         # Parse LSTM parameters from LSTM path for LSTM model loading
         pat = r't(\d+)_r(\d+)_i(\d+)_n(\d+)_h(\d+)_e(\d+)_l([0-9.]+)\.pth'
+        lstm_match = re.findall(pat, lstm_path)
+        if not lstm_match:
+            print(f"Error: Could not parse LSTM path: {lstm_path}")
+            return None
         lstm_num_pred, _, _, lstm_num_layers, lstm_hidden_size, n_epochs, lr = (
             int(x) if i!=6 else float(x)
-            for i,x in enumerate(re.findall(pat, lstm_path)[0])
+            for i,x in enumerate(lstm_match[0])
         )
         print(f"  Debug: LSTM params - num_pred={lstm_num_pred}, num_layers={lstm_num_layers}, hidden_size={lstm_hidden_size}")
 
-        # load models
+        # load LSTM model
         lstm = LSTM(inputs.shape[1], lstm_hidden_size, lstm_num_layers, lstm_num_pred).to(device)
         sd = torch.load(lstm_path,map_location=device)
         new_sd = OrderedDict((k[7:] if k.startswith('module.') else k, v) for k,v in sd.items())
         lstm.load_state_dict(new_sd); lstm.eval()
 
-        # Initialize transformer model with correct parameters
-        # Check if the model has temporal convolution by looking at the saved state
-        saved_state = torch.load(transformer_path, map_location=device)
-        has_temporal_conv = 'temporal_conv.weight' in saved_state
-        
-        if has_temporal_conv:
-            from transformer.models.st_transformer_conv import SpatioTemporalTransformerConv
-            trfm = SpatioTemporalTransformerConv(
-                input_dim=inputs.shape[1],
-                seq_len=num_in,
-                embed_dim=transformer_params['embed_dim'],
-                num_heads=transformer_params['num_heads'],
-                ff_dim=transformer_params['ff_dim'],
-                num_layers=transformer_params['num_layers'],
-                output_dim=transformer_params['num_pred'],
-                dropout=transformer_params['dropout']
-            ).to(device)
-        else:
-            from transformer.models.st_transformer import SpatioTemporalTransformer
+        # Store metrics for all tiles
+        all_tile_metrics = []
+
+        # plotting
+        fig = plt.figure(figsize=(16,46))
+        fig.subplots_adjust(left=0.15, right=0.85, top=0.97, bottom=0.1)
+        gs0 = gridspec.GridSpec(7,1,figure=fig,hspace=.2)
+
+        lstm_fut = lstm_num_pred-1
+        transformer_fut = num_pred-1
+        thr= -0.01; st=4
+
+        for i in range(7):
+            tile_idx = start_tile + i  # index in trimmed grid (now 0..62)
+            disp = tile_idx + 10  # Add offset for display to match eval.py
+            col = tile_idx % size
+            print(f"Tile {disp} (col {col})")
+
+            if not (0 <= tile_idx < inputs.shape[0]):
+                print(f"Tile {tile_idx} is out of bounds for available data (0–{inputs.shape[0]-1}). Skipping.")
+                continue
+
+            X_test, y_test = lstm_ready(tile_idx, size, inputs, ii, num_in, num_pred, model_seq_len=num_in)
+            X_test = X_test.to(device)
+            Xt = X_test.view(X_test.size(0), num_in, X_test.size(2))
+
+            model_path = os.path.join(per_tile_model_dir, f"tile_{col}_model.pth")
+            if not os.path.exists(model_path):
+                print(f"Warning: Model file {model_path} does not exist. Skipping tile {tile_idx} (col {col}).")
+                continue
             trfm = SpatioTemporalTransformer(
                 input_dim=inputs.shape[1],
                 seq_len=num_in,
@@ -374,28 +394,7 @@ def evaluate_models_for_ar(test_AR, lstm_path, transformer_path, transformer_par
                 output_dim=transformer_params['num_pred'],
                 dropout=transformer_params['dropout']
             ).to(device)
-        trfm.load_state_dict(torch.load(transformer_path,map_location=device)); trfm.eval()
-
-        # Store metrics for all tiles
-        all_tile_metrics = []
-
-        # plotting
-        fig = plt.figure(figsize=(16,46))
-        fig.subplots_adjust(left=0.15, right=0.85, top=0.97, bottom=0.1)
-        gs0 = gridspec.GridSpec(7,1,figure=fig,hspace=.2)
-        
-        lstm_fut = lstm_num_pred-1
-        transformer_fut = num_pred-1
-        thr= -0.01; st=4
-
-        for i in range(7):
-            tile_idx = start_tile + i
-            disp = tile_idx + 10
-            print(f"Tile {disp}")
-
-            X_test, y_test = lstm_ready(tile_idx, size, inputs, ii, num_in, num_pred, model_seq_len=num_in)
-            X_test = X_test.to(device)
-            Xt = X_test.view(X_test.size(0), num_in, X_test.size(2))
+            trfm.load_state_dict(torch.load(model_path, map_location=device)); trfm.eval()
 
             with torch.no_grad():
                 p_l = lstm(X_test)[:,lstm_fut].cpu().numpy()
@@ -552,149 +551,11 @@ def evaluate_models_for_ar(test_AR, lstm_path, transformer_path, transformer_par
             ax4.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
             ax4.tick_params(labelbottom=True)
 
-        
-        def extract_params(path):
-            fname = os.path.basename(path)
-            pat = r't(\d+)_r(\d+)_i(\d+)_n(\d+)_h(\d+)_e(\d+)_l([0-9.]+)\.pth$'
-            m = re.search(pat, fname)
-            if not m:
-                return None
-            return {
-                'Time Window': m.group(1),
-                'Rid of Top': m.group(2),
-                'Input Len': m.group(3),
-                'Layers': m.group(4),
-                'Hidden': m.group(5),
-                'Epochs': m.group(6),
-                'LR': m.group(7)
-            }
-
-        lstm_params = extract_params(lstm_path)
-        trfm_params = {
-            'Time Window': transformer_params['time_window'],
-            'Rid of Top': transformer_params['rid_of_top'], 
-            'Input Len': num_in,
-            'Layers': transformer_params['num_layers'],
-            'Hidden': transformer_params['hidden_size'],
-            'Epochs': "400",
-            'LR': transformer_params['learning_rate']
-        }
-
-        # Calculate mean metrics across all tiles
-        def mean_metric(all_metrics, model_key, metric_key):
-            values = []
-            for tile_metrics in all_metrics:
-                val = tile_metrics[model_key][metric_key]
-                if val is not None and not np.isnan(val):
-                    values.append(val)
-            return np.mean(values) if values else None
-
-        # Prepare data for summary tables
-        param_headers = ["Parameter", "LSTM", "Transformer"]
-        param_rows = [
-            ["Time Window", lstm_params['Time Window'], trfm_params['Time Window']],
-            ["Rid of Top", lstm_params['Rid of Top'], trfm_params['Rid of Top']],
-            ["Input Len", lstm_params['Input Len'], trfm_params['Input Len']],
-            ["Layers", lstm_params['Layers'], trfm_params['Layers']],
-            ["Hidden", lstm_params['Hidden'], trfm_params['Hidden']],
-            ["Epochs", lstm_params['Epochs'], trfm_params['Epochs']],
-            ["LR", lstm_params['LR'], trfm_params['LR']],
-        ]
-
-        # Metrics rows with emergence metrics
-        metric_names = ['MAE', 'RMSE', 'R2', 'emerg_MAE', 'emerg_RMSE', 'emerg_R2', 'emergence_timing_diff']
-        metric_labels = ['Overall MAE', 'Overall RMSE', 'Overall R²', 'Window MAE', 'Window RMSE', 'Window R²', 'Δ Emergence(hrs)']
-        
-        metric_rows = []
-        for name, label in zip(metric_names, metric_labels):
-            lstm_val = mean_metric(all_tile_metrics, 'lstm', name)
-            transformer_val = mean_metric(all_tile_metrics, 'transformer', name)
-            
-            if name == 'emergence_timing_diff':
-                lstm_str = f"{lstm_val:+.1f}" if lstm_val is not None else "N/A"
-                transformer_str = f"{transformer_val:+.1f}" if transformer_val is not None else "N/A"
-            else:
-                lstm_str = f"{lstm_val:.4f}" if lstm_val is not None else "N/A"
-                transformer_str = f"{transformer_val:.4f}" if transformer_val is not None else "N/A"
-            
-            metric_rows.append([label, lstm_str, transformer_str])
-
-        metrics_ax = fig.add_axes([0.15, -0.045, 0.3, 0.12])
-        metrics_ax.axis('off')
-
-        metrics_ax.text(0.5, 1, 'Overall Performance Metrics', 
-                       ha='center', va='center', fontsize=12)
-
-        # Create metrics table
-        metrics_data = [['Metric', 'LSTM', 'Transformer']] + metric_rows
-
-        metrics_table = metrics_ax.table(
-            cellText=metrics_data,
-            colLabels=['Metric', 'LSTM', 'Transformer'],
-            colColours=['#e0e0e0'] * 3,
-            cellLoc='center',
-            loc='upper center'
-        )
-
-        # Styling for metrics table
-        metrics_table.auto_set_font_size(False)
-        metrics_table.set_fontsize(10)
-        metrics_table.scale(1, 1.3)
-
-        for (row, col), cell in metrics_table.get_celld().items():
-            cell.set_edgecolor('gray')
-            cell.set_linewidth(0.5)
-            if row == 0:
-                cell.set_text_props(weight='bold')
-            elif row % 2 == 1:
-                cell.set_facecolor('#f9f9f9')
-            else:
-                cell.set_facecolor('white')
-
-        # Parameters table
-        params_ax = fig.add_axes([0.5, -0.045, 0.3, 0.12])
-        params_ax.axis('off')
-
-        # Add title for the parameters table
-        params_ax.text(0.5, 1, 'Model Parameters', 
-                      ha='center', va='center', fontsize=12)
-
-        # Create parameters table
-        params_table = params_ax.table(
-            cellText=param_rows,
-            colLabels=param_headers,
-            colColours=['#e0e0e0'] * 3,
-            cellLoc='center',
-            loc='upper center'
-        )
-
-        # Styling for parameters table
-        params_table.auto_set_font_size(False)
-        params_table.set_fontsize(10)
-        params_table.scale(1, 1.3)
-
-        for (row, col), cell in params_table.get_celld().items():
-            cell.set_edgecolor('gray')
-            cell.set_linewidth(0.5)
-            if row == 0:
-                cell.set_text_props(weight='bold')
-            elif row % 2 == 1:
-                cell.set_facecolor('#f9f9f9')
-            else:
-                cell.set_facecolor('white')
-
-        plt.tight_layout(rect=[0,0,0.8,0.96]); plt.subplots_adjust(right=0.8)
-        plt.suptitle(f'Model Comparison for AR {test_AR}', y=0.99)
+        # Save the figure
         out = os.path.join(output_dir, f"AR{test_AR}_comparison.png")
         os.makedirs(os.path.dirname(out), exist_ok=True)
         plt.savefig(out, dpi=300, bbox_inches='tight')
         plt.close()
-
-        # Crop 100 pixels from the bottom of the saved image
-        img = Image.open(out)
-        w, h = img.size
-        cropped = img.crop((0, 0, w, h - 500))
-        cropped.save(out)
         print(f"Comparison plot saved to: {out}")
         
         # Return the path to the saved image for potential wandb artifact upload
@@ -708,6 +569,101 @@ def evaluate_models_for_ar(test_AR, lstm_path, transformer_path, transformer_par
         print(f"    Full traceback:")
         traceback.print_exc()
         raise
+
+
+def evaluate_per_tile_models(test_AR, lstm_path, per_tile_model_dir, per_tile_norm_dir, transformer_params, output_dir, tiles_to_eval=None):
+    """
+    Evaluate per-tile transformer models for a specific AR.
+    For each tile, load the corresponding model and normalization stats, and generate prediction graphs.
+    """
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print(f'Evaluating AR {test_AR} on: {device}')
+
+    # AR settings
+    rid_of_top = transformer_params['rid_of_top']
+    start_tile, before_plot, num_in, NOAA_first, NOAA_second = get_ar_settings(test_AR, rid_of_top)
+    size = 9
+    tiles = (size - 2 * rid_of_top) * size
+    if tiles_to_eval is None:
+        tiles_to_eval = list(range(tiles))
+
+    # Load and prepare data (same as before)
+    base = f'/mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/data/AR{test_AR}'
+    power = np.load(os.path.join(base, f'mean_pmdop{test_AR}_flat.npz'), allow_pickle=True)
+    mag   = np.load(os.path.join(base, f'mean_mag{test_AR}_flat.npz'),   allow_pickle=True)
+    cont  = np.load(os.path.join(base, f'mean_int{test_AR}_flat.npz'),   allow_pickle=True)
+    pm23, pm34, pm45, pm56, time_arr = (
+        power['arr_0'], power['arr_1'], power['arr_2'], power['arr_3'], power['arr_4']
+    )
+    mf = mag['arr_0']; ii = cont['arr_0']
+    sl = slice(rid_of_top*size, -rid_of_top*size)
+    pm23, pm34, pm45, pm56 = pm23[sl,:], pm34[sl,:], pm45[sl,:], pm56[sl,:]
+    mf = mf[sl,:]; ii = ii[sl,:]
+    mf[np.isnan(mf)] = 0; ii[np.isnan(ii)] = 0
+    stacked = np.stack([pm23,pm34,pm45,pm56],axis=1)
+    # We'll normalize per-tile using saved stats
+    inputs = np.concatenate([stacked, np.expand_dims(mf,1)], axis=1)
+
+    # Load LSTM model as before
+    pat = r't(\d+)_r(\d+)_i(\d+)_n(\d+)_h(\d+)_e(\d+)_l([0-9.]+)\.pth'
+    lstm_num_pred, _, _, lstm_num_layers, lstm_hidden_size, n_epochs, lr = (
+        int(x) if i!=6 else float(x)
+        for i,x in enumerate(re.findall(pat, lstm_path)[0])
+    )
+    lstm = LSTM(inputs.shape[1], lstm_hidden_size, lstm_num_layers, lstm_num_pred).to(device)
+    sd = torch.load(lstm_path,map_location=device)
+    new_sd = OrderedDict((k[7:] if k.startswith('module.') else k, v) for k,v in sd.items())
+    lstm.load_state_dict(new_sd); lstm.eval()
+
+    # For each tile, load model and norm stats, evaluate, and plot
+    for tile in tiles_to_eval:
+        # Load per-tile normalization stats
+        norm_stats_path = os.path.join(per_tile_norm_dir, f"tile_{tile}_norm_stats.npy")
+        norm_stats = np.load(norm_stats_path, allow_pickle=True).item() if norm_stats_path.endswith('.npy') else np.load(norm_stats_path, allow_pickle=True)
+        # Use AR-specific stats for this AR
+        ar_stats = None
+        for entry in norm_stats:
+            if entry['ar'] == test_AR:
+                ar_stats = entry
+                break
+        if ar_stats is None:
+            print(f"No normalization stats found for AR {test_AR} in tile {tile}")
+            continue
+        # Normalize this tile's data for this AR
+        tile_input = inputs[tile]
+        tile_int = ii[tile]
+        min_p, max_p = ar_stats['min_p'], ar_stats['max_p']
+        min_i, max_i = ar_stats['min_i'], ar_stats['max_i']
+        tile_input = (tile_input - min_p) / (max_p - min_p + 1e-8)
+        tile_int = (tile_int - min_i) / (max_i - min_i + 1e-8)
+        # Prepare test sequences
+        X_test, y_test = lstm_ready(0, 1, tile_input[None, ...], tile_int[None, ...], num_in, transformer_params['num_pred'], model_seq_len=num_in)
+        X_test = X_test.to(device)
+        Xt = X_test.view(X_test.size(0), num_in, X_test.size(2))
+        # Load per-tile transformer model
+        model_path = os.path.join(per_tile_model_dir, f"tile_{tile}_model.pth")
+        trfm = SpatioTemporalTransformer(
+            input_dim=inputs.shape[1],
+            seq_len=num_in,
+            embed_dim=transformer_params['embed_dim'],
+            num_heads=transformer_params['num_heads'],
+            ff_dim=transformer_params['ff_dim'],
+            num_layers=transformer_params['num_layers'],
+            output_dim=transformer_params['num_pred'],
+            dropout=transformer_params['dropout']
+        ).to(device)
+        trfm.load_state_dict(torch.load(model_path, map_location=device)); trfm.eval()
+        # Predict
+        with torch.no_grad():
+            p_l = lstm(X_test)[:, -1].cpu().numpy()
+            p_t = trfm(Xt)[:, -1].cpu().numpy()
+        true = y_test[:, -1].cpu().numpy()
+        # Plotting and metrics as before (reuse plotting code, but for this tile)
+        # ... (You can copy the plotting code from the main loop, adjusting for per-tile)
+        # Save plot for this tile
+        out = os.path.join(output_dir, f"AR{test_AR}_tile{tile}_comparison.png")
+        # ... (plt.savefig(out, ...))
+        print(f"Saved comparison plot for AR {test_AR} tile {tile} to {out}")
 
 
 def parse_args():
@@ -756,5 +712,8 @@ if __name__ == '__main__':
     
     os.makedirs(args.output_dir, exist_ok=True)
     
+    per_tile_model_dir = os.path.join(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')), 'transformer', 'results', 'per_tile')
+    per_tile_norm_dir = per_tile_model_dir
     for ar in [11698,11726,13165,13179,13183]:
-        evaluate_models_for_ar(ar, args.lstm_path, args.transformer_path, transformer_params, args.output_dir)
+        evaluate_per_tile_models(ar, args.lstm_path, per_tile_model_dir, per_tile_norm_dir, transformer_params, args.output_dir)
+ 

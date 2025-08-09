@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH --job-name=lr_search
+#SBATCH --job-name=per_tile_train
 #SBATCH --partition=gpu
 #SBATCH --account=mx6
 #SBATCH --qos=standard
@@ -27,4 +27,4 @@ export WANDB_ENTITY="jonastirona-new-jersey-institute-of-technology"
 export WANDB_PROJECT="sar-emergence"
 
 # Run comprehensive constant lr grid search
-python -u train_lr.py
+python -u train_per_tile.py 

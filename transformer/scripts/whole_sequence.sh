@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH --job-name=lr_search
+#SBATCH --job-name=whole_sequence
 #SBATCH --partition=gpu
 #SBATCH --account=mx6
 #SBATCH --qos=standard
@@ -20,11 +20,14 @@ source /mmfs1/project/mx6/jst26/sar-env/bin/activate
 # Change to the transformer directory
 cd /mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/transformer/
 
+# Source environment variables
 source /mmfs1/project/mx6/jst26/SAR_EMERGENCE_RESEARCH/.env
 
 # Set up wandb environment variables
 export WANDB_ENTITY="jonastirona-new-jersey-institute-of-technology"
-export WANDB_PROJECT="sar-emergence"
+export WANDB_PROJECT="sar-emergence-comprehensive-full-sequence-v6"
 
-# Run comprehensive constant lr grid search
-python -u train_lr.py
+# Run the ablation study
+python train_hyperparam_search_final_Version6.py
+
+echo "Comprehensive Full-Sequence Transformer Study V6 completed!" 

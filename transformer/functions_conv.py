@@ -131,36 +131,226 @@ def plot_frame_difference_metric(frame_diffs,cor_file):
 def min_max_scaling(arr, min_val, max_val):
     return (arr - min_val) / (max_val - min_val)
 
-def lstm_ready(tile, size, power_maps, intensities, num_in, num_pred):
-    """Prepare data for a specific tile.
+def lstm_ready(tile, size, power_maps, intensities, num_in, num_pred, model_seq_len=None):
+    """Enhanced version with sequence length padding for model compatibility."""
+    # Use training-style data preprocessing for consistency
+    final_maps = np.transpose(power_maps, axes=(2, 1, 0))  # (time, features, tiles)
+    final_ints = np.transpose(intensities, axes=(1,0))     # (time, tiles)
+    X_trans = final_maps[:,:,tile]  # (time, features)
+    y_trans = final_ints[:,tile]    # (time,)
     
-    Args:
-        tile: Tile index
-        size: Size of the grid
-        power_maps: Power maps data of shape (tiles, features, time)
-        intensities: Intensity data of shape (tiles, time)
-        num_in: Number of input time steps
-        num_pred: Number of prediction time steps
+    available_time_steps = len(X_trans)
+    max_possible_num_in = available_time_steps - num_pred
+    
+    if max_possible_num_in <= 0:
+        raise ValueError(f"Not enough data for tile {tile}")
+    
+    effective_num_in = min(num_in, max_possible_num_in)
+    X_ss, y_mm = split_sequences(X_trans, y_trans, effective_num_in, num_pred)
+    
+    # If model expects a different sequence length, pad accordingly
+    target_seq_len = model_seq_len if model_seq_len is not None else effective_num_in
+    if effective_num_in < target_seq_len and len(X_ss) > 0:
+        padding_length = target_seq_len - effective_num_in
+        padding_shape = (len(X_ss), padding_length, X_ss.shape[2])
+        padding = np.zeros(padding_shape)
+        X_ss = np.concatenate([padding, X_ss], axis=1)
+    
+    X = torch.Tensor(X_ss)
+    y = torch.Tensor(y_mm)
+    return X, y
+
+# ========== DATA AUGMENTATION FUNCTIONS ==========
+
+def get_neighbor_tiles(tile, size):
+    """Get valid neighboring tile indices in 8-connected neighborhood"""
+    row, col = tile // size, tile % size
+    neighbors = []
+    
+    for dr in [-1, 0, 1]:
+        for dc in [-1, 0, 1]:
+            if dr == 0 and dc == 0:
+                continue
+            new_row, new_col = row + dr, col + dc
+            if 0 <= new_row < size and 0 <= new_col < size:
+                neighbors.append(new_row * size + new_col)
+    
+    return neighbors
+
+def temporal_window_augmentation(X, y, augmentation_ratio=0.3):
+    """Create new samples by shifting temporal windows - CONSERVATIVE 30%"""
+    if len(X) == 0:
+        return X, y
+    
+    # Calculate how many augmented samples to create (30% of original)
+    num_original = len(X)
+    num_augmented = int(num_original * augmentation_ratio)
+    
+    if num_augmented == 0:
+        return X, y
+    
+    augmented_X, augmented_y = [], []
+    window_shifts = [1, 2, 3, 5, 8]  # Different temporal shifts
+    
+    # Cycle through shifts to create exactly num_augmented samples
+    for i in range(num_augmented):
+        shift = window_shifts[i % len(window_shifts)]
         
-    Returns:
-        X: Input tensor of shape (batch, seq_len, input_dim)
-        y: Target tensor of shape (batch, output_dim)
-    """
-    # Get data for specific tile
-    X_trans = power_maps[tile]  # (features, time)
-    y_trans = intensities[tile]  # (time,)
+        if len(X) > shift:
+            # Pick a random sample to shift
+            sample_idx = i % (len(X) - shift)
+            
+            # Create shifted sample
+            shifted_x = X[sample_idx + shift:sample_idx + shift + 1]
+            shifted_y = y[sample_idx + shift:sample_idx + shift + 1]
+            
+            if len(shifted_x) > 0:
+                augmented_X.append(shifted_x)
+                augmented_y.append(shifted_y)
     
-    # Transpose to get time as first dimension
-    X_trans = X_trans.T  # (time, features)
-    
-    # Split into sequences
-    X_ss, y_mm = split_sequences(X_trans, y_trans, num_in, num_pred)
-    
-    # Convert to tensors
-    X = torch.Tensor(X_ss)  # (batch, seq_len, input_dim)
-    y = torch.Tensor(y_mm)  # (batch, output_dim)
+    if len(augmented_X) > 0:
+        aug_X = torch.cat(augmented_X, dim=0)
+        aug_y = torch.cat(augmented_y, dim=0)
+        
+        final_X = torch.cat([X, aug_X], dim=0)
+        final_y = torch.cat([y, aug_y], dim=0)
+        
+        print(f"    Temporal augmentation: {len(X)} -> {len(final_X)} samples (+{len(aug_X)})")
+        return final_X, final_y
     
     return X, y
+
+def spatial_neighbor_augmentation(tile, size, all_power_maps, all_intensities, num_in, num_pred, augmentation_ratio=0.3):
+    """Create augmented samples using neighboring tiles - CONSERVATIVE 30%"""
+    
+    # Get original tile data across all ARs
+    original_X_list, original_y_list = [], []
+    
+    for ar_idx in range(all_power_maps.shape[-1]):
+        power_maps = all_power_maps[:, :, :, ar_idx]
+        intensities = all_intensities[:, :, ar_idx]
+        
+        try:
+            X_ar, y_ar = lstm_ready(tile, size, power_maps, intensities, num_in, num_pred)
+            if len(X_ar) > 0:
+                original_X_list.append(X_ar)
+                original_y_list.append(y_ar)
+        except:
+            continue
+    
+    if len(original_X_list) == 0:
+        return torch.tensor([]), torch.tensor([])
+    
+    # Combine all AR data for this tile
+    X_combined = torch.cat(original_X_list, dim=0)
+    y_combined = torch.cat(original_y_list, dim=0)
+    
+    num_original = len(X_combined)
+    num_augmented = int(num_original * augmentation_ratio)
+    
+    if num_augmented == 0:
+        return X_combined, y_combined
+    
+    # Get neighboring tiles
+    neighbors = get_neighbor_tiles(tile, size)
+    
+    if len(neighbors) == 0:
+        return X_combined, y_combined
+    
+    # Collect neighbor data across all ARs
+    neighbor_data = []
+    for neighbor_tile in neighbors[:3]:  # Use top 3 neighbors
+        neighbor_X_list = []
+        
+        for ar_idx in range(all_power_maps.shape[-1]):
+            power_maps = all_power_maps[:, :, :, ar_idx]
+            intensities = all_intensities[:, :, ar_idx]
+            
+            try:
+                X_neighbor, _ = lstm_ready(neighbor_tile, size, power_maps, intensities, num_in, num_pred)
+                if len(X_neighbor) > 0:
+                    neighbor_X_list.append(X_neighbor)
+            except:
+                continue
+        
+        if len(neighbor_X_list) > 0:
+            neighbor_combined = torch.cat(neighbor_X_list, dim=0)
+            neighbor_data.append(neighbor_combined)
+    
+    if len(neighbor_data) == 0:
+        return X_combined, y_combined
+    
+    # Create augmented samples by blending with neighbors
+    augmented_X, augmented_y = [], []
+    
+    for i in range(num_augmented):
+        # Select random original sample
+        orig_idx = i % len(X_combined)
+        orig_x = X_combined[orig_idx:orig_idx+1]
+        orig_y = y_combined[orig_idx:orig_idx+1]
+        
+        # Select random neighbor
+        neighbor_idx = i % len(neighbor_data)
+        neighbor_x = neighbor_data[neighbor_idx]
+        
+        if len(neighbor_x) > 0:
+            # Select random sample from neighbor
+            nei_sample_idx = i % len(neighbor_x)
+            nei_x = neighbor_x[nei_sample_idx:nei_sample_idx+1]
+            
+            # Blend: 70% original + 30% neighbor
+            blend_ratio = 0.3
+            blended_x = (1 - blend_ratio) * orig_x + blend_ratio * nei_x
+            
+            augmented_X.append(blended_x)
+            augmented_y.append(orig_y)  # Keep original target
+    
+    if len(augmented_X) > 0:
+        aug_X = torch.cat(augmented_X, dim=0)
+        aug_y = torch.cat(augmented_y, dim=0)
+        
+        final_X = torch.cat([X_combined, aug_X], dim=0)
+        final_y = torch.cat([y_combined, aug_y], dim=0)
+        
+        print(f"    Spatial augmentation: {len(X_combined)} -> {len(final_X)} samples (+{len(aug_X)})")
+        return final_X, final_y
+    
+    return X_combined, y_combined
+
+def cross_ar_tile_data_preparation(tile, size, all_power_maps, all_intensities, num_in, num_pred, enable_augmentation=True):
+    """Prepare data for one tile across all ARs with optional TEMPORAL-ONLY augmentation"""
+    
+    print(f"  Preparing data for Tile {tile} across all ARs...")
+    
+    # Just combine all AR data for this tile (NO spatial blending)
+    X_list, y_list = [], []
+    
+    for ar_idx in range(all_power_maps.shape[-1]):
+        power_maps = all_power_maps[:, :, :, ar_idx]
+        intensities = all_intensities[:, :, ar_idx]
+        
+        try:
+            X_ar, y_ar = lstm_ready(tile, size, power_maps, intensities, num_in, num_pred)
+            if len(X_ar) > 0:
+                X_list.append(X_ar)
+                y_list.append(y_ar)
+        except:
+            continue
+    
+    if len(X_list) > 0:
+        X_tile = torch.cat(X_list, dim=0)
+        y_tile = torch.cat(y_list, dim=0)
+        
+        # Apply ONLY temporal augmentation if enabled
+        if enable_augmentation and len(X_tile) > 0:
+            X_tile, y_tile = temporal_window_augmentation(X_tile, y_tile, augmentation_ratio=0.0)
+    else:
+        X_tile = torch.tensor([])
+        y_tile = torch.tensor([])
+    
+    return X_tile, y_tile
+
+# ========== EXISTING FUNCTIONS (UNCHANGED) ==========
 
 def training_loop(n_epochs, lstm, optimiser, loss_fn, X_train, y_train, X_test, y_test):
     scheduler = StepLR(optimiser, step_size=n_epochs//10, gamma=0.9)
@@ -287,8 +477,6 @@ class LSTM(nn.Module):
         #sys.exit()
         return outputs
 
-
-
 # split a multivariate sequence past, future samples (X and y)
 def split_sequences(input_sequences, output_sequences, n_steps_in, n_steps_out):
     """Split sequences into input/output pairs.
@@ -322,8 +510,6 @@ def split_sequences(input_sequences, output_sequences, n_steps_in, n_steps_out):
         
     return np.array(X), np.array(y)
 
-
-
 def amplify_fluctuations(y, amplification_factor=2):
     """
     Amplify the fluctuations of a data series.
@@ -342,8 +528,6 @@ def amplify_fluctuations(y, amplification_factor=2):
     # Add the trend back
     y_amplified_with_trend = y_amplified + (y - y_detrended)
     return y_amplified_with_trend
-
-    import numpy as np
 
 def calculate_metrics(timeline_true, timeline_predicted):
     # Ensure inputs are NumPy arrays for consistency
@@ -515,22 +699,3 @@ def calculate_extended_metrics(model, timeline_true, timeline_predicted, trainin
         'RMSE@1': RMSE_1,
         'RMSE@5': RMSE_5
     }
-
-def get_neighbor_tiles(tile, size):
-    """Get valid neighboring tile indices in 8-connected neighborhood"""
-    row, col = tile // size, tile % size
-    neighbors = []
-    
-    for dr in [-1, 0, 1]:
-        for dc in [-1, 0, 1]:
-            if dr == 0 and dc == 0:
-                continue
-            new_row, new_col = row + dr, col + dc
-            if 0 <= new_row < size and 0 <= new_col < size:
-                neighbors.append(new_row * size + new_col)
-    
-    return neighbors
-
-
-
-
