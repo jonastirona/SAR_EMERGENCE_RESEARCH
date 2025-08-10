@@ -641,20 +641,22 @@ def process_data(test_AR, size, rid_of_top, eps=1e-9):
     int_reshaped = np.expand_dims(intensities, axis=1)
     inputs = np.concatenate([stacked_maps, int_reshaped], axis=1)
 
-    inputs = np.diff(inputs, axis=2) / (inputs[:, :, 1:] + eps)
-    mag_flux = np.diff(mag_flux, axis=1) / (mag_flux[:, 1:] + eps)
+    inputs = np.diff(np.log(inputs+eps), axis=2)
+    mag_flux = np.diff(np.log(mag_flux+ eps), axis=1)
+    inputs[np.isnan(inputs)] = 0
+    mag_flux[np.isnan(mag_flux)] = 0
     n_inputs = []
 
     for i in range(inputs.shape[1]):
         feature = inputs[:, i, :].reshape(-1, 1)
         feature = StandardScaler().fit_transform(feature)
-        feature = feature.reshape(inputs.shape[2], -1)
+        feature = feature.reshape(-1, inputs.shape[2])
         n_inputs.append(feature)
-    new_inputs = np.stack(n_inputs, axis=-1)
-    print(new_inputs.shape)
-    os.abort()
 
-    outputs = StandardScaler().fit_transform(mag_flux)
+    new_inputs = np.stack(n_inputs, axis=1)
+
+    outputs = StandardScaler().fit_transform(mag_flux.reshape(-1, 1))
+    outputs = outputs.reshape(-1, mag_flux.shape[1])
     time = time[1:]
 
     return new_inputs, outputs, time
