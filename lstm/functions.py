@@ -17,6 +17,8 @@ from ray import tune
 import re
 from collections import OrderedDict
 import glob
+from sklearn.preprocessing import StandardScaler
+import pandas as pd
 
 isVanillaLSTM = True
 warnings.filterwarnings("ignore")
@@ -632,29 +634,30 @@ def load_ar_data(ar_num, size, rid_of_top):
         return None, None, None
 
 
-def process_data(
-    test_AR,
-    size,
-    rid_of_top,
-):
+def process_data(test_AR, size, rid_of_top, eps=1e-9):
     stacked_maps, mag_flux, intensities, time = load_ar_data(test_AR, size, rid_of_top)
-
-    min_p = np.min(stacked_maps)
-    max_p = np.max(stacked_maps)
-    min_m = np.min(mag_flux)
-    max_m = np.max(mag_flux)
-    min_i = np.min(intensities)
-    max_i = np.max(intensities)
-    stacked_maps = min_max_scaling(stacked_maps, min_p, max_p)
-    mag_flux = min_max_scaling(mag_flux, min_m, max_m)
-    intensities = min_max_scaling(intensities, min_i, max_i)
 
     # Reshape int to have an extra dimension and then put it with pmaps
     int_reshaped = np.expand_dims(intensities, axis=1)
-
     inputs = np.concatenate([stacked_maps, int_reshaped], axis=1)
 
-    return inputs, mag_flux, time
+    inputs = np.diff(inputs, axis=2) / (inputs[:, :, 1:] + eps)
+    mag_flux = np.diff(mag_flux, axis=1) / (mag_flux[:, 1:] + eps)
+    n_inputs = []
+
+    for i in range(inputs.shape[1]):
+        feature = inputs[:, i, :].reshape(-1, 1)
+        feature = StandardScaler().fit_transform(feature)
+        feature = feature.reshape(inputs.shape[2], -1)
+        n_inputs.append(feature)
+    new_inputs = np.stack(n_inputs, axis=-1)
+    print(new_inputs.shape)
+    os.abort()
+
+    outputs = StandardScaler().fit_transform(mag_flux)
+    time = time[1:]
+
+    return new_inputs, outputs, time
 
 
 def get_params(state_dict, path):
@@ -722,6 +725,7 @@ def AR_defs(test_AR):
         print("Invalid test_AR value. Please use 11698, 11726, 13165, 13179, or 13183.")
     return before_plot, num_in, NOAA_first, NOAA_second
 
+
 # --- Data Loading & Preparation ---
 def prepare_dataset(ar_list, size, rid_of_top, num_in, num_pred):
     """Builds a complete dataset (X, y) for a list of ARs."""
@@ -729,7 +733,7 @@ def prepare_dataset(ar_list, size, rid_of_top, num_in, num_pred):
 
     # Load data for all ARs
     for ar in ar_list:
-        combined_inputs, flux, _ = process_data(ar,size, rid_of_top)
+        combined_inputs, flux, _ = process_data(ar, size, rid_of_top)
         all_inputs_list.append(combined_inputs)
         all_flux_list.append(flux)
 
