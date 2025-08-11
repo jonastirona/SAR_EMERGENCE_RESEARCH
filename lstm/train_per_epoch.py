@@ -201,7 +201,7 @@ def main_w_tune(config):
 
     # Initialize wandb
     wandb.init(
-        project=f"{model_type},Plateau_percent",
+        project=f"{model_type},change_eval_tiles",
         entity=os.environ.get("WANDB_ENTITY"),
         config=config,
         name=f"{model_type}_pred{config['num_pred']}_r{config['rid_of_top']}_i{config['num_in']}_n{config['num_layers']}_h{config['hidden_size']}_e{config['n_epochs']}_l{config['learning_rate']:.5f}_d{config['dropout']:.2f}",
@@ -326,7 +326,7 @@ def main_w_tune(config):
             print(f"Model saved to {model_path}")
 
             model_artifact = wandb.Artifact(
-                name=f"{model_type}-model-{wandb.run.id}-RMSE-{val_rmse:.8f}",
+                name=f"RMSE-{val_rmse:.8f}-{model_type}-model-{wandb.run.id}",
                 type="model",
                 description=f"{model_type} Model for SAR emergence prediction",
                 metadata=config,
@@ -405,12 +405,12 @@ if __name__ == "__main__":
             "num_pred": tune.choice([12]),
             "rid_of_top": tune.choice([4]),
             "num_in": tune.choice([110]),
-            "num_layers": tune.choice([2, 3, 4]),
-            "hidden_size": tune.choice([32, 64, 128, 256]),
+            "num_layers": tune.choice([1, 2, 3, 4]),
+            "hidden_size": tune.choice([32, 64, 128, 150]),
             "n_epochs": tune.choice([500]),
             "learning_rate": tune.loguniform(1e-5, 1e-3),
-            "dropout": tune.choice([0, 0.01, 0.1, 0.2, 0.3, 0.4, 0.5]),
-            "batch_size": tune.choice([32, 64, 128, 256]),
+            "dropout": tune.choice([0, 0.01, 0.1]),
+            "batch_size": tune.choice([32, 64, 128]),
         }
         algo = OptunaSearch()
         scheduler = ASHAScheduler(max_t=500, grace_period=10, reduction_factor=3)

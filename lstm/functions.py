@@ -594,7 +594,7 @@ def calculate_extended_metrics(
     }
 
 
-def load_ar_data(ar_num, size, rid_of_top):
+def load_ar_data(ar_num, size, rid_of_top, starting_tile):
     """Loads and preprocesses data for a single Active Region (AR)."""
     try:
         # Load data from .npz files
@@ -613,11 +613,10 @@ def load_ar_data(ar_num, size, rid_of_top):
         intensities = intensities_data["arr_0"]
 
         # Trim, stack, and handle NaNs
-        trim_slice = slice(
-            rid_of_top * size, -rid_of_top * size if rid_of_top > 0 else None
-        )
+        trim_slice = slice(starting_tile, starting_tile + size)
         power_maps = [pm[trim_slice, :] for pm in power_maps]
         mag_flux = mag_flux[trim_slice, :]
+        print(mag_flux, starting_tile)
         intensities = intensities[trim_slice, :]
 
         stacked_maps = np.stack(power_maps, axis=1)
@@ -632,12 +631,10 @@ def load_ar_data(ar_num, size, rid_of_top):
         return None, None, None
 
 
-def process_data(
-    test_AR,
-    size,
-    rid_of_top,
-):
-    stacked_maps, mag_flux, intensities, time = load_ar_data(test_AR, size, rid_of_top)
+def process_data(test_AR, size, rid_of_top, starting_tile):
+    stacked_maps, mag_flux, intensities, time = load_ar_data(
+        test_AR, size, rid_of_top, starting_tile
+    )
 
     min_p = np.min(stacked_maps)
     max_p = np.max(stacked_maps)
@@ -694,33 +691,44 @@ def get_params(state_dict, path):
 def AR_defs(test_AR):
     before_plot, num_in, NOAA_first, NOAA_second = None, None, None, None
     if test_AR == 11698:
+        window_s = 98
+        starting_tile = 46
         before_plot = 50
         num_in = 96
         NOAA_first = datetime(2013, 3, 15, 0, 0, 0)
         NOAA_second = datetime(2013, 3, 17, 0, 0, 0)
     elif test_AR == 11726:
+        window_s = 50
+        starting_tile = 37
         before_plot = 50
         num_in = 72  # decrease even more -> 60
         NOAA_first = datetime(2013, 4, 20, 0, 0, 0)
         NOAA_second = datetime(2013, 4, 22, 0, 0, 0)
     elif test_AR == 13165:
+        window_s = 40
+        starting_tile = 28
         before_plot = 40
         num_in = 96
         NOAA_first = datetime(2022, 12, 12, 0, 0, 0)
         NOAA_second = datetime(2022, 12, 14, 0, 0, 0)
     elif test_AR == 13179:
+        window_s = 40
+        starting_tile = 37
         before_plot = 40
         num_in = 96
         NOAA_first = datetime(2022, 12, 30, 0, 0, 0)
         NOAA_second = datetime(2023, 1, 1, 0, 0, 0)
     elif test_AR == 13183:
+        window_s = 40
+        starting_tile = 37
         before_plot = 40
         num_in = 96
         NOAA_first = datetime(2023, 1, 6, 0, 0, 0)
         NOAA_second = datetime(2023, 1, 8, 0, 0, 0)
     else:
         print("Invalid test_AR value. Please use 11698, 11726, 13165, 13179, or 13183.")
-    return before_plot, num_in, NOAA_first, NOAA_second
+    return before_plot, num_in, NOAA_first, NOAA_second, starting_tile, window_s
+
 
 # --- Data Loading & Preparation ---
 def prepare_dataset(ar_list, size, rid_of_top, num_in, num_pred):
@@ -729,7 +737,7 @@ def prepare_dataset(ar_list, size, rid_of_top, num_in, num_pred):
 
     # Load data for all ARs
     for ar in ar_list:
-        combined_inputs, flux, _ = process_data(ar,size, rid_of_top)
+        combined_inputs, flux, _ = process_data(ar, size, rid_of_top, size * rid_of_top)
         all_inputs_list.append(combined_inputs)
         all_flux_list.append(flux)
 

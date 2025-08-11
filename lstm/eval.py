@@ -9,7 +9,7 @@ from functions import (
     process_data,
     get_params,
     AR_defs,
-    isVanillaLSTM
+    isVanillaLSTM,
 )
 from sklearn.metrics import mean_squared_error
 from datetime import timedelta
@@ -28,6 +28,7 @@ else:
     from functions import LSTM as LSTM
 
 warnings.filterwarnings("ignore")
+
 
 def initialize_lstm(
     inputs, hidden_size, num_layers, num_pred, state_dict, filename, device
@@ -78,16 +79,15 @@ def eval_AR_emergence_with_plots(
     #     f"Extracted from filename: Time Window: {num_pred}, Rid of Top: {rid_of_top}, Number of Inputs: {num_in}, Number of Layers: {num_layers}, Hidden Size: {hidden_size}, Number of Epochs: {n_epochs}, Learning Rate: {learning_rate}"
     # )  # Print extracted values for confirmation
 
-    before_plot, num_in, NOAA_first, NOAA_second = AR_defs(test_AR)
+    before_plot, num_in, NOAA_first, NOAA_second, starting_tile, window_start = AR_defs(test_AR)
     if not before_plot:
         return
-    
+
     # Define the AR information
-    starting_tile = 1
     size = 9
     rid_of_top = 4
 
-    inputs, mag_flux, time = process_data(test_AR, size, rid_of_top)
+    inputs, mag_flux, time = process_data(test_AR, size, rid_of_top, starting_tile)
     lstm = initialize_lstm(
         inputs, hidden_size, num_layers, num_pred, state_dict, filename, device
     )
@@ -103,7 +103,7 @@ def eval_AR_emergence_with_plots(
     all_metrics = []
     threshold = 0.01  # -0.006
     sust_time = 4
-    window_start, window_end = before_plot, before_plot + 72
+    window_end = window_start + 72
     for i in range(7):
         print()
         print("Tile {}".format(starting_tile + i))
@@ -111,7 +111,7 @@ def eval_AR_emergence_with_plots(
         ### Validation
         print("Inputs shape;", inputs.shape, "Mag flux shape:", mag_flux.shape)
         X_test, y_test = lstm_ready(
-            starting_tile + i, size, inputs, mag_flux, num_in, num_pred
+            1 + i, size, inputs, mag_flux, num_in, num_pred
         )  # ,min_p,max_p,min_i,max_i)
         X_test = X_test.to(device)
         print("x_test shape:", X_test.shape)
@@ -124,9 +124,9 @@ def eval_AR_emergence_with_plots(
         true = y_test[:, future].numpy()
 
         last_known_idx = (
-            np.shape(mag_flux[starting_tile + i, :])[0] - np.shape(true)[0] - 1
+            np.shape(mag_flux[1 + i, :])[0] - np.shape(true)[0] - 1
         )  # the index in the timeline before we start predicting
-        pred = recalibrate(pred, mag_flux[starting_tile + i, last_known_idx])
+        pred = recalibrate(pred, mag_flux[1 + i, last_known_idx])
         first_pred_time = mdates.date2num(
             time[last_known_idx] - timedelta(hours=num_pred)
         )
@@ -136,7 +136,7 @@ def eval_AR_emergence_with_plots(
             3, 1, subplot_spec=main_gs[i], height_ratios=[4, 1, 1], hspace=0.05
         )  # Define GridSpec for this iteration
         mag_before_pred = mag_flux[
-            starting_tile + i,
+            1 + i,
             last_known_idx - before_plot - num_pred - future : last_known_idx
             - num_pred
             - future,
@@ -177,9 +177,7 @@ def eval_AR_emergence_with_plots(
             alpha=0.25,
         )
         ax0.legend(loc="upper left")
-        ax0.set_ylabel(
-            f"Tile {starting_tile + i + size * rid_of_top}"
-        )  # Title for each plot (optional)
+        ax0.set_ylabel(f"Tile {starting_tile + i}")  # Title for each plot (optional)
         # ax0.axvline(x=first_pred_time, color='darkturquoise', linestyle='--')
         ### ax0.axvline(x=NOAA_first_record, color='magenta', linestyle='--')  # Adjust color, linestyle, linewidth as needed
         ### ax0.axvline(x=NOAA_second_record, color='darkmagenta', linestyle='--')
@@ -428,16 +426,15 @@ def eval_AR_emergence(
         f"Extracted from filename: Time Window: {num_pred}, Rid of Top: {rid_of_top}, Number of Inputs: {num_in}, Number of Layers: {num_layers}, Hidden Size: {hidden_size}, Number of Epochs: {n_epochs}, Learning Rate: {learning_rate}"
     )  # Print extracted values for confirmation
 
-    before_plot, num_in, _, _ = AR_defs(test_AR)
+    before_plot, num_in, _, _, starting_tile, window_start = AR_defs(test_AR)
     if not before_plot:
         return
-    
+
     # Define the AR information
-    starting_tile = 1
     size = 9
     rid_of_top = 4
 
-    inputs, mag_flux, time = process_data(test_AR, size, rid_of_top)
+    inputs, mag_flux, time = process_data(test_AR, size, rid_of_top, starting_tile)
     lstm = initialize_lstm(
         inputs, hidden_size, num_layers, num_pred, state_dict, filename, device
     )
@@ -446,14 +443,14 @@ def eval_AR_emergence(
     # Loop to create 8 plots
     future = 11
     all_metrics = []
-    window_start, window_end = before_plot, before_plot + 72
+    window_end = window_start + 72
 
     for i in range(7):
-        # print("Tile {}".format(starting_tile + i))
+        # print("Tile {}".format(1 + i))
 
         ### Validation
         X_test, y_test = lstm_ready(
-            starting_tile + i, size, inputs, mag_flux, num_in, num_pred
+            1 + i, size, inputs, mag_flux, num_in, num_pred
         )  # ,min_p,max_p,min_i,max_i)
         X_test = X_test.to(device)
 
@@ -461,9 +458,9 @@ def eval_AR_emergence(
         pred = all_predictions[:, future].detach().cpu().numpy()
         true = y_test[:, future].numpy()
         last_known_idx = (
-            np.shape(mag_flux[starting_tile + i, :])[0] - np.shape(true)[0] - 1
+            np.shape(mag_flux[1 + i, :])[0] - np.shape(true)[0] - 1
         )  # the index in the timeline before we start predicting
-        pred = recalibrate(pred, mag_flux[starting_tile + i, last_known_idx])
+        pred = recalibrate(pred, mag_flux[1 + i, last_known_idx])
         # Evaluation metrics
         metrics = calculate_metrics(
             true[window_start:window_end], pred[window_start:window_end]
