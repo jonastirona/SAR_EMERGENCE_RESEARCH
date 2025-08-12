@@ -405,12 +405,12 @@ if __name__ == "__main__":
             "num_pred": tune.choice([12]),
             "rid_of_top": tune.choice([4]),
             "num_in": tune.choice([110]),
-            "num_layers": tune.choice([1, 2, 3, 4]),
-            "hidden_size": tune.choice([32, 64, 128, 150]),
+            "num_layers": tune.choice([1]),
+            "hidden_size": tune.choice([10, 32, 64, 128, 150]),
             "n_epochs": tune.choice([500]),
             "learning_rate": tune.loguniform(1e-5, 1e-3),
             "dropout": tune.choice([0, 0.01, 0.1]),
-            "batch_size": tune.choice([32, 64, 128]),
+            "batch_size": tune.choice([4, 8, 16, 32]),
         }
         algo = OptunaSearch()
         scheduler = ASHAScheduler(max_t=500, grace_period=10, reduction_factor=3)
