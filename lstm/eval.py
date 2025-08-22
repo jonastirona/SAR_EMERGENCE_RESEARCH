@@ -6,7 +6,7 @@ from functions import (
     recalibrate,
     add_grid_lines,
     highlight_tile,
-    process_data,
+    transform_data_eval,
     get_params,
     AR_defs,
     isVanillaLSTM,
@@ -21,6 +21,7 @@ import warnings
 import torch
 import os
 from collections import OrderedDict
+from sklearn.preprocessing import StandardScaler
 
 if isVanillaLSTM:
     from functions import VanillaLSTM as LSTM
@@ -79,7 +80,9 @@ def eval_AR_emergence_with_plots(
     #     f"Extracted from filename: Time Window: {num_pred}, Rid of Top: {rid_of_top}, Number of Inputs: {num_in}, Number of Layers: {num_layers}, Hidden Size: {hidden_size}, Number of Epochs: {n_epochs}, Learning Rate: {learning_rate}"
     # )  # Print extracted values for confirmation
 
-    before_plot, num_in, NOAA_first, NOAA_second, starting_tile, window_start = AR_defs(test_AR)
+    before_plot, num_in, NOAA_first, NOAA_second, starting_tile, window_start = AR_defs(
+        test_AR
+    )
     if not before_plot:
         return
 
@@ -87,7 +90,7 @@ def eval_AR_emergence_with_plots(
     size = 9
     rid_of_top = 4
 
-    inputs, mag_flux, time = process_data(test_AR, size, rid_of_top, starting_tile)
+    inputs, mag_flux, time = transform_data_eval(test_AR, size, rid_of_top, starting_tile)
     lstm = initialize_lstm(
         inputs, hidden_size, num_layers, num_pred, state_dict, filename, device
     )
@@ -398,6 +401,9 @@ def eval_AR_emergence(
     test_AR,
     save_fig,
     path,
+    cont_int_median=None,
+    maps_scaler: StandardScaler = None,
+    mag_scaler: StandardScaler = None,
     state_dict=None,
     num_pred=None,
     rid_of_top=None,
@@ -434,38 +440,41 @@ def eval_AR_emergence(
     size = 9
     rid_of_top = 4
 
-    inputs, mag_flux, time = process_data(test_AR, size, rid_of_top, starting_tile)
+    inputs, mag_flux, time = transform_data_eval([test_AR], size, rid_of_top, starting_tile, cont_int_median, maps_scaler, mag_scaler)
+
+    inputs = inputs[0]
+    mag_flux = mag_flux[0]
+
     lstm = initialize_lstm(
         inputs, hidden_size, num_layers, num_pred, state_dict, filename, device
     )
 
-    # Assuming prediction, y_test_tensors, ARs, learning_rate, and n_epochs are already defined
     # Loop to create 8 plots
     future = 11
     all_metrics = []
     window_end = window_start + 72
+    with torch.no_grad():
+        for i in range(7):
+            # print("Tile {}".format(1 + i))
 
-    for i in range(7):
-        # print("Tile {}".format(1 + i))
+            ### Validation
+            X_test, y_test = lstm_ready(
+                1 + i, size, inputs, mag_flux, num_in, num_pred
+            )  # ,min_p,max_p,min_i,max_i)
+            X_test = X_test.to(device)
 
-        ### Validation
-        X_test, y_test = lstm_ready(
-            1 + i, size, inputs, mag_flux, num_in, num_pred
-        )  # ,min_p,max_p,min_i,max_i)
-        X_test = X_test.to(device)
-
-        all_predictions = lstm(X_test)
-        pred = all_predictions[:, future].detach().cpu().numpy()
-        true = y_test[:, future].numpy()
-        last_known_idx = (
-            np.shape(mag_flux[1 + i, :])[0] - np.shape(true)[0] - 1
-        )  # the index in the timeline before we start predicting
-        pred = recalibrate(pred, mag_flux[1 + i, last_known_idx])
-        # Evaluation metrics
-        metrics = calculate_metrics(
-            true[window_start:window_end], pred[window_start:window_end]
-        )
-        all_metrics.append(metrics)
+            all_predictions = lstm(X_test)
+            pred = all_predictions[:, future].detach().cpu().numpy()
+            true = y_test[:, future].numpy()
+            last_known_idx = (
+                np.shape(mag_flux[1 + i, :])[0] - np.shape(true)[0] - 1
+            )  # the index in the timeline before we start predicting
+            pred = recalibrate(pred, mag_flux[1 + i, last_known_idx])
+            # Evaluation metrics
+            metrics = calculate_metrics(
+                true[window_start:window_end], pred[window_start:window_end]
+            )
+            all_metrics.append(metrics)
 
     # Print the metrics at the bottom
     all_metrics_np = np.array(

@@ -11,7 +11,7 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader, TensorDataset
 from functions import (
     PlateauStopper,
-    prepare_dataset,
+    prepare_dataset_train,
     train_epoch,
     evaluate_model,
     isVanillaLSTM,
@@ -39,8 +39,6 @@ else:
 
 warnings.filterwarnings("ignore")
 os.makedirs(RESULTS_PATH, exist_ok=True)  # Ensure the results directory exists
-
-
 
 
 # --- Main Execution ---
@@ -105,6 +103,13 @@ def main(config):
         13004,
         13085,
         13098,
+        11462,
+        11521,
+        11907,
+        12219,
+        12271,
+        12275,
+        12567,
     ]
     x_train, y_train, input_size = prepare_dataset(
         train_ars,
@@ -123,6 +128,7 @@ def main(config):
         config["num_in"],
         config["num_pred"],
     )
+
 
     if x_train is None or x_test is None:
         print("Could not create datasets. Exiting.")
@@ -209,6 +215,7 @@ def main_w_tune(config):
     )
 
     # --- Data Loading ---
+    print("Batch size:", config["batch_size"])
     print("Loading and preparing training data...")
     train_ars = [
         11130,
@@ -252,19 +259,16 @@ def main_w_tune(config):
         13004,
         13085,
         13098,
+        11462,
+        11521,
+        11907,
+        12219,
+        12271,
+        12275,
+        12567,
     ]
-    x_train, y_train, input_size = prepare_dataset(
+    x_train, y_train, x_test, y_test, input_size = prepare_dataset_train(
         train_ars,
-        9,
-        config["rid_of_top"],
-        config["num_in"],
-        config["num_pred"],
-    )
-
-    print("Loading and preparing test data...")
-    test_ars = [11462, 11521, 11907, 12219, 12271, 12275, 12567]
-    x_test, y_test, _ = prepare_dataset(
-        test_ars,
         9,
         config["rid_of_top"],
         config["num_in"],
@@ -294,6 +298,7 @@ def main_w_tune(config):
     optimizer = torch.optim.Adam(model.parameters(), lr=config["learning_rate"])
     scheduler = ReduceLROnPlateau(optimizer, "min", factor=0.2, patience=10)
     model_name = f"{model_type}pred{config['num_pred']}_r{config['rid_of_top']}_i{config['num_in']}_n{config['num_layers']}_h{config['hidden_size']}_e{config['n_epochs']}_lr{config['learning_rate']:.8f}_d{config['dropout']}.pth"
+    
 
     # --- Training Loop ---
     print("Starting training...")

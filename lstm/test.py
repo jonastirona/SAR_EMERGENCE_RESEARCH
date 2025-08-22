@@ -1,27 +1,60 @@
-for values in itertools.product(*param_grid.values()):
-    params = dict(zip(param_grid.keys(), values))
-    print("Training with", params)
-    wandb_project = 'sar'
-    wandb_entity = "erenberkedogan-new-jersey-institute-of-technology"
-    wandb.init(
-        project=wandb_project,
-        entity=wandb_entity,
-        config=params,
-        name="LSTM_" + str(params),
-        notes=f"Grid search comparing lstm performance with constant learning rate {params["learning_rate"]} , dropout {params["dropout"]}, and {params["num_layers"]} layers",
-    )
-    state_dict = train(device, params, **params)       # pass num_pred=params["num_pred"], etc.
-    scores = []
+from functions import prepare_dataset_train
 
-    for AR in [11698,11726,13165,13179,13183]:
-        score, fig = eval(device, AR, False, state_dict, **params)
-        wandb.log({f"Predictions/AR{AR}": wandb.Image(fig)})
-        plt.close(fig) 
-        scores.append(score)
-    val_rmse = float(np.mean(scores))
-    print(f"Score: {val_rmse:.8f}")
-
-    if val_rmse < best_score:
-        best_score, best_params, best_state = val_rmse, params, state_dict
-    print(f"Best Parameters: {best_params}")
-    wandb.finish()
+train_ars = [
+    11130,
+    11149,
+    11158,
+    11162,
+    11199,
+    11327,
+    11344,
+    11387,
+    11393,
+    11416,
+    11422,
+    11455,
+    11619,
+    11640,
+    11660,
+    11678,
+    11682,
+    11765,
+    11768,
+    11776,
+    11916,
+    11928,
+    12036,
+    12051,
+    12085,
+    12089,
+    12144,
+    12175,
+    12203,
+    12257,
+    12331,
+    12494,
+    12659,
+    12778,
+    12864,
+    12877,
+    12900,
+    12929,
+    13004,
+    13085,
+    13098,
+    11462,
+    11521,
+    11907,
+    12219,
+    12271,
+    12275,
+    12567,
+]
+x_train, y_train, x_test, y_test, input_size, scalers = prepare_dataset_train(
+    train_ars,
+    9,
+    4,
+    7,
+    2,
+)
+print()
