@@ -227,7 +227,7 @@ def main_w_tune(config):
 
     # Initialize wandb
     wandb.init(
-        project=f"{model_type},change_eval_tiles",
+        project=f"{model_type},newscaling",
         entity=os.environ.get("WANDB_ENTITY"),
         config=config,
         name=f"{model_type}_pred{config['num_pred']}_r{config['rid_of_top']}_i{config['num_in']}_n{config['num_layers']}_h{config['hidden_size']}_e{config['n_epochs']}_l{config['learning_rate']:.5f}_d{config['dropout']:.2f}",
@@ -287,12 +287,27 @@ def main_w_tune(config):
         12275,
         12567,
     ]
-    x_train, y_train, x_test, y_test, input_size = prepare_dataset_train(
-        train_ars,
+    x_train, y_train, input_size, (int_median, maps_scaler, flux_scaler) = (
+        prepare_dataset(
+            train_ars,
+            9,
+            config["rid_of_top"],
+            config["num_in"],
+            config["num_pred"],
+        )
+    )
+
+    print("Loading and preparing test data...")
+    test_ars = [11462, 11521, 11907, 12219, 12271, 12275, 12567]
+    x_test, y_test, _, _ = prepare_dataset(
+        test_ars,
         9,
         config["rid_of_top"],
         config["num_in"],
         config["num_pred"],
+        int_median,
+        maps_scaler,
+        flux_scaler,
     )
 
     if x_train is None or x_test is None:
@@ -331,7 +346,17 @@ def main_w_tune(config):
         # Evaluate every 10 epochs and on the last epoch
         scores = []
         for AR in [11698, 11726, 13165, 13179, 13183]:
-            score = eval(device, AR, False, BASE_PATH, model.state_dict(), **config)
+            score = eval(
+                device,
+                AR,
+                False,
+                BASE_PATH,
+                int_median,
+                maps_scaler,
+                flux_scaler,
+                model.state_dict(),
+                **config,
+            )
             scores.append(score)
         val_rmse = float(np.mean(scores))
 
