@@ -11,13 +11,14 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader, TensorDataset
 from functions import (
     PlateauStopper,
-    prepare_dataset_train,
+    prepare_dataset,
     train_epoch,
     evaluate_model,
     isVanillaLSTM,
     BASE_PATH,
     RESULTS_PATH,
 )
+import pickle
 from ray import tune
 import ray
 from ray.tune.search.optuna import OptunaSearch
@@ -111,24 +112,28 @@ def main(config):
         12275,
         12567,
     ]
-    x_train, y_train, input_size = prepare_dataset(
-        train_ars,
-        9,
-        config["rid_of_top"],
-        config["num_in"],
-        config["num_pred"],
+    x_train, y_train, input_size, (int_median, maps_scaler, flux_scaler) = (
+        prepare_dataset(
+            train_ars,
+            9,
+            config["rid_of_top"],
+            config["num_in"],
+            config["num_pred"],
+        )
     )
 
     print("Loading and preparing test data...")
     test_ars = [11462, 11521, 11907, 12219, 12271, 12275, 12567]
-    x_test, y_test, _ = prepare_dataset(
+    x_test, y_test, _, _ = prepare_dataset(
         test_ars,
         9,
         config["rid_of_top"],
         config["num_in"],
         config["num_pred"],
+        int_median,
+        maps_scaler,
+        flux_scaler,
     )
-
 
     if x_train is None or x_test is None:
         print("Could not create datasets. Exiting.")
@@ -165,7 +170,17 @@ def main(config):
         # Evaluate every 10 epochs and on the last epoch
         scores = []
         for AR in [11698, 11726, 13165, 13179, 13183]:
-            score = eval(device, AR, False, BASE_PATH, model.state_dict(), **config)
+            score = eval(
+                device,
+                AR,
+                False,
+                BASE_PATH,
+                int_median,
+                maps_scaler,
+                flux_scaler,
+                model.state_dict(),
+                **config,
+            )
             scores.append(score)
         val_rmse = float(np.mean(scores))
 
@@ -183,6 +198,11 @@ def main(config):
     model_name = f"pred{config['num_pred']}_r{config['rid_of_top']}_i{config['num_in']}_n{config['num_layers']}_h{config['hidden_size']}_e{config['n_epochs']}_lr{config['learning_rate']:.8f}_d{config['dropout']}.pth"
     model_path = os.path.join(RESULTS_PATH, model_name)
     torch.save(model.state_dict(), model_path)
+
+    pickle.dump(
+        {"median": int_median, "maps": maps_scaler, "flux": flux_scaler},
+        open(os.path.join(RESULTS_PATH, "median_scalers.pkl"), 'wb'),
+    )
     print(f"Model saved to {model_path}")
 
     # model_artifact = wandb.Artifact(
@@ -298,7 +318,6 @@ def main_w_tune(config):
     optimizer = torch.optim.Adam(model.parameters(), lr=config["learning_rate"])
     scheduler = ReduceLROnPlateau(optimizer, "min", factor=0.2, patience=10)
     model_name = f"{model_type}pred{config['num_pred']}_r{config['rid_of_top']}_i{config['num_in']}_n{config['num_layers']}_h{config['hidden_size']}_e{config['n_epochs']}_lr{config['learning_rate']:.8f}_d{config['dropout']}.pth"
-    
 
     # --- Training Loop ---
     print("Starting training...")

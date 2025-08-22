@@ -631,212 +631,79 @@ def load_ar_data(ar_num, size, rid_of_top, starting_tile):
         return None, None, None
 
 
-def transform_data_eval(
-    ar_list, size, rid_of_top, starting_tile, intensity_median, maps_scaler, flux_scaler
-):
-    # get data
-    stacked_maps, mag_flux, cont_int, time = load_ar_data(
-        ar_list, size, rid_of_top, starting_tile
-    )
-
-    # transform and split
-    # power maps
-    stacked_maps = np.sign(stacked_maps) * np.log1p(np.abs(stacked_maps))
-
-    # magnetic flux
-    mag_flux = np.sign(mag_flux) * np.log1p(np.abs(mag_flux))
-
-    # continuum intensity
-    cont_int = np.stack(cont_int)
-    cont_int = cont_int / intensity_median
-
-    # standardscale
-    # power maps
-    maps_train_size = stacked_maps.shape
-    stacked_maps = maps_scaler.transform(stacked_maps.reshape(-1, 1))
-    stacked_maps = stacked_maps.reshape(maps_train_size)
-
-    # mag_flux
-    flux_train_size = mag_flux.shape
-    mag_flux = flux_scaler.transform(mag_flux.reshape(-1, 1))
-    Y_train = mag_flux.reshape(flux_train_size)
-
-    X_train = np.concatenate([stacked_maps, np.expand_dims(cont_int, axis=2)], axis=2)
-
-    return (
-        X_train,
-        Y_train,
-        time,
-    )
-
-
-def transform_data_train(ar_list, size, rid_of_top, starting_tile):
-    # get data
-    stacked_maps, mag_flux, cont_int, time = load_ar_data(
-        ar_list, size, rid_of_top, starting_tile
-    )
-
-    # find train size
-    train_size = int(cont_int[0].shape[1] * 0.75)
-
-    # transform and split
-    # power maps
-    stacked_maps = np.sign(stacked_maps) * np.log1p(np.abs(stacked_maps))
-    stacked_maps_train = stacked_maps[:, :, :, :train_size]
-    stacked_maps_test = stacked_maps[:, :, :, train_size:]
-
-    # magnetic flux
-    mag_flux = np.sign(mag_flux) * np.log1p(np.abs(mag_flux))
-    mag_flux_train = mag_flux[:, :, :train_size]
-    mag_flux_test = mag_flux[:, :, train_size:]
-
-    # continuum intensity
-    cont_int = np.stack(cont_int)
-    cont_int_train = cont_int[:, :, :train_size]
-    cont_int_test = cont_int[:, :, train_size:]
-
-    intensity_median = np.median(cont_int_train)
-    cont_int_train = cont_int_train / intensity_median
-    cont_int_test = cont_int_test / intensity_median
-
-    # standardscale
-    # power maps
-    maps_scaler = StandardScaler()
-
-    maps_train_size = stacked_maps_train.shape
-    stacked_maps_train = maps_scaler.fit_transform(stacked_maps_train.reshape(-1, 1))
-    stacked_maps_train = stacked_maps_train.reshape(maps_train_size)
-
-    maps_test_size = stacked_maps_test.shape
-    stacked_maps_test = maps_scaler.transform(stacked_maps_test.reshape(-1, 1))
-    stacked_maps_test = stacked_maps_test.reshape(maps_test_size)
-
-    # mag_flux
-    flux_scaler = StandardScaler()
-
-    flux_train_size = mag_flux_train.shape
-    mag_flux_train = flux_scaler.fit_transform(mag_flux_train.reshape(-1, 1))
-    Y_train = mag_flux_train.reshape(flux_train_size)
-
-    flux_test_size = mag_flux_test.shape
-    mag_flux_test = flux_scaler.transform(mag_flux_test.reshape(-1, 1))
-    Y_test = mag_flux_test.reshape(flux_test_size)
-
-    X_train = np.concatenate(
-        [stacked_maps_train, np.expand_dims(cont_int_train, axis=2)], axis=2
-    )
-    X_test = np.concatenate(
-        [stacked_maps_test, np.expand_dims(cont_int_test, axis=2)], axis=2
-    )
-
-    return (
-        X_train,
-        Y_train,
-        X_test,
-        Y_test,
-        time,
-        (intensity_median, maps_scaler, flux_scaler),
-    )
-
-
-# --- Data Loading & Preparation ---
-def prepare_dataset_train(ar_list, size, rid_of_top, num_in, num_pred):
-    """Builds a complete dataset (X, y) for a list of ARs."""
-    # Load data for all ARs
-    X_train, Y_train, X_test, Y_test, time, median_scalers = transform_data_train(
-        ar_list, size, rid_of_top, size * rid_of_top
-    )
-
-    if X_train.size == 0:
-        print("Data could not be loaded")
-        return None, None, 0
-
-    # Create sequences for the LSTM
-    x_list_train, y_list_train = [], []
-    tiles = size**2 - 2 * size * rid_of_top
-
-    for inputs, flux in zip(X_train, Y_train):
-        for tile in range(tiles):
-            x_seq, y_seq = lstm_ready(tile, size, inputs, flux, num_in, num_pred)
-
-            if x_seq.shape[0] > 0:
-                x_seq = torch.reshape(x_seq, (x_seq.shape[0], num_in, x_seq.shape[2]))
-                x_list_train.append(x_seq)
-                y_list_train.append(y_seq)
-
-    x_list_test, y_list_test = [], []
-    for inputs, flux in zip(X_test, Y_test):
-        for tile in range(tiles):
-            x_seq, y_seq = lstm_ready(tile, size, inputs, flux, num_in, num_pred)
-            if x_seq.shape[0] > 0:
-                x_seq = torch.reshape(x_seq, (x_seq.shape[0], num_in, x_seq.shape[2]))
-                x_list_test.append(x_seq)
-                y_list_test.append(y_seq)
-
-    if not x_list_train:
-        print("Something Went Wrong in Preparing DATA")
-        return None, None, 0
-
-    x_all_train = torch.cat(x_list_train, dim=0)
-    y_all_train = torch.cat(y_list_train, dim=0)
-    x_all_test = torch.cat(x_list_test, dim=0)
-    y_all_test = torch.cat(y_list_test, dim=0)
-    input_feature_size = x_all_train.shape[2]
-
-    return (
-        x_all_train,
-        y_all_train,
-        x_all_test,
-        y_all_test,
-        input_feature_size,
-        median_scalers,
-    )
-
-
 def process_data(ar_list, size, rid_of_top, starting_tile):
-    all_maps, all_flux, all_int = [], [], []
+    all_maps, all_flux, all_int, all_time = [], [], [], []
     for ar in ar_list:
-        maps, flux, intensities, _ = load_ar_data(ar, size, rid_of_top, starting_tile)
+        maps, flux, intensities, time = load_ar_data(
+            ar, size, rid_of_top, starting_tile
+        )
         maps = np.sign(maps) * np.log1p(np.abs(maps))
         flux = np.sign(flux) * np.log1p(np.abs(flux))
         all_maps.append(maps)
         all_flux.append(flux)
         all_int.append(intensities)
-    return np.stack(all_maps), np.stack(all_flux), np.stack(all_int)
+        all_time.append(time)
+    return np.stack(all_maps), np.stack(all_flux), np.stack(all_int), all_time
 
 
-def scale_data(all_maps, all_flux, all_int):
+def scale_data(
+    all_maps,
+    all_flux,
+    all_int,
+    int_median=None,
+    maps_scaler=None,
+    flux_scaler=None,
+):
     # power maps
-    maps_scaler = StandardScaler()
     maps_shape = all_maps.shape
-    scaled_maps = maps_scaler.fit_transform(all_maps.reshape(-1, 1))
+    # if power maps scaler is already given to the function (happens in the evalution and test)
+    if maps_scaler:
+        scaled_maps = maps_scaler.transform(all_maps.reshape(-1, 1))
+    else:
+        maps_scaler = StandardScaler()
+        scaled_maps = maps_scaler.fit_transform(all_maps.reshape(-1, 1))
     scaled_maps = scaled_maps.reshape(maps_shape)
 
     # magnetic flux
-    flux_scaler = StandardScaler()
     flux_shape = all_flux.shape
-    scaled_flux = flux_scaler.fit_transform(all_flux.reshape(-1, 1))
+    # if flux scaler is already given to the function (happens in the evalution and test)
+    if flux_scaler:
+        scaled_flux = flux_scaler.transform(all_flux.reshape(-1, 1))
+    else:
+        flux_scaler = StandardScaler()
+        scaled_flux = flux_scaler.fit_transform(all_flux.reshape(-1, 1))
     Y = scaled_flux.reshape(flux_shape)
 
     # continuum intensity
-    intensity_median = np.median(all_int)
-    scaled_int = all_int / intensity_median
+    int_median = int_median or np.median(all_int)
+    scaled_int = all_int / int_median
 
-    X = np.concatenate([scaled_maps, np.expand_dims(scaled_int, axis=1)], axis=1)
-    return X, Y, (intensity_median, maps_scaler, flux_scaler)
+    X = np.concatenate([scaled_maps, np.expand_dims(scaled_int, axis=2)], axis=2)
+    return X, Y, (int_median, maps_scaler, flux_scaler)
 
 
-def prepare_dataset_train(ar_list, size, rid_of_top, num_in, num_pred):
+def prepare_dataset(
+    ar_list,
+    size,
+    rid_of_top,
+    num_in,
+    num_pred,
+    int_median=None,
+    maps_scaler=None,
+    flux_scaler=None,
+):
     """Builds a complete dataset (X, y) for a list of ARs."""
-    all_maps, all_flux, all_int = process_data(
+    all_maps, all_flux, all_int, _ = process_data(
         ar_list, size, rid_of_top, size * rid_of_top
     )
 
-    all_inputs_list, all_flux_list = scale_data(all_maps, all_flux, all_int)
+    all_inputs_list, all_flux_list, median_scalers = scale_data(
+        all_maps, all_flux, all_int, int_median, maps_scaler, flux_scaler
+    ) #the last three are none if train, in test they have values
 
-    if not all_inputs_list:
+    if all_inputs_list.size == 0:
         print("all_inputs_list does not exist")
-        return None, None, 0
+        return None, None, 0, (None, None,None)
 
     # Create sequences for the LSTM
     x_list, y_list = [], []
@@ -852,13 +719,32 @@ def prepare_dataset_train(ar_list, size, rid_of_top, num_in, num_pred):
 
     if not x_list:
         print("X_list does not exist")
-        return None, None, 0
+        return None, None, 0, (None, None,None)
 
     x_all = torch.cat(x_list, dim=0)
     y_all = torch.cat(y_list, dim=0)
     input_feature_size = x_all.shape[2]
 
-    return x_all, y_all, input_feature_size
+    return x_all, y_all, input_feature_size, median_scalers
+
+
+def prepare_dataset_eval(
+    ar_list, size, rid_of_top, starting_tile, intensity_median, maps_scaler, flux_scaler
+):
+    all_maps, all_flux, all_int, time = process_data(
+        ar_list, size, rid_of_top, starting_tile
+    )
+
+    all_inputs_list, all_flux_list, _ = scale_data(
+        all_maps, all_flux, all_int, intensity_median, maps_scaler, flux_scaler
+    )
+
+    if all_inputs_list.size == 0:
+        print("Data not processed")
+        return None, None, 0
+
+    # index 0 because only one ar is given in eval script
+    return all_inputs_list[0], all_flux_list[0], time[0]
 
 
 # --- Model Training & Evaluation ---

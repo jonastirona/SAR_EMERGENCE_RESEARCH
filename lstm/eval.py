@@ -6,10 +6,11 @@ from functions import (
     recalibrate,
     add_grid_lines,
     highlight_tile,
-    transform_data_eval,
+    prepare_dataset_eval,
     get_params,
     AR_defs,
     isVanillaLSTM,
+    RESULTS_PATH,
 )
 from sklearn.metrics import mean_squared_error
 from datetime import timedelta
@@ -20,6 +21,7 @@ import numpy as np
 import warnings
 import torch
 import os
+import pickle
 from collections import OrderedDict
 from sklearn.preprocessing import StandardScaler
 
@@ -79,7 +81,9 @@ def eval_AR_emergence_with_plots(
     # print(
     #     f"Extracted from filename: Time Window: {num_pred}, Rid of Top: {rid_of_top}, Number of Inputs: {num_in}, Number of Layers: {num_layers}, Hidden Size: {hidden_size}, Number of Epochs: {n_epochs}, Learning Rate: {learning_rate}"
     # )  # Print extracted values for confirmation
-
+    median_scalers = pickle.load(
+        open(os.path.join(RESULTS_PATH, "median_scalers.pkl"), "rb")
+    )
     before_plot, num_in, NOAA_first, NOAA_second, starting_tile, window_start = AR_defs(
         test_AR
     )
@@ -90,7 +94,16 @@ def eval_AR_emergence_with_plots(
     size = 9
     rid_of_top = 4
 
-    inputs, mag_flux, time = transform_data_eval(test_AR, size, rid_of_top, starting_tile)
+    inputs, mag_flux, time = prepare_dataset_eval(
+        [test_AR],
+        size,
+        rid_of_top,
+        starting_tile,
+        median_scalers["median"],
+        median_scalers["maps"],
+        median_scalers["flux"],
+    )
+
     lstm = initialize_lstm(
         inputs, hidden_size, num_layers, num_pred, state_dict, filename, device
     )
@@ -152,27 +165,34 @@ def eval_AR_emergence_with_plots(
         zeros_array = np.full(mag_before_pred.shape, 0)
         # true = true[:-before_plot]; pred = pred[:-before_plot]; time_cut_mpl = time_cut_mpl[:-before_plot]
 
+        predicted = median_scalers["flux"].inverse_transform(np.concatenate((nan_array, pred)).reshape(-1,1))
+        observed = median_scalers["flux"].inverse_transform(np.concatenate((mag_before_pred, true)).reshape(-1,1))
+
+        predicted = np.sign(predicted) * np.expm1(np.abs(predicted))
+        observed = np.sign(observed) * np.expm1(np.abs(observed))
         # Main plot
+
+        
         ax0 = plt.subplot(gs[0])
         ax0.plot(
             time_cut_mpl,
-            np.concatenate((nan_array, pred)),
+            predicted,
             color="red",
             label="Predicted",
         )
         ax0.plot(
             time_cut_mpl,
-            np.concatenate((mag_before_pred, true)),
+            observed,
             color="black",
             label="Observed",
         )
-        ax0.plot(
-            time_cut_mpl,
-            smooth_with_numpy(np.concatenate((mag_before_pred, true))),
-            color="black",
-            alpha=0.25,
-            label="Smooth Obs.",
-        )
+        # ax0.plot(
+        #     time_cut_mpl,
+        #     smooth_with_numpy(predicted),
+        #     color="black",
+        #     alpha=0.25,
+        #     label="Smooth Obs.",
+        # )
         ax0.axvspan(
             time_cut_mpl[window_start],
             time_cut_mpl[window_end],
@@ -185,7 +205,7 @@ def eval_AR_emergence_with_plots(
         ### ax0.axvline(x=NOAA_first_record, color='magenta', linestyle='--')  # Adjust color, linestyle, linewidth as needed
         ### ax0.axvline(x=NOAA_second_record, color='darkmagenta', linestyle='--')
         # ax0.legend(['Observed','Predicted', 'Observed (Smooth)', 'First Prediction', r'NOAA $1^{st}$ Record', 'After Emergence'], fontsize = 7)  # Legend for each plot (optional)
-        ax0.set_ylim([-0.1, 1.1])
+        ax0.set_ylim([min(np.nanmin(predicted), np.nanmin(observed)), max(np.nanmax(predicted), np.nanmax(observed))])
         ax0.grid(
             True, which="both", axis="both", linestyle="--", linewidth=0.5
         )  # Enable the grid explicitly
@@ -440,10 +460,15 @@ def eval_AR_emergence(
     size = 9
     rid_of_top = 4
 
-    inputs, mag_flux, time = transform_data_eval([test_AR], size, rid_of_top, starting_tile, cont_int_median, maps_scaler, mag_scaler)
-
-    inputs = inputs[0]
-    mag_flux = mag_flux[0]
+    inputs, mag_flux, time = prepare_dataset_eval(
+        [test_AR],
+        size,
+        rid_of_top,
+        starting_tile,
+        cont_int_median,
+        maps_scaler,
+        mag_scaler,
+    )
 
     lstm = initialize_lstm(
         inputs, hidden_size, num_layers, num_pred, state_dict, filename, device
