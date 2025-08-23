@@ -616,7 +616,6 @@ def load_ar_data(ar_num, size, rid_of_top, starting_tile):
         trim_slice = slice(starting_tile, starting_tile + size)
         power_maps = [pm[trim_slice, :] for pm in power_maps]
         mag_flux = mag_flux[trim_slice, :]
-        print(mag_flux, starting_tile)
         intensities = intensities[trim_slice, :]
 
         stacked_maps = np.stack(power_maps, axis=1)
