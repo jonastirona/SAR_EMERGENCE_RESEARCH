@@ -24,6 +24,7 @@ import ray
 from ray.tune.search.optuna import OptunaSearch
 from ray.tune.schedulers import ASHAScheduler
 from eval import eval_AR_emergence as eval
+from functions import ConvLSTM
 
 if isVanillaLSTM:
     from functions import VanillaLSTM as LSTM
@@ -48,17 +49,16 @@ def main(config):
     start_time = time.time()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Runs on: {device}")
-
-    # Initialize wandb
-    # wandb.init(
-    #     project="LSTM,Future_11,NUM_IN_110,pred_12",
-    #     entity=os.environ.get("WANDB_ENTITY"),
-    #     config=config,
-
-    #     name=f"LSTM_pred{config['num_pred']}_r{config['rid_of_top']}_i{config['num_in']}_n{config['num_layers']}_h{config['hidden_size']}_e{config['n_epochs']}_l{config['learning_rate']:.5f}_d{config['dropout']:.2f}",
-    #     notes=f"LSTM training with lr={config['learning_rate']}, dropout={config['dropout']}",
-    # )
-
+    {
+        # Initialize wandb
+        # wandb.init(
+        #     project="LSTM,Future_11,NUM_IN_110,pred_12",
+        #     entity=os.environ.get("WANDB_ENTITY"),
+        #     config=config,
+        #     name=f"LSTM_pred{config['num_pred']}_r{config['rid_of_top']}_i{config['num_in']}_n{config['num_layers']}_h{config['hidden_size']}_e{config['n_epochs']}_l{config['learning_rate']:.5f}_d{config['dropout']:.2f}",
+        #     notes=f"LSTM training with lr={config['learning_rate']}, dropout={config['dropout']}",
+        # )
+    }
     # --- Data Loading ---
     print("Batch size:", config["batch_size"])
     print("Loading and preparing training data...")
@@ -140,68 +140,65 @@ def main(config):
         return
 
     train_loader = DataLoader(
-        TensorDataset(x_train, y_train), batch_size=config["batch_size"], shuffle=True
+        TensorDataset(x_train, y_train),
+        batch_size=config["batch_size"],
+        shuffle=True,
+        drop_last=True,
     )
     test_loader = DataLoader(
         TensorDataset(x_test, y_test), batch_size=config["batch_size"], shuffle=False
     )
 
     # --- Model & Optimizer ---
-    model = LSTM(
-        input_size,
-        config["hidden_size"],
-        config["num_layers"],
-        config["num_pred"],
-        dropout=config["dropout"],
+    model = ConvLSTM(
+        input_dim=input_size,
+        hidden_dim=[32, 64],
+        out_dim=1,
+        kernel_size=(1, 3),
+        num_layers=2,
+        device=device,
     ).to(device)
-    loss_fn = nn.MSELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=config["learning_rate"])
     scheduler = ReduceLROnPlateau(optimizer, "min", factor=0.2, patience=10)
 
     # --- Training Loop ---
     print("Starting training...")
     for epoch in range(config["n_epochs"]):
-        train_loss = train_epoch(model, train_loader, loss_fn, optimizer, device)
-        test_loss = evaluate_model(model, test_loader, loss_fn, device)
+        train_loss = train_epoch(model, train_loader, optimizer, device)
+        test_loss = evaluate_model(model, test_loader, device)
 
         lr = scheduler.get_last_lr()[0]
         scheduler.step(test_loss)
-
-        # Evaluate every 10 epochs and on the last epoch
-        scores = []
-        for AR in [11698, 11726, 13165, 13179, 13183]:
-            score = eval(
-                device,
-                AR,
-                False,
-                BASE_PATH,
-                int_median,
-                maps_scaler,
-                flux_scaler,
-                model.state_dict(),
-                **config,
+        RMSEs = []
+        for test_AR in [11698, 11726, 13165, 13179, 13183]:
+            RMSEs.append(
+                eval(
+                    device,
+                    test_AR,
+                    int_median,
+                    maps_scaler,
+                    flux_scaler,
+                    model.state_dict(),
+                    config["num_pred"],
+                    config["rid_of_top"],
+                    config["num_in"],
+                    config["n_epochs"],
+                    lr,
+                )
             )
-            scores.append(score)
-        val_rmse = float(np.mean(scores))
-
-        log_metrics = {
-            "epoch": epoch,
-            "train_loss": train_loss,
-            "test_loss": test_loss,
-            "learning_rate": float(lr),
-            "RMSE": val_rmse,
-        }
-        print(log_metrics)
+        print(
+            f"epoch {epoch:03d}  train {train_loss:.4f}  test {test_loss:.4f}  lr {optimizer.param_groups[0]['lr']:.2e} RMSE {np.mean(RMSEs)}"
+        )
         # wandb.log(log_metrics)
 
     # --- Save Model & Artifacts ---
-    model_name = f"pred{config['num_pred']}_r{config['rid_of_top']}_i{config['num_in']}_n{config['num_layers']}_h{config['hidden_size']}_e{config['n_epochs']}_lr{config['learning_rate']:.8f}_d{config['dropout']}.pth"
+    model_name = f"ConvLSTM_p{config['num_pred']}_r{config['rid_of_top']}_i{config['num_in']}_e{config['n_epochs']}_lr{config['learning_rate']:.8f}.pth"
     model_path = os.path.join(RESULTS_PATH, model_name)
     torch.save(model.state_dict(), model_path)
 
     pickle.dump(
         {"median": int_median, "maps": maps_scaler, "flux": flux_scaler},
-        open(os.path.join(RESULTS_PATH, "median_scalers.pkl"), 'wb'),
+        open(os.path.join(RESULTS_PATH, "median_scalers.pkl"), "wb"),
     )
     print(f"Model saved to {model_path}")
 
@@ -408,36 +405,30 @@ def main_w_tune(config):
 
 def parse_args():
     """Parses command-line arguments."""
-    if len(sys.argv) < 9 or len(sys.argv) > 10:
+    if len(sys.argv) < 5 or len(sys.argv) > 6:
         print(
-            "Usage: python train_one_epoch.py <num_pred> <rid_of_top> <num_in> <num_layers> <hidden_size> <n_epochs> <learning_rate> <dropout> <grid_search sample_size>"
+            "Usage: python train_one_epoch.py <num_pred> <rid_of_top> <num_in> <n_epochs> <learning_rate> <grid_search sample_size>"
         )
         sys.exit(1)
 
     try:
-        if len(sys.argv) == 9:
+        if len(sys.argv) == 6:
             config = {
                 "num_pred": int(sys.argv[1]),
                 "rid_of_top": int(sys.argv[2]),
                 "num_in": int(sys.argv[3]),
-                "num_layers": int(sys.argv[4]),
-                "hidden_size": int(sys.argv[5]),
-                "n_epochs": int(sys.argv[6]),
-                "learning_rate": float(sys.argv[7]),
-                "dropout": float(sys.argv[8]),
-                "batch_size": 64,
+                "n_epochs": int(sys.argv[4]),
+                "learning_rate": float(sys.argv[5]),
+                "batch_size": 8,
             }
         else:
             config = {
                 "num_pred": int(sys.argv[1]),
                 "rid_of_top": int(sys.argv[2]),
                 "num_in": int(sys.argv[3]),
-                "num_layers": int(sys.argv[4]),
-                "hidden_size": int(sys.argv[5]),
-                "n_epochs": int(sys.argv[6]),
-                "learning_rate": float(sys.argv[7]),
-                "dropout": float(sys.argv[8]),
-                "sample_size": int(sys.argv[9]),
+                "n_epochs": int(sys.argv[4]),
+                "learning_rate": float(sys.argv[5]),
+                "sample_size": int(sys.argv[6]),
             }
         return config
     except (ValueError, IndexError) as e:

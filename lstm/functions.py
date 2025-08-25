@@ -647,39 +647,131 @@ def process_data(ar_list, size, rid_of_top, starting_tile):
 
 
 def scale_data(
-    all_maps,
-    all_flux,
-    all_int,
-    int_median=None,
-    maps_scaler=None,
-    flux_scaler=None,
+    all_maps: np.ndarray,
+    all_flux: np.ndarray,
+    all_int: np.ndarray,
+    int_median: StandardScaler = None,
+    maps_scaler: StandardScaler = None,
+    flux_scaler: StandardScaler = None,
 ):
+    """
+    Parameters
+    ------
+    all_maps: list[np.ndarray]
+        (N, tiles, channels=4, time)
+    all_flux: list[np.ndarray]
+        (N, tiles, time)
+    all_int: list[np.ndarray]
+        (N, tiles, time)
+
+    Returns
+    ----
+    X: list[np.ndarray]
+        (N, tiles, 5, time)
+    Y: list[np.ndarray]
+        (N, tiles, time)
+    (int_median, maps_scaler, flux_scaler)
+    """
     # power maps
     maps_shape = all_maps.shape
     # if power maps scaler is already given to the function (happens in the evalution and test)
+    all_maps_transposed = np.transpose(all_maps, (0, 1, 3, 2)).reshape(
+        -1, maps_shape[2]
+    )
     if maps_scaler:
-        scaled_maps = maps_scaler.transform(all_maps.reshape(-1, 1))
+        scaled_maps = maps_scaler.transform(all_maps_transposed)
     else:
         maps_scaler = StandardScaler()
-        scaled_maps = maps_scaler.fit_transform(all_maps.reshape(-1, 1))
-    scaled_maps = scaled_maps.reshape(maps_shape)
+        scaled_maps = maps_scaler.fit_transform(all_maps_transposed)
+    scaled_maps = scaled_maps.reshape(maps_shape[0],maps_shape[1],maps_shape[3],maps_shape[2]).transpose(0, 1, 3, 2)
 
     # magnetic flux
     flux_shape = all_flux.shape
     # if flux scaler is already given to the function (happens in the evalution and test)
+    all_flux_reshaped = all_flux.reshape(-1, 1)
     if flux_scaler:
-        scaled_flux = flux_scaler.transform(all_flux.reshape(-1, 1))
+        scaled_flux = flux_scaler.transform(all_flux_reshaped)
     else:
         flux_scaler = StandardScaler()
-        scaled_flux = flux_scaler.fit_transform(all_flux.reshape(-1, 1))
+        scaled_flux = flux_scaler.fit_transform(all_flux_reshaped)
     Y = scaled_flux.reshape(flux_shape)
 
     # continuum intensity
     int_median = int_median or np.median(all_int)
-    scaled_int = all_int / int_median
+    scaled_int = all_int / int_median - 1
 
     X = np.concatenate([scaled_maps, np.expand_dims(scaled_int, axis=2)], axis=2)
     return X, Y, (int_median, maps_scaler, flux_scaler)
+
+
+def tiles_to_frames_band(inputs_tilect, flux_tilect, size):
+    """
+    inputs_tilect: (tiles, 5, T)   # your 4 power + 1 continuum
+    flux_tilect:   (tiles, T)      # flux target per tile
+    size: int                      # full grid is size x size
+    rid_of_top: int                # rows removed from top AND bottom
+    Returns:
+      X: (T, 5, H, W)
+      Y: (T, 1, H, W)
+    """
+    tiles, C, T = inputs_tilect.shape
+    H, W = 1, tiles
+    assert tiles == H * W, f"tiles={tiles} but H*W={H * W}"
+
+    X = np.zeros((T, C, H, W), dtype=np.float32)
+    Y = np.zeros((T, 1, H, W), dtype=np.float32)
+
+    # k in [0..tiles-1] enumerates rows in the middle band (top/bottom cropped)
+    # Map linear k -> (r', c) where r' is 0..H-1 in the cropped band
+    for k in range(tiles):
+        r_prime = k // W  # row inside the kept band 0..H-1
+        c = k % W
+        X[:, :, r_prime, c] = np.transpose(inputs_tilect[k], (1, 0))  # (T,5)
+        Y[:, 0, r_prime, c] = flux_tilect[k]  # (T,)
+    return X, Y  # (T,5,H,W), (T,1,H,W)
+
+
+def make_convlstm_windows(
+    all_inputs_list,
+    all_flux_list,
+    size,
+    T_in=110,
+    horizon=12,
+    stride=1,
+    x_stats=None,
+    y_stats=None,
+):
+    """
+    all_inputs_list: list of regions, each (tiles, 5, T)
+    all_flux_list:   list of regions, each (tiles, T)
+    Returns:
+      x_tensor: (N_samples, T_in, 5, H, W)
+      y_tensor: (N_samples, horizon, 1, H, W)
+    """
+    Xs, Ys = [], []
+    for inputs, flux in zip(all_inputs_list, all_flux_list):
+        X, Y = tiles_to_frames_band(
+            inputs, flux, size
+        )  # (T,5,H,W), (T,1,H,W)
+
+        # optional normalization (z-score) using train-set stats
+        if x_stats is not None:
+            mx, sx = x_stats  # shape (5,)
+            X = (X - mx[None, :, None, None]) / (sx[None, :, None, None] + 1e-6)
+        if y_stats is not None:
+            my, sy = y_stats  # shape (1,)
+            Y = (Y - my[None, :, None, None]) / (sy[None, :, None, None] + 1e-6)
+
+        T = X.shape[0]
+        for t_end in range(T_in - 1, T - horizon, stride):
+            x_seq = X[t_end - T_in + 1 : t_end + 1]  # (T_in, 5, H, W)
+            y_seq = Y[t_end + 1 : t_end + 1 + horizon]  # (horizon, 1, H, W)
+            Xs.append(x_seq)
+            Ys.append(y_seq)
+
+    x_tensor = torch.from_numpy(np.stack(Xs, 0))  # (N, T_in, 5, H, W)
+    y_tensor = torch.from_numpy(np.stack(Ys, 0))  # (N, horizon, 1, H, W)
+    return x_tensor, y_tensor
 
 
 def prepare_dataset(
@@ -699,87 +791,87 @@ def prepare_dataset(
 
     all_inputs_list, all_flux_list, median_scalers = scale_data(
         all_maps, all_flux, all_int, int_median, maps_scaler, flux_scaler
-    ) #the last three are none if train, in test they have values
+    )  # the last three are none if train, in test they have values
 
     if all_inputs_list.size == 0:
         print("all_inputs_list does not exist")
-        return None, None, 0, (None, None,None)
+        return None, None, 0, (None, None, None)
 
     # Create sequences for the LSTM
-    x_list, y_list = [], []
     tiles = size**2 - 2 * size * rid_of_top
 
-    for inputs, flux in zip(all_inputs_list, all_flux_list):
-        for tile in range(tiles):
-            x_seq, y_seq = lstm_ready(tile, size, inputs, flux, num_in, num_pred)
-            if x_seq.shape[0] > 0:
-                x_seq = torch.reshape(x_seq, (x_seq.shape[0], num_in, x_seq.shape[2]))
-                x_list.append(x_seq)
-                y_list.append(y_seq)
+    x_all, y_all = make_convlstm_windows(
+        all_inputs_list, all_flux_list, size, num_in, num_pred
+    )
 
-    if not x_list:
+    if x_all.shape[0] == 0:
         print("X_list does not exist")
-        return None, None, 0, (None, None,None)
+        return None, None, 0, (None, None, None)
 
-    x_all = torch.cat(x_list, dim=0)
-    y_all = torch.cat(y_list, dim=0)
     input_feature_size = x_all.shape[2]
-
     return x_all, y_all, input_feature_size, median_scalers
 
 
 def prepare_dataset_eval(
-    ar_list, size, rid_of_top, starting_tile, intensity_median, maps_scaler, flux_scaler
+    ar_list, size, rid_of_top, starting_tile, int_median, maps_scaler, flux_scaler
 ):
+    """Builds a complete dataset (X, y) for a list of ARs."""
     all_maps, all_flux, all_int, time = process_data(
-        ar_list, size, rid_of_top, starting_tile
+        ar_list, size, rid_of_top, size * rid_of_top
     )
 
-    all_inputs_list, all_flux_list, _ = scale_data(
-        all_maps, all_flux, all_int, intensity_median, maps_scaler, flux_scaler
-    )
+    all_inputs_list, all_flux_list, median_scalers = scale_data(
+        all_maps, all_flux, all_int, int_median, maps_scaler, flux_scaler
+    )  # the last three are none if train, in test they have values
 
     if all_inputs_list.size == 0:
-        print("Data not processed")
-        return None, None, 0
+        print("all_inputs_list does not exist")
+        return None, None, 0, (None, None, None)
 
-    # index 0 because only one ar is given in eval script
-    return all_inputs_list[0], all_flux_list[0], time[0]
-
+    input_feature_size = all_inputs_list.shape[2]
+    return all_inputs_list, all_flux_list, time, input_feature_size
 
 # --- Model Training & Evaluation ---
-def train_epoch(model, dataloader, loss_fn, optimizer, device):
-    """Runs a single training epoch."""
+
+def train_epoch(model, loader, optimizer, device, tf_prob=0.3):
+    print("Training")
     model.train()
-    total_loss = 0
-    for x, y in dataloader:
-        x, y = x.to(device), y.to(device)
+    crit = nn.SmoothL1Loss()
+    total, n = 0.0, 0
+    for x, y in loader:
+        x = x.to(device, non_blocking=True)          # (B, T_in, 5, H, W)
+        y = y.to(device, non_blocking=True)          # (B, horizon, 1, H, W)
 
         optimizer.zero_grad()
-        outputs = model(x)
-        loss = loss_fn(outputs, y)
+        use_tf = torch.rand(()).item() < tf_prob
+        tf_seq = y if use_tf else None
+
+        _, yhat, _ = model(x, future_steps=y.shape[1], teacher_forcing_seq=tf_seq)
+        loss = crit(yhat, y)
         loss.backward()
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+        nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         optimizer.step()
 
-        total_loss += loss.item()
+        bs = x.size(0)
+        total += loss.item() * bs
+        n += bs
+    return total / max(n, 1)
 
-    return total_loss / len(dataloader)
-
-
-def evaluate_model(model, dataloader, loss_fn, device):
-    """Evaluates the model on a given dataset."""
+@torch.no_grad()
+def evaluate_model(model, loader, device):
+    print("Evaluating")
     model.eval()
-    total_loss = 0
-    with torch.no_grad():
-        for x, y in dataloader:
-            x, y = x.to(device), y.to(device)
-            preds = model(x)
-            loss = loss_fn(preds, y)
-            total_loss += loss.item()
-
-    return total_loss / len(dataloader)
-
+    crit = nn.SmoothL1Loss()
+    total, n = 0.0, 0
+    for x, y in loader:
+        x = x.to(device, non_blocking=True)
+        y = y.to(device, non_blocking=True)
+        _, yhat, _ = model(x, future_steps=y.shape[1], teacher_forcing_seq=None)
+        loss = crit(yhat, y)
+        bs = x.size(0)
+        total += loss.item() * bs
+        n += bs
+    return total / max(n, 1)
 
 def get_params(state_dict, path):
     pth_files = glob.glob(
@@ -914,3 +1006,286 @@ class PlateauStopper(tune.stopper.Stopper):
     def stop_all(self) -> bool:
         """This function is used to stop all trials at once. We don't need it here."""
         return False
+
+
+class ConvLSTMCell(nn.Module):
+    def __init__(self, input_dim, hidden_dim, kernel_size, bias, device):
+        """
+        Initialize ConvLSTM cell.
+
+        Parameters
+        ----------
+        input_dim: int
+            Number of channels of input tensor.
+        hidden_dim: int
+            Number of channels of hidden state.
+        kernel_size: (int, int)
+            Size of the convolutional kernel.
+        bias: bool
+            Whether or not to add the bias.
+        """
+
+        super(ConvLSTMCell, self).__init__()
+
+        self.input_dim = input_dim
+        self.hidden_dim = hidden_dim
+
+        self.kernel_size = kernel_size
+        self.padding = kernel_size[0] // 2, kernel_size[1] // 2
+        self.bias = bias
+
+        self.conv = nn.Conv2d(
+            in_channels=self.input_dim + self.hidden_dim,
+            out_channels=4 * self.hidden_dim,
+            kernel_size=self.kernel_size,
+            padding=self.padding,
+            bias=self.bias,
+            device=device,
+        )
+        with torch.no_grad():
+            if self.conv.bias is not None:
+                # gates order: i, f, o, g
+                start = self.hidden_dim
+                end = 2 * self.hidden_dim
+                self.conv.bias[start:end].fill_(1.0)
+
+    def forward(self, input_tensor, cur_state: tuple[torch.Tensor, torch.Tensor]):
+        h_cur, c_cur = cur_state
+
+        combined = torch.cat(
+            [input_tensor, h_cur], dim=1
+        )  # concatenate along channel axis
+
+        combined_conv = self.conv(combined)
+        cc_i, cc_f, cc_o, cc_g = torch.chunk(combined_conv, 4, dim=1)
+        i = torch.sigmoid(cc_i)
+        f = torch.sigmoid(cc_f)
+        o = torch.sigmoid(cc_o)
+        g = torch.tanh(cc_g)
+
+        c_next = f * c_cur + i * g
+        h_next = o * torch.tanh(c_next)
+
+        return h_next, c_next
+
+    def init_hidden(self, batch_size, image_size, dtype=None):
+        height, width = image_size
+        return (
+            torch.zeros(
+                batch_size,
+                self.hidden_dim,
+                height,
+                width,
+                device=self.conv.weight.device,
+                dtype=dtype,
+            ),
+            torch.zeros(
+                batch_size,
+                self.hidden_dim,
+                height,
+                width,
+                device=self.conv.weight.device,
+                dtype=dtype,
+            ),
+        )
+
+
+class ConvLSTM(nn.Module):
+    """
+
+    Parameters:
+        input_dim: Number of channels in input
+        hidden_dim: Number of hidden channels
+        kernel_size: Size of kernel in convolutions
+        num_layers: Number of LSTM layers stacked on each other
+        batch_first: Whether or not dimension 0 is the batch or not
+        bias: Bias or no bias in Convolution
+        return_all_layers: Return the list of computations for all layers
+        Note: Will do same padding.
+
+    Input:
+        A tensor of size B, T, C, H, W or T, B, C, H, W
+    Output:
+        A tuple of two lists of length num_layers (or length 1 if return_all_layers is False).
+            0 - layer_output_list is the list of lists of length T of each output
+            1 - last_state_list is the list of last states
+                    each element of the list is a tuple (h, c) for hidden state and memory
+    Example:
+        >> x = torch.rand((32, 10, 64, 128, 128))
+        >> convlstm = ConvLSTM(64, 16, 3, 1, True, True, False)
+        >> _, last_states = convlstm(x)
+        >> h = last_states[0][0]  # 0 for layer index, 0 for h index
+    """
+
+    def __init__(
+        self,
+        input_dim: int,
+        hidden_dim: list[int],
+        out_dim: int,
+        kernel_size: tuple[int, int] | list[tuple[int, int]],
+        num_layers: int,
+        device: torch.device,
+        batch_first=True,
+        bias=True,
+        return_all_layers=False,
+    ):
+        super(ConvLSTM, self).__init__()
+
+        self._check_kernel_size_consistency(kernel_size)
+
+        # Make sure that both `kernel_size` and `hidden_dim` are lists having len == num_layers
+        kernel_size = self._extend_for_multilayer(kernel_size, num_layers)
+        hidden_dim = self._extend_for_multilayer(hidden_dim, num_layers)
+        if not len(kernel_size) == len(hidden_dim) == num_layers:
+            raise ValueError("Inconsistent list length.")
+
+        self.input_dim = input_dim
+        self.hidden_dim = hidden_dim
+        self.kernel_size = kernel_size
+        self.out_channels = out_dim
+        self.num_layers = num_layers
+        self.batch_first = batch_first
+        self.bias = bias
+        self.return_all_layers = return_all_layers
+
+        cell_list = []
+        for i in range(0, self.num_layers):
+            cur_input_dim = self.input_dim if i == 0 else self.hidden_dim[i - 1]
+
+            cell_list.append(
+                ConvLSTMCell(
+                    input_dim=cur_input_dim,
+                    hidden_dim=self.hidden_dim[i],
+                    kernel_size=self.kernel_size[i],
+                    bias=self.bias,
+                    device=device,
+                )
+            )
+
+        self.cell_list: nn.ModuleList[ConvLSTMCell] = nn.ModuleList(cell_list)
+        self.head = nn.Conv2d(hidden_dim[-1], out_dim, kernel_size=1)
+        self.feedback = (
+            nn.Identity()
+            if out_dim == input_dim
+            else nn.Conv2d(out_dim, input_dim, kernel_size=1, bias=True)
+        )
+
+    def forward(
+        self,
+        input_tensor: torch.Tensor,
+        future_steps: int = 12,
+        teacher_forcing_seq=None,
+    ):
+        """
+
+        Parameters
+        ----------
+        input_tensor: todo
+            5-D Tensor either of shape (t, b, c, h, w) or (b, t, c, h, w)
+        hidden_state: todo
+            None. todo implement stateful
+
+        Returns
+        -------
+        last_state_list, layer_output
+        """
+        if not self.batch_first:
+            # (t, b, c, h, w) -> (b, t, c, h, w)
+            input_tensor = input_tensor.permute(1, 0, 2, 3, 4)
+
+        b, t_in, c_in, hei, wi = input_tensor.shape
+
+        # Since the init is done in forward. Can send image size here
+        hidden_state = self._init_hidden(
+            batch_size=b, image_size=(hei, wi), dtype=input_tensor.dtype
+        )
+
+        layer_output_list = []
+        last_state_list = []
+
+        seq_len = t_in
+        cur_layer_input = input_tensor
+
+        for layer_idx in range(self.num_layers):
+            h_l, c_l = hidden_state[layer_idx]
+            output_inner = []
+            for t in range(seq_len):
+                h_l, c_l = self.cell_list[layer_idx](
+                    input_tensor=cur_layer_input[:, t, :, :, :], cur_state=[h_l, c_l]
+                )
+                output_inner.append(h_l)
+
+            layer_output = torch.stack(output_inner, dim=1)
+            cur_layer_input = layer_output
+
+            layer_output_list.append(layer_output)
+            last_state_list.append([h_l, c_l])
+
+        if not self.return_all_layers:
+            layer_output_list = layer_output_list[-1:]
+
+        # Map encoded time steps to output (optional but handy for aux loss)
+        top_enc = layer_output_list[-1]  # (b, t_in, hidden_ch, h, w)
+        bt, tt, hc, hh, ww = top_enc.shape
+        preds_in = self.head(top_enc.reshape(bt * tt, hc, hh, ww)).reshape(
+            bt, tt, self.out_channels, hh, ww
+        )
+
+        # ------------ DECODER (autoregressive for future steps) ------------
+        preds_future = []
+        # Start from last *actual* input frame unless teacher forcing provides the first one
+        decoder_input = input_tensor[:, -1, :, :, :]  # (b, c_in, h, w)
+
+        # We'll keep and update states from the encoder's end
+        states = last_state_list
+
+        for step in range(future_steps):
+            x = decoder_input
+            for layer_idx in range(self.num_layers):
+                h_l, c_l = states[layer_idx]
+                h_l, c_l = self.cell_list[layer_idx](
+                    input_tensor=x, cur_state=[h_l, c_l]
+                )
+                states[layer_idx] = [h_l, c_l]
+                x = h_l
+
+            out = self.head(x)  # (b, out_c, h, w)
+            preds_future.append(out.unsqueeze(1))
+            if teacher_forcing_seq is not None:
+                # teacher forcing given in OUTPUT space
+                decoder_input = self.feedback(teacher_forcing_seq[:, step])  # -> (B, C_in, H, W)
+            else:
+                decoder_input = self.feedback(out)    
+
+        if future_steps > 0:
+            preds_future = torch.cat(preds_future, dim=1)  # (b, future, out_c, h, w)
+        else:
+            preds_future = top_enc.new_zeros((b, 0, self.out_channels, hei, wi))
+
+        return preds_in, preds_future, last_state_list
+
+    def _init_hidden(self, batch_size, image_size, dtype=None):
+        init_states = []
+        for i in range(self.num_layers):
+            init_states.append(
+                self.cell_list[i].init_hidden(batch_size, image_size, dtype=dtype)
+            )
+        return init_states
+
+    @staticmethod
+    def _check_kernel_size_consistency(kernel_size):
+        if not (
+            isinstance(kernel_size, tuple)
+            or (
+                isinstance(kernel_size, list)
+                and all([isinstance(elem, tuple) for elem in kernel_size])
+            )
+        ):
+            raise ValueError("`kernel_size` must be tuple or list of tuples")
+
+    @staticmethod
+    def _extend_for_multilayer(param, num_layers):
+        if not isinstance(param, list):
+            param = [param] * num_layers
+        return param
+

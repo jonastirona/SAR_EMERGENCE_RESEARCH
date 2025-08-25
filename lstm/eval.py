@@ -9,7 +9,8 @@ from functions import (
     prepare_dataset_eval,
     get_params,
     AR_defs,
-    isVanillaLSTM,
+    make_convlstm_windows,
+    ConvLSTM,
     RESULTS_PATH,
 )
 from sklearn.metrics import mean_squared_error
@@ -24,24 +25,25 @@ import os
 import pickle
 from collections import OrderedDict
 from sklearn.preprocessing import StandardScaler
-from  datetime import datetime
-
-if isVanillaLSTM:
-    from functions import VanillaLSTM as LSTM
-else:
-    from functions import LSTM as LSTM
+from datetime import datetime
+import re
 
 warnings.filterwarnings("ignore")
 
 
-def initialize_lstm(
-    inputs, hidden_size, num_layers, num_pred, state_dict, filename, device
-):
-    input_size = np.shape(inputs)[1]
-
+def initialize_lstm(input_size, state_dict, filename, device):
     # Initialize the LSTM and move it to GPU
-    lstm = LSTM(input_size, hidden_size, num_layers, num_pred).to(device)
-    saved_state_dict = state_dict or torch.load(filename, map_location=device)
+    lstm = ConvLSTM(
+        input_dim=input_size,
+        hidden_dim=[32, 64],
+        out_dim=1,
+        kernel_size=(1, 3),
+        num_layers=2,
+        device=device,
+    ).to(device)
+    saved_state_dict = state_dict or torch.load(
+        os.path.join(RESULTS_PATH, filename), map_location=device
+    )
     new_state_dict = OrderedDict()
     for k, v in saved_state_dict.items():
         name = k[7:] if k.startswith("module.") else k  # remove 'module.' prefix
@@ -56,29 +58,25 @@ def eval_AR_emergence_with_plots(
     AR_list,
     save_fig,
     path,
+    filename: str,
     state_dict=None,
     num_pred=None,
     rid_of_top=None,
     num_in=None,
-    num_layers=None,
-    hidden_size=None,
-    n_epochs=None,
-    learning_rate=None,
-    dropout=None,
 ):
-    filename = None
-    if not state_dict:
-        (
-            num_pred,
-            rid_of_top,
-            num_in,
-            num_layers,
-            hidden_size,
-            n_epochs,
-            learning_rate,
-            dropout,
-            filename,
-        ) = get_params(state_dict, path)
+    matches = re.findall(
+        r"ConvLSTM_p(\d+)_r(\d+)_i(\d+)_e(\d+)_lr([0-9.]+)\.pth",
+        filename,
+    )  # Extract numbers from the filename
+    (
+        num_pred,
+        rid_of_top,
+        num_in,
+        n_epochs,
+        learning_rate,
+    ) = [
+        float(val) if i == 4 else int(val) for i, val in enumerate(matches[0])
+    ]  # Unpack the matched values into variables
     # print(
     #     f"Extracted from filename: Time Window: {num_pred}, Rid of Top: {rid_of_top}, Number of Inputs: {num_in}, Number of Layers: {num_layers}, Hidden Size: {hidden_size}, Number of Epochs: {n_epochs}, Learning Rate: {learning_rate}"
     # )  # Print extracted values for confirmation
@@ -96,7 +94,7 @@ def eval_AR_emergence_with_plots(
         if not before_plot:
             return
 
-        inputs, mag_flux, time = prepare_dataset_eval(
+        inputs_list, flux_list, time_list, inputs_size = prepare_dataset_eval(
             [test_AR],
             size,
             rid_of_top,
@@ -106,9 +104,7 @@ def eval_AR_emergence_with_plots(
             median_scalers["flux"],
         )
 
-        lstm = initialize_lstm(
-            inputs, hidden_size, num_layers, num_pred, state_dict, filename, device
-        )
+        model = initialize_lstm(inputs_size, state_dict, filename, device)
         # Loop to create 8 plots
         future = 11
         all_metrics = []
@@ -123,25 +119,32 @@ def eval_AR_emergence_with_plots(
         main_gs = gridspec.GridSpec(
             4, 2, figure=fig
         )  # Create a GridSpec with 4 rows and 2 columns
+
+        time = time_list[0]
+        ### Validation
+        X_test, y_test = make_convlstm_windows(
+            inputs_list, flux_list, size, rid_of_top, num_in, num_pred
+        )  # ,min_p,max_p,min_i,max_i)
+
+        with torch.no_grad():
+            X_test = X_test.to(device)
+            print("x_test shape:", X_test.shape)
+            preds_in, preds_future, _ = model(X_test, future_steps=12)
+
+        print("all predictions shape:", preds_future.shape)
+        preds = preds_future[:, future].detach().cpu().numpy()
+        print("pred:", preds.shape)
+        print("y_test:", y_test.shape)
+        trues = y_test[:, future].numpy()
+
         for i in range(7):
             print()
             print("Tile {}".format(starting_tile + i))
-
-            ### Validation
+            inputs = inputs_list[0]
+            mag_flux = flux_list[0]
             print("Inputs shape;", inputs.shape, "Mag flux shape:", mag_flux.shape)
-            X_test, y_test = lstm_ready(
-                1 + i, size, inputs, mag_flux, num_in, num_pred
-            )  # ,min_p,max_p,min_i,max_i)
-            X_test = X_test.to(device)
-            print("x_test shape:", X_test.shape)
-
-            all_predictions = lstm(X_test)
-            print("all predictions shape:", all_predictions.shape)
-            pred = all_predictions[:, future].detach().cpu().numpy()
-            print("pred:", pred.shape)
-            print("y_test:", y_test.shape)
-            true = y_test[:, future].numpy()
-
+            pred = preds[:, 0, 0, i + 1]
+            true = trues[:, 0, 0, i + 1]
             last_known_idx = (
                 np.shape(mag_flux[1 + i, :])[0] - np.shape(true)[0] - 1
             )  # the index in the timeline before we start predicting
@@ -345,7 +348,7 @@ def eval_AR_emergence_with_plots(
             # print(f"RMSLE: {metrics[3]}")
             # print(f"R-squared: {metrics[4]}")
             diff: datetime = pred_emergence - true_emergence
-            AR_emergences.append((diff.days,diff.seconds))
+            AR_emergences.append((diff.days, diff.seconds))
         all_emergences.append(AR_emergences)
 
         # Last subplot with continuum intensities
@@ -432,43 +435,25 @@ def eval_AR_emergence_with_plots(
         plt.savefig(save_path)
         print("Results saved at: " + save_path)
         plt.close()
-    a = plt.table(cellText=all_emergences, rowLabels=[1,2,3,4,5])
+    a = plt.table(cellText=all_emergences, rowLabels=[1, 2, 3, 4, 5])
     plt.show()
+
 
 def eval_AR_emergence(
     device,
     test_AR,
-    save_fig,
-    path,
-    cont_int_median=None,
+    int_median=None,
     maps_scaler: StandardScaler = None,
-    mag_scaler: StandardScaler = None,
+    flux_scaler: StandardScaler = None,
     state_dict=None,
     num_pred=None,
     rid_of_top=None,
     num_in=None,
-    num_layers=None,
-    hidden_size=None,
     n_epochs=None,
     learning_rate=None,
-    dropout=None,
-    batch_size=None,
 ):
-    filename = None
-    if not state_dict:
-        (
-            num_pred,
-            rid_of_top,
-            num_in,
-            num_layers,
-            hidden_size,
-            n_epochs,
-            learning_rate,
-            dropout,
-            filename,
-        ) = get_params(state_dict, path)
     print(
-        f"Extracted from filename: Time Window: {num_pred}, Rid of Top: {rid_of_top}, Number of Inputs: {num_in}, Number of Layers: {num_layers}, Hidden Size: {hidden_size}, Number of Epochs: {n_epochs}, Learning Rate: {learning_rate}"
+        f"Extracted from filename: Time Window: {num_pred}, Rid of Top: {rid_of_top}, Number of Inputs: {num_in},  Number of Epochs: {n_epochs}, Learning Rate: {learning_rate}"
     )  # Print extracted values for confirmation
 
     before_plot, num_in, _, _, starting_tile, window_start = AR_defs(test_AR)
@@ -479,46 +464,55 @@ def eval_AR_emergence(
     size = 9
     rid_of_top = 4
 
-    inputs, mag_flux, time = prepare_dataset_eval(
-        [test_AR],
-        size,
-        rid_of_top,
-        starting_tile,
-        cont_int_median,
-        maps_scaler,
-        mag_scaler,
-    )
+    inputs_list, flux_list, time_list, inputs_size = prepare_dataset_eval(
+            [test_AR],
+            size,
+            rid_of_top,
+            starting_tile,
+            int_median,
+            maps_scaler,
+            flux_scaler
+        )
 
-    lstm = initialize_lstm(
-        inputs, hidden_size, num_layers, num_pred, state_dict, filename, device
-    )
-
+    model = initialize_lstm(inputs_size, state_dict, '', device)
     # Loop to create 8 plots
     future = 11
     all_metrics = []
+    threshold = 0.01  # -0.006
+    sust_time = 4
     window_end = window_start + 72
+    AR_emergences = []
+    time = time_list[0]
+    ### Validation
+    X_test, y_test = make_convlstm_windows(
+        inputs_list, flux_list, size, rid_of_top, num_in, num_pred
+    )  # ,min_p,max_p,min_i,max_i)
+
     with torch.no_grad():
-        for i in range(7):
-            # print("Tile {}".format(1 + i))
+        X_test = X_test.to(device)
+        print("x_test shape:", X_test.shape)
+        preds_in, preds_future, _ = model(X_test, future_steps=12)
 
-            ### Validation
-            X_test, y_test = lstm_ready(
-                1 + i, size, inputs, mag_flux, num_in, num_pred
-            )  # ,min_p,max_p,min_i,max_i)
-            X_test = X_test.to(device)
+    print("all predictions shape:", preds_future.shape)
+    preds = preds_future[:, future].detach().cpu().numpy()
+    print("pred:", preds.shape)
+    print("y_test:", y_test.shape)
+    trues = y_test[:, future].numpy()
 
-            all_predictions = lstm(X_test)
-            pred = all_predictions[:, future].detach().cpu().numpy()
-            true = y_test[:, future].numpy()
-            last_known_idx = (
-                np.shape(mag_flux[1 + i, :])[0] - np.shape(true)[0] - 1
-            )  # the index in the timeline before we start predicting
-            pred = recalibrate(pred, mag_flux[1 + i, last_known_idx])
-            # Evaluation metrics
-            metrics = calculate_metrics(
-                true[window_start:window_end], pred[window_start:window_end]
-            )
-            all_metrics.append(metrics)
+    for i in range(7):
+        inputs = inputs_list[0]
+        mag_flux = flux_list[0]
+        pred = preds[:, 0, 0, i + 1]
+        true = trues[:, 0, 0, i + 1]
+        last_known_idx = (
+            np.shape(mag_flux[1 + i, :])[0] - np.shape(true)[0] - 1
+        )  # the index in the timeline before we start predicting
+        pred = recalibrate(pred, mag_flux[1 + i, last_known_idx])
+        # Evaluation metrics
+        metrics = calculate_metrics(
+            true[window_start:window_end], pred[window_start:window_end]
+        )
+        all_metrics.append(metrics)
 
     # Print the metrics at the bottom
     all_metrics_np = np.array(
@@ -546,5 +540,9 @@ if __name__ == "__main__":
     print("Runs on: {}".format(device), " / Using", torch.cuda.device_count(), "GPUs!")
 
     eval_AR_emergence_with_plots(
-        device, [11698, 11726, 13165, 13179, 13183], True, "../"
+        device,
+        [11698, 11726, 13165, 13179, 13183],
+        True,
+        "../",
+        "ConvLSTM_p12_r4_i110_e30_lr0.00010000.pth",
     )
