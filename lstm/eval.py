@@ -9,6 +9,7 @@ from functions import (
     process_data,
     get_params,
     AR_defs,
+    load_ar_data,
     isVanillaLSTM,
 )
 from sklearn.metrics import mean_squared_error
@@ -64,18 +65,17 @@ def eval_AR_emergence_with_plots(
     dropout=None,
 ):
     filename = None
-    if not state_dict:
-        (
-            num_pred,
-            rid_of_top,
-            num_in,
-            num_layers,
-            hidden_size,
-            n_epochs,
-            learning_rate,
-            dropout,
-            filename,
-        ) = get_params(state_dict, path)
+    (
+        num_pred,
+        rid_of_top,
+        num_in,
+        num_layers,
+        hidden_size,
+        n_epochs,
+        learning_rate,
+        dropout,
+        filename,
+    ) = get_params(path)
     # print(
     #     f"Extracted from filename: Time Window: {num_pred}, Rid of Top: {rid_of_top}, Number of Inputs: {num_in}, Number of Layers: {num_layers}, Hidden Size: {hidden_size}, Number of Epochs: {n_epochs}, Learning Rate: {learning_rate}"
     # )  # Print extracted values for confirmation
@@ -93,10 +93,14 @@ def eval_AR_emergence_with_plots(
         size = 9
         rid_of_top = 4
 
-        inputs, mag_flux, time = process_data(test_AR, size, rid_of_top, starting_tile)
+        cont_int_scale = (-12419.59375, 3119.267578125)
+        flux_scale = (-78.26012229919434, 490.13057708740234)
+        m_scale = (-365079096.0, 118424064.0)
+        maps, flux, cont_int, time = load_ar_data(test_AR, size, rid_of_top, starting_tile)
+        inputs, mag_flux = process_data(maps, flux, cont_int, m_scale, flux_scale, cont_int_scale)
         lstm = initialize_lstm(
             inputs, hidden_size, num_layers, num_pred, state_dict, filename, device
-        )
+    )
 
         # Assuming prediction, y_test_tensors, ARs, learning_rate, and n_epochs are already defined
         fig = plt.figure(figsize=(12, 10))  # Adjust the figure size if necessary
@@ -116,7 +120,7 @@ def eval_AR_emergence_with_plots(
 
             ### Validation
             print("Inputs shape;", inputs.shape, "Mag flux shape:", mag_flux.shape)
-            X_test, y_test = lstm_ready(
+            X_test, y_test, _ = lstm_ready(
                 1 + i, size, inputs, mag_flux, num_in, num_pred
             )  # ,min_p,max_p,min_i,max_i)
             X_test = X_test.to(device)
@@ -463,7 +467,7 @@ def eval_AR_emergence(
             learning_rate,
             dropout,
             filename,
-        ) = get_params(state_dict, path)
+        ) = get_params(path)
     print(
         f"Extracted from filename: Time Window: {num_pred}, Rid of Top: {rid_of_top}, Number of Inputs: {num_in}, Number of Layers: {num_layers}, Hidden Size: {hidden_size}, Number of Epochs: {n_epochs}, Learning Rate: {learning_rate}"
     )  # Print extracted values for confirmation
@@ -475,8 +479,11 @@ def eval_AR_emergence(
     # Define the AR information
     size = 9
     rid_of_top = 4
-
-    inputs, mag_flux, time = process_data(test_AR, size, rid_of_top, starting_tile)
+    cont_int_scale = (-12419.59375, 3119.267578125)
+    flux_scale = (-78.26012229919434, 490.13057708740234)
+    m_scale = (-365079096.0, 118424064.0)
+    maps, flux, cont_int, time = load_ar_data(test_AR, size, rid_of_top, starting_tile)
+    inputs, mag_flux = process_data(maps, flux, cont_int, m_scale, flux_scale, cont_int_scale)
     lstm = initialize_lstm(
         inputs, hidden_size, num_layers, num_pred, state_dict, filename, device
     )
@@ -491,7 +498,7 @@ def eval_AR_emergence(
         # print("Tile {}".format(1 + i))
 
         ### Validation
-        X_test, y_test = lstm_ready(
+        X_test, y_test, _ = lstm_ready(
             1 + i, size, inputs, mag_flux, num_in, num_pred
         )  # ,min_p,max_p,min_i,max_i)
         X_test = X_test.to(device)

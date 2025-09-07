@@ -41,6 +41,7 @@ warnings.filterwarnings("ignore")
 os.makedirs(RESULTS_PATH, exist_ok=True)  # Ensure the results directory exists
 
 
+# --- Main Execution ---
 def main(config):
     """Main function to run the experiment."""
     start_time = time.time()
@@ -48,15 +49,17 @@ def main(config):
     print(f"Runs on: {device}")
 
     # Initialize wandb
-    wandb.init(
-        project=f"{model_type},change_eval_tiles",
-        entity=os.environ.get("WANDB_ENTITY"),
-        config=config,
-        name=f"{model_type}_pred{config['num_pred']}_r{config['rid_of_top']}_i{config['num_in']}_n{config['num_layers']}_h{config['hidden_size']}_e{config['n_epochs']}_l{config['learning_rate']:.5f}_d{config['dropout']:.2f}",
-        notes=f"{model_type} training with lr={config['learning_rate']}, dropout={config['dropout']}",
-    )
+    # wandb.init(
+    #     project="LSTM,Future_11,NUM_IN_110,pred_12",
+    #     entity=os.environ.get("WANDB_ENTITY"),
+    #     config=config,
+
+    #     name=f"LSTM_pred{config['num_pred']}_r{config['rid_of_top']}_i{config['num_in']}_n{config['num_layers']}_h{config['hidden_size']}_e{config['n_epochs']}_l{config['learning_rate']:.5f}_d{config['dropout']:.2f}",
+    #     notes=f"LSTM training with lr={config['learning_rate']}, dropout={config['dropout']}",
+    # )
 
     # --- Data Loading ---
+    print("Batch size:", config["batch_size"])
     print("Loading and preparing training data...")
     train_ars = [
         11130,
@@ -101,19 +104,17 @@ def main(config):
         13085,
         13098,
     ]
-    x_train, y_train, _, input_size, m_scale, flux_scale, cont_int_scale = (
-        prepare_dataset(
-            train_ars,
-            9,
-            config["rid_of_top"],
-            config["num_in"],
-            config["num_pred"],
-        )
+    x_train, y_train,_, input_size, m_scale, flux_scale, cont_int_scale = prepare_dataset(
+        train_ars,
+        9,
+        config["rid_of_top"],
+        config["num_in"],
+        config["num_pred"],
     )
 
     print("Loading and preparing test data...")
     val_ars = [11462, 11521, 11907, 12219, 12271, 12275, 12567]
-    x_val, y_val, last_all, _, _, _, _ = prepare_dataset(
+    x_val, y_val, last_val, _, _, _, _ = prepare_dataset(
         val_ars,
         9,
         config["rid_of_top"],
@@ -132,7 +133,7 @@ def main(config):
         TensorDataset(x_train, y_train), batch_size=config["batch_size"], shuffle=True
     )
     val_loader = DataLoader(
-        TensorDataset(x_val, y_val, last_all), batch_size=config["batch_size"], shuffle=False
+        TensorDataset(x_val, y_val, last_val), batch_size=config["batch_size"], shuffle=False
     )
 
     # --- Model & Optimizer ---
@@ -146,7 +147,6 @@ def main(config):
     loss_fn = nn.MSELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=config["learning_rate"])
     scheduler = ReduceLROnPlateau(optimizer, "min", factor=0.2, patience=10)
-    model_name = f"{model_type}pred{config['num_pred']}_r{config['rid_of_top']}_i{config['num_in']}_n{config['num_layers']}_h{config['hidden_size']}_e{config['n_epochs']}_lr{config['learning_rate']:.8f}_d{config['dropout']}.pth"
 
     # --- Training Loop ---
     print("Starting training...")
@@ -157,6 +157,13 @@ def main(config):
         lr = scheduler.get_last_lr()[0]
         scheduler.step(val_rmse)
 
+        # Evaluate every 10 epochs and on the last epoch
+        # scores = []
+        # for AR in [11698, 11726, 13165, 13179, 13183]:
+        #     score = eval(device, AR, False, BASE_PATH, model.state_dict(), **config)
+        #     scores.append(score)
+        # val_rmse = float(np.mean(scores))
+
         log_metrics = {
             "epoch": epoch,
             "train_loss": train_loss,
@@ -164,24 +171,8 @@ def main(config):
             "learning_rate": float(lr),
             "RMSE": val_rmse,
         }
-        # if val_rmse <= 0.07:
-        #     result = BASE_PATH + f"SAR_EMERGENCE_RESEARCH/lstm/results/{val_rmse:.8f}"
-        #     os.makedirs(result, exist_ok=True)  # Ensure the results directory exists
-        #     model_path = os.path.join(result, model_name)
-        #     torch.save(model.state_dict(), model_path)
-        #     print(f"Model saved to {model_path}")
-
-        #     model_artifact = wandb.Artifact(
-        #         name=f"RMSE-{val_rmse:.8f}-{model_type}-model-{wandb.run.id}",
-        #         type="model",
-        #         description=f"{model_type} Model for SAR emergence prediction",
-        #         metadata=config,
-        #     )
-        #     model_artifact.add_file(model_path)
-        #     wandb.log_artifact(model_artifact)
-        # print(log_metrics)
-        wandb.log(log_metrics)
-        tune.report(log_metrics)
+        print(log_metrics)
+        # wandb.log(log_metrics)
 
     # --- Save Model & Artifacts ---
     model_name = f"pred{config['num_pred']}_r{config['rid_of_top']}_i{config['num_in']}_n{config['num_layers']}_h{config['hidden_size']}_e{config['n_epochs']}_lr{config['learning_rate']:.8f}_d{config['dropout']}.pth"
@@ -189,28 +180,40 @@ def main(config):
     torch.save(model.state_dict(), model_path)
     print(f"Model saved to {model_path}")
 
-    model_artifact = wandb.Artifact(
-        name=f"lstm-model-{wandb.run.id}",
-        type="model",
-        description="LSTM Model for SAR emergence prediction",
-        metadata=config,
-    )
-    model_artifact.add_file(model_path)
-    wandb.log_artifact(model_artifact)
+    # model_artifact = wandb.Artifact(
+    #     name=f"lstm-model-{wandb.run.id}",
+    #     type="model",
+    #     description="LSTM Model for SAR emergence prediction",
+    #     metadata=config,
+    # )
+    # model_artifact.add_file(model_path)
+    # wandb.log_artifact(model_artifact)
 
     end_time = time.time()
     print(f"Elapsed time: {(end_time - start_time) / 60:.2f} minutes")
-    wandb.finish()
+    # wandb.finish()
 
 
 def parse_args():
     """Parses command-line arguments."""
-    if len(sys.argv) != 2:
-        print("Usage: python train_one_epoch.py <grid_search sample_size>")
+    if len(sys.argv) != 10:
+        print(
+            "Usage: python train_one_epoch.py <num_pred> <rid_of_top> <num_in> <num_layers> <hidden_size> <n_epochs> <learning_rate> <dropout> <batch_size>"
+        )
         sys.exit(1)
 
     try:
-        config = {"sample_size": int(sys.argv[1])}
+        config = {
+            "num_pred": int(sys.argv[1]),
+            "rid_of_top": int(sys.argv[2]),
+            "num_in": int(sys.argv[3]),
+            "num_layers": int(sys.argv[4]),
+            "hidden_size": int(sys.argv[5]),
+            "n_epochs": int(sys.argv[6]),
+            "learning_rate": float(sys.argv[7]),
+            "dropout": float(sys.argv[8]),
+            "batch_size": int(sys.argv[9]),
+        }
         return config
     except (ValueError, IndexError) as e:
         print(f"Error parsing arguments: {e}")
@@ -221,39 +224,4 @@ if __name__ == "__main__":
     # For this refactoring to be fully functional, you must provide
     # the implementations for these functions from your 'functions.py' file.
     config = parse_args()
-    search_space = {
-        "num_pred": tune.choice([12]),
-        "rid_of_top": tune.choice([4]),
-        "num_in": tune.choice([110]),
-        "num_layers": tune.choice([1]),
-        "hidden_size": tune.choice([10, 32, 64, 128, 150]),
-        "n_epochs": tune.choice([500]),
-        "learning_rate": tune.loguniform(1e-5, 1e-3),
-        "dropout": tune.choice([0, 0.01, 0.1]),
-        "batch_size": tune.choice([4, 8, 16, 32]),
-    }
-    algo = OptunaSearch()
-    scheduler = ASHAScheduler(max_t=500, grace_period=10, reduction_factor=3)
-
-    custom_stopper = PlateauStopper(
-        "RMSE", min_epochs=50, patience=10, min_improvement_percent=0.5
-    )
-
-    ray.init(num_cpus=4, num_gpus=2, include_dashboard=False)
-    tuner = tune.Tuner(  # ③
-        tune.with_resources(main, {"gpu": 1}),
-        tune_config=tune.TuneConfig(
-            metric="RMSE",
-            mode="min",
-            search_alg=algo,
-            scheduler=scheduler,
-            num_samples=config["sample_size"],
-            trial_dirname_creator=lambda trial: str(trial.trial_id),
-        ),
-        run_config=tune.RunConfig(
-            stop=custom_stopper,
-        ),
-        param_space=search_space,
-    )
-    results = tuner.fit()
-    print("Best config is:", results.get_best_result().config)
+    main(config)

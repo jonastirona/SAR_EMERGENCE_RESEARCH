@@ -25,6 +25,6 @@ source sar/bin/activate
 pip -V
 echo 'Done loading environment'
 
-python -u lstm/train_per_epoch.py 6 4 220 5 140 500 0.0173901 0.1 $1
+python -u lstm/grid_seach.py $1
 
 EOT

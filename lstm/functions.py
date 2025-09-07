@@ -27,146 +27,7 @@ DATA_PATH = BASE_PATH + "SAR_EMERGENCE_RESEARCH/data"
 RESULTS_PATH = BASE_PATH + "SAR_EMERGENCE_RESEARCH/lstm/results"
 
 
-# Splitting Image Function
-def split_image(
-    image, size
-):  # Splits a given image of size 512 by 512 into 9 equal-size square pieces. Returns a list of 9 PIL Image objects.
-    width = np.shape(image)[0]
-    height = np.shape(image)[1]
-    piece_size = width // size
-    pieces = []
-    for i in range(size):
-        for j in range(size):
-            x = j * piece_size
-            y = i * piece_size
-            im = Image.fromarray(image)
-            piece = im.crop((x, y, x + piece_size, y + piece_size))
-            pieces.append(np.array(piece))
-    return np.array(pieces)
-
-
-# Calculate split image mean
-def get_piece_means(input_cube, size):
-    parts = size**2
-    means_timeline = np.zeros((np.shape(input_cube)[0], parts))
-    for frame_num in range(0, np.shape(input_cube)[0]):  # for every frame
-        pieces = split_image(input_cube[frame_num, :, :], size)
-        means_timeline[frame_num, :] = np.array([np.mean(array) for array in pieces])
-    return np.transpose(means_timeline)
-
-
-# Calculate DTW
-def dtws(size, pm_means):  # Should we take in account the neighboroung time points?
-    dtw = np.zeros(np.shape(pm_means))
-    dtwA = pm_means[:size, :]
-    dtwB = pm_means[-size:, :]
-    for i in range(0, size):
-        # print(dtw_weights(size)[-(i+1)],dtw_weights(size)[i])
-        dtw[i * size : (i + 1) * size, :] = (
-            dtw_weights(size)[-(i + 1)] * dtwA + dtw_weights(size)[i] * dtwB
-        )
-    return dtw
-
-
-# Get weighting for each row of grid
-def dtw_weights(size):
-    if size % 2 == 0:
-        my_list = np.arange(0, size + 1)
-        my_list = np.delete(my_list, int(size / 2)) / size
-        print(my_list)
-        sys.exit()
-    else:
-        my_list = np.linspace(0, 1, num=size + 1)
-        average = (
-            my_list[(size + 1) // 2 - 1] + my_list[(size + 1) // 2]
-        ) / 2  # Calculate the average of the two middle elements
-        my_list[(size + 1) // 2 - 1 : (size + 1) // 2 + 1] = [
-            average
-        ]  # Replace the two middle elements with the calculated average
-        my_list = np.delete(my_list, int(size / 2))
-    return my_list
-
-
-# Straighten lines
-def straighten(dtw_dist, old_line):
-    new_line = 1
-    return new_line
-
-
-# Calculate derivatives
-def derivative():
-    x = 1
-    return x
-
-
-def scale_vid(x, pos, new_min, new_max):  # define the mapping function
-    return "{:.2f}".format(new_min + ((x - 0) / (512 - 0)) * (new_max - new_min))
-
-
-def print_progress_bar(
-    iteration,
-    total,
-    prefix="Progress:",
-    suffix="Complete",
-    length=50,
-    fill="#",
-    empty="-",
-    end_line="\r",
-):
-    progress = float(iteration) / float(total)
-    filled_length = int(length * iteration // total)
-    bar = fill * filled_length + empty * (length - filled_length)
-    sys.stdout.write(f"\r{prefix} |{bar}| {iteration}/{total} {suffix}")
-    sys.stdout.flush()
-    if iteration == total:
-        sys.stdout.write(end_line)
-        sys.stdout.flush()
-
-
-# Functions for comparing frames in corrupt due to eclipse AR11726
-
-
-def calculate_frame_difference_metric(framez):
-    num_frames = framez.shape[0]
-    frame_diffs = []
-    for i in range(1, num_frames):
-        diff = np.mean(np.abs(framez[i] - framez[i - 1]))
-        frame_diffs.append(diff)
-    return frame_diffs
-
-
-def plot_frame_difference_metric(frame_diffs, cor_file):
-    zero_start = None
-    zero_end = None
-    in_zeros = False
-    for i, diff in enumerate(frame_diffs):
-        if not in_zeros and diff == 0:
-            in_zeros = True
-            zero_start = i
-        elif in_zeros and diff != 0:
-            in_zeros = False
-            zero_end = i - 1
-            break
-    if zero_start is not None and zero_end is not None:
-        print(
-            f"The frame_diffs array contains zeros from index {zero_start} to {zero_end} before becoming non-zero values again."
-        )
-    elif zero_start is not None:
-        print(
-            f"The frame_diffs array contains zeros starting from index {zero_start}, but non-zero values are not encountered again."
-        )
-    else:
-        print("The frame_diffs array does not contain consecutive zeros.")
-    plt.plot(frame_diffs)
-    plt.xlabel("Frame Index")
-    plt.ylabel("Frame Difference Metric")
-    plt.title(f"Frame Difference Metric vs. Frame Index for {cor_file}")
-    plt.show()
-
-
 ##### Sept 18th and later
-
-
 def min_max_scaling(arr, min_val, max_val):
     """
     Set values
@@ -182,78 +43,8 @@ def lstm_ready(
     final_flux = np.transpose(mag_flux, axes=(1, 0))
     X_trans = final_maps[:, :, tile]
     y_trans = final_flux[:, tile]
-    X_ss, y_mm = split_sequences(X_trans, y_trans, num_in, num_pred)
-    return torch.Tensor(X_ss), torch.Tensor(y_mm)
-
-
-def training_loop(n_epochs, lstm, optimiser, loss_fn, X_train, y_train, X_test, y_test):
-    scheduler = StepLR(optimiser, step_size=n_epochs // 10, gamma=0.9)
-    for epoch in range(n_epochs):
-        lstm.train()
-        # shuffle
-        indices = torch.randperm(int(np.shape(X_train)[0]))
-        X_train = X_train[indices]
-        y_train = y_train[indices]
-        # print(np.shape(X_train))
-        outputs = lstm.forward(X_train)  # forward pass
-        optimiser.zero_grad()  # calculate the gradient, manually setting to 0
-        # obtain the loss function
-        loss = loss_fn(outputs, y_train)
-        loss.backward()  # calculates the loss of the loss function
-        optimiser.step()  # improve from loss, i.e backprop
-        # test loss
-        lstm.eval()
-        with (
-            torch.no_grad()
-        ):  # Turn off gradients for validation, saves memory and computations
-            test_preds = lstm(X_test)
-            test_loss = loss_fn(test_preds, y_test)
-        # if epoch % int(n_epochs / 10) == 0:
-        #     print(
-        #         "Epoch: %d, train loss: %1.5f, test loss: %1.5f"
-        #         % (epoch, loss.item(), test_loss.item())
-        #     )
-        scheduler.step()
-
-
-def training_loop_w_stats(
-    n_epochs, lstm, optimiser, loss_fn, X_train, y_train, X_test, y_test
-):
-    scheduler = StepLR(optimiser, step_size=n_epochs // 10, gamma=0.9)
-    results = []
-    for epoch in range(n_epochs):
-        lstm.train()
-        # Shuffle
-        indices = torch.randperm(int(np.shape(X_train)[0]))
-        X_train = X_train[indices]
-        y_train = y_train[indices]
-
-        outputs = lstm.forward(X_train)  # Forward pass
-        optimiser.zero_grad()  # Calculate the gradient, manually setting to 0
-        loss = loss_fn(outputs, y_train)
-        loss.backward()  # Calculates the loss of the loss function
-        optimiser.step()  # Improve from loss, i.e., backprop
-
-        # Test loss
-        lstm.eval()
-        with (
-            torch.no_grad()
-        ):  # Turn off gradients for validation, saves memory and computations
-            test_preds = lstm(X_test)
-            test_loss = loss_fn(test_preds, y_test)
-
-        # if epoch % int(n_epochs/100) == 0:
-        learning_rate = scheduler.get_last_lr()[0]
-        # print(
-        #     "Epoch: %d, train loss: %1.5f, test loss: %1.5f, learning rate: %1.5f"
-        #     % (epoch, loss.item(), test_loss.item(), learning_rate)
-        # )
-        results.append(
-            (epoch, loss.item(), test_loss.item(), learning_rate)
-        )  # Collect results for saving
-        scheduler.step()
-
-    return results
+    X_ss, y_mm, last_vals = split_sequences(X_trans, y_trans, num_in, num_pred)
+    return torch.Tensor(X_ss), torch.Tensor(y_mm), torch.Tensor(last_vals)
 
 
 class LSTM(nn.Module):
@@ -337,6 +128,7 @@ class VanillaLSTM(nn.Module):
 # split a multivariate sequence past, future samples (X and y)
 def split_sequences(input_sequences, output_sequences, n_steps_in, n_steps_out):
     X, y = list(), list()  # instantiate X and y
+    last_vals = list()
     for i in range(len(input_sequences)):
         # find the end of the input, output sequence
         end_ix = i + n_steps_in
@@ -349,30 +141,9 @@ def split_sequences(input_sequences, output_sequences, n_steps_in, n_steps_out):
             input_sequences[i:end_ix],
             output_sequences[end_ix - 1 : out_end_ix],
         )
-        X.append(seq_x), y.append(seq_y)
-    return np.array(X), np.array(y)
-
-
-def amplify_fluctuations(y, amplification_factor=2):
-    """
-    Amplify the fluctuations of a data series.
-
-    Parameters:
-    - y: Data points (list or numpy array)
-    - amplification_factor: Factor by which to amplify the fluctuations (default=2)
-
-    Returns:
-    - Amplified data (numpy array)
-    """
-    # Detrend the data
-    y_detrended = detrend(y)
-    # Amplify the detrended data
-    y_amplified = y_detrended * amplification_factor
-    # Add the trend back
-    y_amplified_with_trend = y_amplified + (y - y_detrended)
-    return y_amplified_with_trend
-
-    import numpy as np
+        last_val = output_sequences[end_ix - 2] # for calibration purposes when doing RMSE on validation
+        X.append(seq_x), y.append(seq_y), last_vals.append(last_val)
+    return np.array(X), np.array(y), np.array(last_vals)
 
 
 def calculate_metrics(timeline_true, timeline_predicted):
@@ -422,14 +193,6 @@ def emergence_indication(d_true, threshold, sust_time):
     return indicator
 
 
-def emergence_indication2(d_true):
-    indicator = np.zeros(d_true.shape)  # Initialize with 1s (green)
-    min_index = np.argmin(d_true)  # Find the index of the minimum value in d_true
-    indicator[min_index] = 1  # Mark only the lowest value with 0 (red)
-    indicator[min_index + 1] = 1
-    return indicator
-
-
 def smooth_with_numpy(d_true, window_size=5):
     if window_size <= 1:
         return d_true
@@ -450,69 +213,6 @@ def recalibrate(pred, previous_value):
     trend = pred - pred[0]
     new_pred = trend + previous_value
     return new_pred
-
-
-def find_closest_fits_frame_to_NOAA_record(filenames, target_date):
-    """
-    Finds the file with timestamp closest to the target_date.
-    Parameters:
-    - filenames: List of strings, paths to files with timestamps in their names.
-    - target_date: Datetime object, the target date to compare the file timestamps against.
-    Returns:
-    - The filename from filenames that is closest in time to target_date.
-    """
-
-    def extract_datetime_from_filename(filename):
-        basename = os.path.basename(filename)  # Get the base name of the file
-        timestamp_str = basename.split(".")[2]  # Extract the timestamp part
-        file_datetime = datetime.strptime(
-            timestamp_str, "%Y%m%d_%H%M%S_TAI"
-        )  # Adjusted to include "_TAI"
-        return file_datetime
-
-    def get_data(
-        file,
-    ):  # Function designed to read FITS image data and headers from a specified file, and return the data and associated headers as output
-        with fits.open(file) as file_read:
-            int_grams = file_read[1].data  # get the images
-            headers = file_read[1].header  # get the headers associated with the images
-        return int_grams, headers
-
-    closest_file = None
-    min_difference = timedelta.max  # Initialize with maximum timedelta
-    for file in filenames:
-        file_datetime = extract_datetime_from_filename(file)
-        difference = abs(
-            file_datetime - target_date
-        )  # Calculate difference as a timedelta object
-        if difference < min_difference:
-            min_difference = difference
-            closest_file = file
-    int_grams, int_headers = get_data(closest_file)
-    NOAA_first_int_map = int_grams[int(np.shape(int_grams)[0] / 2 - 1), :, :]
-    return NOAA_first_int_map
-
-
-def add_grid_lines(ax, divisions=9, color="w", linewidth=1):
-    """
-    Adds grid lines to an image plot to visually divide it into a matrix.
-
-    Parameters:
-    - ax: The axes object to add grid lines to.
-    - divisions: Number of divisions along each axis (default is 9 for a 9x9 grid).
-    - color: Color of the grid lines.
-    - linewidth: Width of the grid lines.
-    """
-    xlim = ax.get_xlim()
-    ylim = ax.get_ylim()
-
-    x_spacing = np.linspace(xlim[0], xlim[1], divisions + 1)
-    y_spacing = np.linspace(ylim[0], ylim[1], divisions + 1)
-
-    for x in x_spacing[1:-1]:
-        ax.axvline(x=x, color=color, linewidth=linewidth)
-    for y in y_spacing[1:-1]:
-        ax.axhline(y=y, color=color, linewidth=linewidth)
 
 
 def highlight_tile(ax, tile_number, divisions=9, color="r", linewidth=2):
@@ -555,45 +255,6 @@ def highlight_tile(ax, tile_number, divisions=9, color="r", linewidth=2):
     ax.add_patch(rect)
 
 
-def calculate_extended_metrics(
-    model, timeline_true, timeline_predicted, training_time=None
-):
-    """Calculate extended metrics including RMSE@1, RMSE@5, parameter count, and training time."""
-    # Basic metrics
-    MAE, MSE, RMSE, RMSLE, R_squared = calculate_metrics(
-        timeline_true, timeline_predicted
-    )
-
-    # Calculate RMSE@1 (RMSE for 1-hour prediction)
-    if len(timeline_true.shape) > 1:
-        RMSE_1 = np.sqrt(
-            np.mean(np.square(timeline_predicted[:, 0] - timeline_true[:, 0]))
-        )
-        # Calculate RMSE@5 (RMSE for 5-hour prediction)
-        if timeline_true.shape[1] >= 5:
-            RMSE_5 = np.sqrt(
-                np.mean(np.square(timeline_predicted[:, 4] - timeline_true[:, 4]))
-            )
-        else:
-            RMSE_5 = None
-    else:
-        RMSE_1 = RMSE
-        RMSE_5 = None
-
-    # Calculate parameter count
-    param_count = sum(p.numel() for p in model.parameters())
-
-    return {
-        "MAE": MAE,
-        "RMSE": RMSE,
-        "R2": R_squared,
-        "params": param_count,
-        "train_time": training_time,
-        "RMSE@1": RMSE_1,
-        "RMSE@5": RMSE_5,
-    }
-
-
 def load_ar_data(ar_num, size, rid_of_top, starting_tile):
     """Loads and preprocesses data for a single Active Region (AR)."""
     try:
@@ -630,32 +291,22 @@ def load_ar_data(ar_num, size, rid_of_top, starting_tile):
         return None, None, None
 
 
-def process_data(test_AR, size, rid_of_top, starting_tile):
-    stacked_maps, mag_flux, intensities, time = load_ar_data(
-        test_AR, size, rid_of_top, starting_tile
-    )
-
-    min_p = np.min(stacked_maps)
-    max_p = np.max(stacked_maps)
-    min_m = np.min(mag_flux)
-    max_m = np.max(mag_flux)
-    min_i = np.min(intensities)
-    max_i = np.max(intensities)
-    stacked_maps = min_max_scaling(stacked_maps, min_p, max_p)
-    mag_flux = min_max_scaling(mag_flux, min_m, max_m)
-    intensities = min_max_scaling(intensities, min_i, max_i)
+def process_data(maps, flux, cont_int, m_scale, f_scale, cont_int_scale):
+    stacked_maps = min_max_scaling(maps, *m_scale)
+    mag_flux = min_max_scaling(flux, *f_scale)
+    intensities = min_max_scaling(cont_int, *cont_int_scale)
 
     # Reshape int to have an extra dimension and then put it with pmaps
     int_reshaped = np.expand_dims(intensities, axis=1)
 
     inputs = np.concatenate([stacked_maps, int_reshaped], axis=1)
 
-    return inputs, mag_flux, time
+    return inputs, mag_flux
 
 
-def get_params(state_dict, path):
+def get_params(path):
     pth_files = glob.glob(
-        path + "SAR_EMERGENCE_RESEARCH/lstm/results/*.pth"
+        path + "SAR_EMERGENCE_RESEARCH/lstm/results/pred12_r4_i110_n1_h32_e10_lr0.00500000_d0.0.pth"
     )  # Assuming there's only one .pth file and its naming follows the specific pattern
     filename = pth_files[0]
     matches = re.findall(
@@ -687,37 +338,37 @@ def get_params(state_dict, path):
     )
 
 
-def AR_defs(test_AR):
+def AR_defs(val_AR):
     before_plot, num_in, NOAA_first, NOAA_second = None, None, None, None
-    if test_AR == 11698:
+    if val_AR == 11698:
         window_s = 98
         starting_tile = 46
         before_plot = 50
         num_in = 96
         NOAA_first = datetime(2013, 3, 15, 0, 0, 0)
         NOAA_second = datetime(2013, 3, 17, 0, 0, 0)
-    elif test_AR == 11726:
+    elif val_AR == 11726:
         window_s = 50
         starting_tile = 37
         before_plot = 50
         num_in = 72  # decrease even more -> 60
         NOAA_first = datetime(2013, 4, 20, 0, 0, 0)
         NOAA_second = datetime(2013, 4, 22, 0, 0, 0)
-    elif test_AR == 13165:
+    elif val_AR == 13165:
         window_s = 40
         starting_tile = 28
         before_plot = 40
         num_in = 96
         NOAA_first = datetime(2022, 12, 12, 0, 0, 0)
         NOAA_second = datetime(2022, 12, 14, 0, 0, 0)
-    elif test_AR == 13179:
+    elif val_AR == 13179:
         window_s = 40
         starting_tile = 37
         before_plot = 40
         num_in = 96
         NOAA_first = datetime(2022, 12, 30, 0, 0, 0)
         NOAA_second = datetime(2023, 1, 1, 0, 0, 0)
-    elif test_AR == 13183:
+    elif val_AR == 13183:
         window_s = 40
         starting_tile = 37
         before_plot = 40
@@ -725,36 +376,76 @@ def AR_defs(test_AR):
         NOAA_first = datetime(2023, 1, 6, 0, 0, 0)
         NOAA_second = datetime(2023, 1, 8, 0, 0, 0)
     else:
-        print("Invalid test_AR value. Please use 11698, 11726, 13165, 13179, or 13183.")
+        print(
+            "Invalid validation Active Region value. Please use 11698, 11726, 13165, 13179, or 13183."
+        )
     return before_plot, num_in, NOAA_first, NOAA_second, starting_tile, window_s
 
 
 # --- Data Loading & Preparation ---
-def prepare_dataset(ar_list, size, rid_of_top, num_in, num_pred):
+def prepare_dataset(
+    ar_list,
+    size,
+    rid_of_top,
+    num_in,
+    num_pred,
+    m_scale=None,
+    flux_scale=None,
+    cont_int_scale=None,
+):
     """Builds a complete dataset (X, y) for a list of ARs."""
     all_inputs_list, all_flux_list = [], []
+    all_maps = []
+    all_flux = []
+    all_cont_int = []
 
     # Load data for all ARs
-    for ar in ar_list:
-        combined_inputs, flux, _ = process_data(ar, size, rid_of_top, size * rid_of_top)
-        all_inputs_list.append(combined_inputs)
-        all_flux_list.append(flux)
+    if m_scale is None:
+        for ar in ar_list:
+            maps, flux, cont_int, time = load_ar_data(
+                ar, size, rid_of_top, size * rid_of_top
+            )
+            all_maps.append(maps)
+            all_flux.append(flux)
+            all_cont_int.append(cont_int)
+
+        m_scale = (np.min(all_maps), np.max(all_maps))
+        flux_scale = (np.min(all_flux), np.max(all_flux))
+        cont_int_scale = (np.min(all_cont_int), np.max(all_cont_int))
+
+        for i in range(len(all_maps)):
+            combined_inputs, flux = process_data(
+                all_maps[i], all_flux[i], all_cont_int[i], m_scale, flux_scale, cont_int_scale
+            )
+            all_inputs_list.append(combined_inputs)
+            all_flux_list.append(flux)
+    else:
+        for ar in ar_list:
+            maps, flux, cont_int, time = load_ar_data(
+                ar, size, rid_of_top, size * rid_of_top
+            )
+            combined_inputs, flux = process_data(
+                maps, flux, cont_int, m_scale, flux_scale, cont_int_scale
+            )
+            all_inputs_list.append(combined_inputs)
+            all_flux_list.append(flux)
 
     if not all_inputs_list:
         print("all_inputs_list does not exist")
         return None, None, 0
 
     # Create sequences for the LSTM
-    x_list, y_list = [], []
+    x_list, y_list, last_list = [], [], []
     tiles = size**2 - 2 * size * rid_of_top
 
     for inputs, flux in zip(all_inputs_list, all_flux_list):
         for tile in range(tiles):
-            x_seq, y_seq = lstm_ready(tile, size, inputs, flux, num_in, num_pred)
+            x_seq, y_seq, last_seq = lstm_ready(tile, size, inputs, flux, num_in, num_pred)
             if x_seq.shape[0] > 0:
                 x_seq = torch.reshape(x_seq, (x_seq.shape[0], num_in, x_seq.shape[2]))
                 x_list.append(x_seq)
                 y_list.append(y_seq)
+                last_list.append(last_seq)
 
     if not x_list:
         print("X_list does not exist")
@@ -762,9 +453,10 @@ def prepare_dataset(ar_list, size, rid_of_top, num_in, num_pred):
 
     x_all = torch.cat(x_list, dim=0)
     y_all = torch.cat(y_list, dim=0)
+    last_all = torch.cat(last_list, dim=0) # Concatenate the last values
     input_feature_size = x_all.shape[2]
 
-    return x_all, y_all, input_feature_size
+    return x_all, y_all, last_all, input_feature_size, m_scale, flux_scale, cont_int_scale
 
 
 # --- Model Training & Evaluation ---
@@ -787,19 +479,56 @@ def train_epoch(model, dataloader, loss_fn, optimizer, device):
     return total_loss / len(dataloader)
 
 
-def evaluate_model(model, dataloader, loss_fn, device):
-    """Evaluates the model on a given dataset."""
+def validate_model(model, dataloader, loss_fn, device):
+    """
+    Validates the model, calculating both loss and RMSE for a specific future time step.
+    """
     model.eval()
     total_loss = 0
+    all_calibrated_preds = []
+    all_y = []
+    
+    # This is the specific time step you want to evaluate (12th hour)
+    future = 11 
+
     with torch.no_grad():
-        for x, y in dataloader:
-            x, y = x.to(device), y.to(device)
+        for x, y, last_vals in dataloader: 
+            x, y, last_vals = x.to(device), y.to(device), last_vals.to(device)
+            
+            # Get model predictions (full sequence)
             preds = model(x)
-            loss = loss_fn(preds, y)
+
+            # --- Calibrate the entire batch of sequences first ---
+            calibrated_preds_batch = torch.zeros_like(preds)
+            for i in range(preds.shape[0]):
+                calibrated_sequence = recalibrate(preds[i].cpu().numpy(), last_vals[i].cpu().item())
+                calibrated_preds_batch[i,:] = torch.tensor(calibrated_sequence, device=device)
+
+            # --- KEY CHANGE FOR LOSS CALCULATION ---
+            # Slice the calibrated predictions and true values to get only the 12th hour
+            preds_at_12h = calibrated_preds_batch[:, future]
+            y_at_12h = y[:, future]
+            
+            # Calculate loss for this batch on the specific time step
+            loss = loss_fn(preds_at_12h, y_at_12h)
             total_loss += loss.item()
+            
+            # Store the results for the final RMSE calculation
+            all_calibrated_preds.append(calibrated_preds_batch.cpu().numpy())
+            all_y.append(y.cpu().numpy())
 
-    return total_loss / len(dataloader)
+    # --- RMSE Calculation (remains the same) ---
+    all_calibrated_preds_array = np.concatenate(all_calibrated_preds, axis=0)
+    all_y_array = np.concatenate(all_y, axis=0)
 
+    preds_at_12h_all = all_calibrated_preds_array[:, future]
+    y_at_12h_all = all_y_array[:, future]
+
+    rmse = np.sqrt(np.mean((preds_at_12h_all - y_at_12h_all)**2))
+    
+    # Return both the average loss and the final RMSE
+    avg_loss = total_loss / len(dataloader)
+    return avg_loss, rmse
 
 class PlateauStopper(tune.stopper.Stopper):
     """Stops trials when the metric has plateaued."""
@@ -858,3 +587,25 @@ class PlateauStopper(tune.stopper.Stopper):
     def stop_all(self) -> bool:
         """This function is used to stop all trials at once. We don't need it here."""
         return False
+
+
+def add_grid_lines(ax, divisions=9, color="w", linewidth=1):
+    """
+    Adds grid lines to an image plot to visually divide it into a matrix.
+
+    Parameters:
+    - ax: The axes object to add grid lines to.
+    - divisions: Number of divisions along each axis (default is 9 for a 9x9 grid).
+    - color: Color of the grid lines.
+    - linewidth: Width of the grid lines.
+    """
+    xlim = ax.get_xlim()
+    ylim = ax.get_ylim()
+
+    x_spacing = np.linspace(xlim[0], xlim[1], divisions + 1)
+    y_spacing = np.linspace(ylim[0], ylim[1], divisions + 1)
+
+    for x in x_spacing[1:-1]:
+        ax.axvline(x=x, color=color, linewidth=linewidth)
+    for y in y_spacing[1:-1]:
+        ax.axhline(y=y, color=color, linewidth=linewidth)
