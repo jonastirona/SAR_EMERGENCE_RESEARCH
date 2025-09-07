@@ -49,7 +49,7 @@ def main(config):
 
     # Initialize wandb
     wandb.init(
-        project=f"{model_type},change_eval_tiles",
+        project=f"{model_type},global_min_max",
         entity=os.environ.get("WANDB_ENTITY"),
         config=config,
         name=f"{model_type}_pred{config['num_pred']}_r{config['rid_of_top']}_i{config['num_in']}_n{config['num_layers']}_h{config['hidden_size']}_e{config['n_epochs']}_l{config['learning_rate']:.5f}_d{config['dropout']:.2f}",
