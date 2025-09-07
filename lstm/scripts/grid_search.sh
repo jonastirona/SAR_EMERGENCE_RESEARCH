@@ -25,6 +25,6 @@ source sar/bin/activate
 pip -V
 echo 'Done loading environment'
 
-python -u lstm/grid_seach.py $1
+python -u lstm/grid_search.py $1
 
 EOT
