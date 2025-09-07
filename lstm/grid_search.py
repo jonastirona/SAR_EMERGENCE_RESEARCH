@@ -132,7 +132,9 @@ def main(config):
         TensorDataset(x_train, y_train), batch_size=config["batch_size"], shuffle=True
     )
     val_loader = DataLoader(
-        TensorDataset(x_val, y_val, last_all), batch_size=config["batch_size"], shuffle=False
+        TensorDataset(x_val, y_val, last_all),
+        batch_size=config["batch_size"],
+        shuffle=False,
     )
 
     # --- Model & Optimizer ---
@@ -225,7 +227,7 @@ if __name__ == "__main__":
         "num_pred": tune.choice([12]),
         "rid_of_top": tune.choice([4]),
         "num_in": tune.choice([110]),
-        "num_layers": tune.choice([1]),
+        "num_layers": tune.choice([1, 2, 3, 4]),
         "hidden_size": tune.choice([10, 32, 64, 128, 150]),
         "n_epochs": tune.choice([500]),
         "learning_rate": tune.loguniform(1e-5, 1e-3),
