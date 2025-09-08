@@ -141,7 +141,9 @@ def split_sequences(input_sequences, output_sequences, n_steps_in, n_steps_out):
             input_sequences[i:end_ix],
             output_sequences[end_ix - 1 : out_end_ix],
         )
-        last_val = output_sequences[end_ix - 2] # for calibration purposes when doing RMSE on validation
+        last_val = output_sequences[
+            end_ix - 2
+        ]  # for calibration purposes when doing RMSE on validation
         X.append(seq_x), y.append(seq_y), last_vals.append(last_val)
     return np.array(X), np.array(y), np.array(last_vals)
 
@@ -306,7 +308,8 @@ def process_data(maps, flux, cont_int, m_scale, f_scale, cont_int_scale):
 
 def get_params(path):
     pth_files = glob.glob(
-        path + "SAR_EMERGENCE_RESEARCH/lstm/results/pred12_r4_i110_n4_h32_e2_lr0.00010000_d0.2.pth"
+        path
+        + "SAR_EMERGENCE_RESEARCH/lstm/results/pred12_r4_i110_n4_h32_e2_lr0.00010000_d0.2.pth"
     )  # Assuming there's only one .pth file and its naming follows the specific pattern
     filename = pth_files[0]
     matches = re.findall(
@@ -415,7 +418,12 @@ def prepare_dataset(
 
         for i in range(len(all_maps)):
             combined_inputs, flux = process_data(
-                all_maps[i], all_flux[i], all_cont_int[i], m_scale, flux_scale, cont_int_scale
+                all_maps[i],
+                all_flux[i],
+                all_cont_int[i],
+                m_scale,
+                flux_scale,
+                cont_int_scale,
             )
             all_inputs_list.append(combined_inputs)
             all_flux_list.append(flux)
@@ -440,7 +448,9 @@ def prepare_dataset(
 
     for inputs, flux in zip(all_inputs_list, all_flux_list):
         for tile in range(tiles):
-            x_seq, y_seq, last_seq = lstm_ready(tile, size, inputs, flux, num_in, num_pred)
+            x_seq, y_seq, last_seq = lstm_ready(
+                tile, size, inputs, flux, num_in, num_pred
+            )
             if x_seq.shape[0] > 0:
                 x_seq = torch.reshape(x_seq, (x_seq.shape[0], num_in, x_seq.shape[2]))
                 x_list.append(x_seq)
@@ -453,35 +463,43 @@ def prepare_dataset(
 
     x_all = torch.cat(x_list, dim=0)
     y_all = torch.cat(y_list, dim=0)
-    last_all = torch.cat(last_list, dim=0) # Concatenate the last values
+    last_all = torch.cat(last_list, dim=0)  # Concatenate the last values
     input_feature_size = x_all.shape[2]
 
-    return x_all, y_all, last_all, input_feature_size, m_scale, flux_scale, cont_int_scale
+    return (
+        x_all,
+        y_all,
+        last_all,
+        input_feature_size,
+        m_scale,
+        flux_scale,
+        cont_int_scale,
+    )
 
 
 # --- Model Training & Evaluation ---
 def train_epoch(model, dataloader, loss_fn, optimizer, device, teacher_ratio, alpha):
     model.train()
     total_loss = 0
-    loss_scaler = 100.0 
-    
+    loss_scaler = 100.0
+
     # Weighting factor for the two loss components
     # alpha
 
     for x, y in dataloader:
         x, y = x.to(device), y.to(device)
         optimizer.zero_grad()
-        
-        outputs = model(x, y, teacher_forcing_ratio=teacher_ratio) 
-        
+
+        outputs = model(x, y, teacher_forcing_ratio=teacher_ratio)
+
         # 1. Calculate loss on the actual values
         value_loss = loss_fn(outputs, y)
-        
+
         # 2. Calculate loss on the derivatives
         outputs_deriv = outputs[:, 1:] - outputs[:, :-1]
         y_deriv = y[:, 1:] - y[:, :-1]
         derivative_loss = loss_fn(outputs_deriv, y_deriv)
-        
+
         # 3. Combine them into a hybrid loss
         loss = alpha * value_loss + (1 - alpha) * derivative_loss
 
@@ -502,14 +520,14 @@ def train_epoch(model, dataloader, loss_fn, optimizer, device, teacher_ratio, al
 #     total_loss = 0
 #     all_calibrated_preds = []
 #     all_y = []
-    
+
 #     # This is the specific time step you want to evaluate (12th hour)
-#     future = 11 
+#     future = 11
 
 #     with torch.no_grad():
-#         for x, y, last_vals in dataloader: 
+#         for x, y, last_vals in dataloader:
 #             x, y, last_vals = x.to(device), y.to(device), last_vals.to(device)
-            
+
 #             # Get model predictions (full sequence)
 #             preds = model(x)
 
@@ -523,11 +541,11 @@ def train_epoch(model, dataloader, loss_fn, optimizer, device, teacher_ratio, al
 #             # Slice the calibrated predictions and true values to get only the 12th hour
 #             preds_at_12h = calibrated_preds_batch[:, future]
 #             y_at_12h = y[:, future]
-            
+
 #             # Calculate loss for this batch on the specific time step
 #             loss = loss_fn(preds_at_12h, y_at_12h)
 #             total_loss += loss.item()
-            
+
 #             # Store the results for the final RMSE calculation
 #             all_calibrated_preds.append(calibrated_preds_batch.cpu().numpy())
 #             all_y.append(y.cpu().numpy())
@@ -540,24 +558,25 @@ def train_epoch(model, dataloader, loss_fn, optimizer, device, teacher_ratio, al
 #     y_at_12h_all = all_y_array[:, future]
 
 #     rmse = np.sqrt(np.mean((preds_at_12h_all - y_at_12h_all)**2))
-    
+
 #     # Return both the average loss and the final RMSE
 #     avg_loss = total_loss / len(dataloader)
 #     return avg_loss, rmse
+
 
 def validate_model(model, dataloader, device):
     model.eval()
     all_preds = []
     all_y = []
-    
+
     with torch.no_grad():
         for x, y in dataloader:
             x, y = x.to(device), y.to(device)
-            
+
             # --- KEY CHANGE ---
             # Do NOT pass 'y' during validation/inference
-            preds = model(x, y=None) 
-            
+            preds = model(x, y=None)
+
             all_preds.append(preds.cpu().numpy())
             all_y.append(y.cpu().numpy())
 
@@ -565,9 +584,11 @@ def validate_model(model, dataloader, device):
     # ...
     pred_derivatives = np.diff(np.concatenate(all_preds, axis=0), axis=1)
     true_derivatives = np.diff(np.concatenate(all_y, axis=0), axis=1)
-    derivative_rmse = np.sqrt(np.mean((pred_derivatives - true_derivatives)**2))
-    
+    derivative_rmse = np.sqrt(np.mean((pred_derivatives - true_derivatives) ** 2))
+
     return derivative_rmse
+
+
 class PlateauStopper(tune.stopper.Stopper):
     """Stops trials when the metric has plateaued."""
 

@@ -47,17 +47,19 @@ def main(config):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Runs on: {device}")
 
+    rot = 4
+    num_in = 110
+    num_pred = 12
+
+    model_name = f"{model_type}_n{config['num_layers']}_h{config['hidden_size']}_lr{config['learning_rate']:.8f}_d{config['dropout']}_t{config['teacher_forcing_ratio']}_a{config['alpha']}"
     # Initialize wandb
     wandb.init(
         project=f"{model_type},LSTM with magnitude and derivative loss ",
         entity=os.environ.get("WANDB_ENTITY"),
         config=config,
-        name=f"{model_type}_pred{config['num_pred']}_r{config['rid_of_top']}_i{config['num_in']}_n{config['num_layers']}_h{config['hidden_size']}_e{config['n_epochs']}_l{config['learning_rate']:.5f}_d{config['dropout']:.2f}",
-        notes=f"{model_type} training with lr={config['learning_rate']}, dropout={config['dropout']}",
+        name=f"{model_name}",
     )
-    rot = 4
-    num_in = 110
-    num_pred = 12
+
     # --- Data Loading ---
     print("Loading and preparing training data...")
     train_ars = [
@@ -150,12 +152,19 @@ def main(config):
     loss_fn = nn.MSELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=config["learning_rate"])
     scheduler = ReduceLROnPlateau(optimizer, "min", factor=0.2, patience=10)
-    model_name = f"{model_type}pred{config['num_pred']}_r{config['rid_of_top']}_i{config['num_in']}_n{config['num_layers']}_h{config['hidden_size']}_e{config['n_epochs']}_lr{config['learning_rate']:.8f}_d{config['dropout']}.pth"
 
     # --- Training Loop ---
     print("Starting training...")
     for epoch in range(config["n_epochs"]):
-        train_loss = train_epoch(model, train_loader, loss_fn, optimizer, device, config['teacher_forcing_ratio'], config['alpha'])
+        train_loss = train_epoch(
+            model,
+            train_loader,
+            loss_fn,
+            optimizer,
+            device,
+            config["teacher_forcing_ratio"],
+            config["alpha"],
+        )
         val_rmse = validate_model(model, val_loader, device)
 
         lr = scheduler.get_last_lr()[0]
@@ -188,8 +197,7 @@ def main(config):
         tune.report(log_metrics)
 
     # --- Save Model & Artifacts ---
-    model_name = f"pred{config['num_pred']}_r{config['rid_of_top']}_i{config['num_in']}_n{config['num_layers']}_h{config['hidden_size']}_e{config['n_epochs']}_lr{config['learning_rate']:.8f}_d{config['dropout']}.pth"
-    model_path = os.path.join(RESULTS_PATH, model_name)
+    model_path = os.path.join(RESULTS_PATH, model_name + ".pth")
     torch.save(model.state_dict(), model_path)
     print(f"Model saved to {model_path}")
 
@@ -232,22 +240,19 @@ if __name__ == "__main__":
         "dropout": tune.choice([0.1, 0.2, 0.3]),
         "batch_size": tune.choice([32, 64]),
         # Add any other fixed parameters your train function needs
-        "n_epochs": 100, # Example fixed parameter
+        "n_epochs": 100,  # Example fixed parameter
     }
-    
+
     # Scheduler to early-stop bad trials
     scheduler = ASHAScheduler(
         metric="RMSE",
         mode="min",
-        grace_period=10, # Min epochs before a trial can be stopped
-        reduction_factor=2
+        grace_period=10,  # Min epochs before a trial can be stopped
+        reduction_factor=2,
     )
 
     # Search algorithm
-    search_alg = OptunaSearch(
-        metric="RMSE",
-        mode="min"
-    )
+    search_alg = OptunaSearch(metric="RMSE", mode="min")
 
     # Set up the Tuner
     tuner = tune.Tuner(
@@ -260,8 +265,8 @@ if __name__ == "__main__":
         ),
         run_config=ray.train.RunConfig(
             name="lstm_hyperparameter_search",
-            stop={"training_iteration": 100}, # Max epochs per trial
-        )
+            stop={"training_iteration": 100},  # Max epochs per trial
+        ),
     )
 
     # Run the hyperparameter search
