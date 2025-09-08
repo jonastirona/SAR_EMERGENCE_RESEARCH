@@ -23,6 +23,7 @@ import ray
 from ray.tune.search.optuna import OptunaSearch
 from ray.tune.schedulers import ASHAScheduler
 from eval import eval_AR_emergence as eval
+from ray.tune.stopper import TrialPlateauStopper
 
 if isVanillaLSTM:
     from functions import VanillaLSTM as LSTM
@@ -258,11 +259,10 @@ if __name__ == "__main__":
         resources={"cpu": 2, "gpu": 1}
     )
 
-    early_stopper = ray.tune.stopper.EarlyStopping(
+    early_stopper = TrialPlateauStopper(
         metric="RMSE",
         mode="min",
-        patience=10, # Number of epochs to wait for improvement
-        verbose=True # Prints a message when a trial is stopped
+        grace_period=10, # Number of epochs to wait for improvement
     )
     # Set up the Tuner
     tuner = tune.Tuner(
