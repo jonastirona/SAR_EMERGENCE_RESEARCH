@@ -253,7 +253,9 @@ if __name__ == "__main__":
 
     # Search algorithm
     search_alg = OptunaSearch(metric="RMSE", mode="min")
-
+    scaling_config = ray.train.ScalingConfig(
+        use_gpu=True, resources_per_worker={"CPU": 1, "GPU": 1}
+    )
     # Set up the Tuner
     tuner = tune.Tuner(
         main,
@@ -266,6 +268,7 @@ if __name__ == "__main__":
         run_config=ray.train.RunConfig(
             name="lstm_hyperparameter_search",
             stop={"training_iteration": 100},  # Max epochs per trial
+            scaling_config=scaling_config,
         ),
     )
 
