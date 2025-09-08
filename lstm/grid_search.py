@@ -54,7 +54,7 @@ def main(config):
     model_name = f"{model_type}_n{config['num_layers']}_h{config['hidden_size']}_lr{config['learning_rate']:.8f}_d{config['dropout']}_t{config['teacher_forcing_ratio']}_a{config['alpha']}"
     # Initialize wandb
     wandb.init(
-        project=f"{model_type},LSTM with magnitude and derivative loss ",
+        project=f"{model_type},LSTM w magnitude&derivative loss & weight decay & earlystopper",
         entity=os.environ.get("WANDB_ENTITY"),
         config=config,
         name=f"{model_name}",
@@ -150,7 +150,7 @@ def main(config):
         dropout=config["dropout"],
     ).to(device)
     loss_fn = nn.MSELoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=config["learning_rate"])
+    optimizer = torch.optim.Adam(model.parameters(), lr=config["learning_rate"], weight_decay=config['weight_decay'])
     scheduler = ReduceLROnPlateau(optimizer, "min", factor=0.2, patience=10)
 
     # --- Training Loop ---
@@ -239,15 +239,15 @@ if __name__ == "__main__":
         "num_layers": tune.choice([2, 3, 4]),
         "dropout": tune.choice([0.1, 0.2, 0.3]),
         "batch_size": tune.choice([32, 64]),
-        # Add any other fixed parameters your train function needs
-        "n_epochs": 100,  # Example fixed parameter
+        "weight_decay": tune.loguniform(1e-6, 1e-3),
+        "n_epochs": 100,  
     }
 
     # Scheduler to early-stop bad trials
     scheduler = ASHAScheduler(
         metric="RMSE",
         mode="min",
-        grace_period=10,  # Min epochs before a trial can be stopped
+        grace_period=15,  # Min epochs before a trial can be stopped
         reduction_factor=2,
     )
 
@@ -257,18 +257,25 @@ if __name__ == "__main__":
         main,
         resources={"cpu": 2, "gpu": 1}
     )
+
+    early_stopper = ray.tune.stopper.EarlyStopping(
+        metric="RMSE",
+        mode="min",
+        patience=10, # Number of epochs to wait for improvement
+        verbose=True # Prints a message when a trial is stopped
+    )
     # Set up the Tuner
     tuner = tune.Tuner(
         trainable_with_resources,
         param_space=search_space,
         tune_config=tune.TuneConfig(
-            num_samples=50,  # Number of different hyperparameter combinations to try
+            num_samples=200,  # Number of different hyperparameter combinations to try
             scheduler=scheduler,
             search_alg=search_alg,
         ),
         run_config=ray.train.RunConfig(
             name="lstm_hyperparameter_search",
-            stop={"training_iteration": 100},  # Max epochs per trial
+            stop=early_stopper,  # Max epochs per trial
         ),
         
     )

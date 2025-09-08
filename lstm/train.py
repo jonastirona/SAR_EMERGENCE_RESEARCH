@@ -153,7 +153,7 @@ def main(config):
     # --- Training Loop ---
     print("Starting training...")
     for epoch in range(config["n_epochs"]):
-        train_loss = train_epoch(model, train_loader, loss_fn, optimizer, device)
+        train_loss = train_epoch(model, train_loader, loss_fn, optimizer, device, 0.1, 0.1)
         val_rmse = validate_model(model, val_loader, device)
 
         lr = scheduler.get_last_lr()[0]
