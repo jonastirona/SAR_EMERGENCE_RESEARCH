@@ -18,7 +18,7 @@ import re
 from collections import OrderedDict
 import glob
 
-isVanillaLSTM = True
+isVanillaLSTM = False
 warnings.filterwarnings("ignore")
 l = re.split(r"[\\/]", os.path.abspath(os.getcwd()))
 BASE_PATH = "/".join(l[:-1]) + "/"
@@ -306,7 +306,7 @@ def process_data(maps, flux, cont_int, m_scale, f_scale, cont_int_scale):
 
 def get_params(path):
     pth_files = glob.glob(
-        path + "SAR_EMERGENCE_RESEARCH/lstm/results/pred12_r4_i110_n1_h32_e10_lr0.00500000_d0.0.pth"
+        path + "SAR_EMERGENCE_RESEARCH/lstm/results/pred12_r4_i110_n4_h32_e2_lr0.00010000_d0.2.pth"
     )  # Assuming there's only one .pth file and its naming follows the specific pattern
     filename = pth_files[0]
     matches = re.findall(
@@ -460,76 +460,114 @@ def prepare_dataset(
 
 
 # --- Model Training & Evaluation ---
-def train_epoch(model, dataloader, loss_fn, optimizer, device):
-    """Runs a single training epoch."""
+def train_epoch(model, dataloader, loss_fn, optimizer, device, teacher_ratio, alpha):
     model.train()
     total_loss = 0
+    loss_scaler = 100.0 
+    
+    # Weighting factor for the two loss components
+    # alpha
+
     for x, y in dataloader:
         x, y = x.to(device), y.to(device)
-
         optimizer.zero_grad()
-        outputs = model(x)
-        loss = loss_fn(outputs, y)
-        loss.backward()
+        
+        outputs = model(x, y, teacher_forcing_ratio=teacher_ratio) 
+        
+        # 1. Calculate loss on the actual values
+        value_loss = loss_fn(outputs, y)
+        
+        # 2. Calculate loss on the derivatives
+        outputs_deriv = outputs[:, 1:] - outputs[:, :-1]
+        y_deriv = y[:, 1:] - y[:, :-1]
+        derivative_loss = loss_fn(outputs_deriv, y_deriv)
+        
+        # 3. Combine them into a hybrid loss
+        loss = alpha * value_loss + (1 - alpha) * derivative_loss
+
+        scaled_loss = loss * loss_scaler
+        scaled_loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         optimizer.step()
-
         total_loss += loss.item()
 
     return total_loss / len(dataloader)
 
 
-def validate_model(model, dataloader, loss_fn, device):
-    """
-    Validates the model, calculating both loss and RMSE for a specific future time step.
-    """
+# def validate_model(model, dataloader, loss_fn, device):
+#     """
+#     Validates the model, calculating both loss and RMSE for a specific future time step.
+#     """
+#     model.eval()
+#     total_loss = 0
+#     all_calibrated_preds = []
+#     all_y = []
+    
+#     # This is the specific time step you want to evaluate (12th hour)
+#     future = 11 
+
+#     with torch.no_grad():
+#         for x, y, last_vals in dataloader: 
+#             x, y, last_vals = x.to(device), y.to(device), last_vals.to(device)
+            
+#             # Get model predictions (full sequence)
+#             preds = model(x)
+
+#             # --- Calibrate the entire batch of sequences first ---
+#             calibrated_preds_batch = torch.zeros_like(preds)
+#             for i in range(preds.shape[0]):
+#                 calibrated_sequence = recalibrate(preds[i].cpu().numpy(), last_vals[i].cpu().item())
+#                 calibrated_preds_batch[i,:] = torch.tensor(calibrated_sequence, device=device)
+
+#             # --- KEY CHANGE FOR LOSS CALCULATION ---
+#             # Slice the calibrated predictions and true values to get only the 12th hour
+#             preds_at_12h = calibrated_preds_batch[:, future]
+#             y_at_12h = y[:, future]
+            
+#             # Calculate loss for this batch on the specific time step
+#             loss = loss_fn(preds_at_12h, y_at_12h)
+#             total_loss += loss.item()
+            
+#             # Store the results for the final RMSE calculation
+#             all_calibrated_preds.append(calibrated_preds_batch.cpu().numpy())
+#             all_y.append(y.cpu().numpy())
+
+#     # --- RMSE Calculation (remains the same) ---
+#     all_calibrated_preds_array = np.concatenate(all_calibrated_preds, axis=0)
+#     all_y_array = np.concatenate(all_y, axis=0)
+
+#     preds_at_12h_all = all_calibrated_preds_array[:, future]
+#     y_at_12h_all = all_y_array[:, future]
+
+#     rmse = np.sqrt(np.mean((preds_at_12h_all - y_at_12h_all)**2))
+    
+#     # Return both the average loss and the final RMSE
+#     avg_loss = total_loss / len(dataloader)
+#     return avg_loss, rmse
+
+def validate_model(model, dataloader, device):
     model.eval()
-    total_loss = 0
-    all_calibrated_preds = []
+    all_preds = []
     all_y = []
     
-    # This is the specific time step you want to evaluate (12th hour)
-    future = 11 
-
     with torch.no_grad():
-        for x, y, last_vals in dataloader: 
-            x, y, last_vals = x.to(device), y.to(device), last_vals.to(device)
+        for x, y in dataloader:
+            x, y = x.to(device), y.to(device)
             
-            # Get model predictions (full sequence)
-            preds = model(x)
-
-            # --- Calibrate the entire batch of sequences first ---
-            calibrated_preds_batch = torch.zeros_like(preds)
-            for i in range(preds.shape[0]):
-                calibrated_sequence = recalibrate(preds[i].cpu().numpy(), last_vals[i].cpu().item())
-                calibrated_preds_batch[i,:] = torch.tensor(calibrated_sequence, device=device)
-
-            # --- KEY CHANGE FOR LOSS CALCULATION ---
-            # Slice the calibrated predictions and true values to get only the 12th hour
-            preds_at_12h = calibrated_preds_batch[:, future]
-            y_at_12h = y[:, future]
+            # --- KEY CHANGE ---
+            # Do NOT pass 'y' during validation/inference
+            preds = model(x, y=None) 
             
-            # Calculate loss for this batch on the specific time step
-            loss = loss_fn(preds_at_12h, y_at_12h)
-            total_loss += loss.item()
-            
-            # Store the results for the final RMSE calculation
-            all_calibrated_preds.append(calibrated_preds_batch.cpu().numpy())
+            all_preds.append(preds.cpu().numpy())
             all_y.append(y.cpu().numpy())
 
-    # --- RMSE Calculation (remains the same) ---
-    all_calibrated_preds_array = np.concatenate(all_calibrated_preds, axis=0)
-    all_y_array = np.concatenate(all_y, axis=0)
-
-    preds_at_12h_all = all_calibrated_preds_array[:, future]
-    y_at_12h_all = all_y_array[:, future]
-
-    rmse = np.sqrt(np.mean((preds_at_12h_all - y_at_12h_all)**2))
+    # (The rest of the derivative RMSE calculation is the same)
+    # ...
+    pred_derivatives = np.diff(np.concatenate(all_preds, axis=0), axis=1)
+    true_derivatives = np.diff(np.concatenate(all_y, axis=0), axis=1)
+    derivative_rmse = np.sqrt(np.mean((pred_derivatives - true_derivatives)**2))
     
-    # Return both the average loss and the final RMSE
-    avg_loss = total_loss / len(dataloader)
-    return avg_loss, rmse
-
+    return derivative_rmse
 class PlateauStopper(tune.stopper.Stopper):
     """Stops trials when the metric has plateaued."""
 

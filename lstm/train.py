@@ -104,12 +104,14 @@ def main(config):
         13085,
         13098,
     ]
-    x_train, y_train,_, input_size, m_scale, flux_scale, cont_int_scale = prepare_dataset(
-        train_ars,
-        9,
-        config["rid_of_top"],
-        config["num_in"],
-        config["num_pred"],
+    x_train, y_train, _, input_size, m_scale, flux_scale, cont_int_scale = (
+        prepare_dataset(
+            train_ars,
+            9,
+            config["rid_of_top"],
+            config["num_in"],
+            config["num_pred"],
+        )
     )
 
     print("Loading and preparing test data...")
@@ -133,7 +135,7 @@ def main(config):
         TensorDataset(x_train, y_train), batch_size=config["batch_size"], shuffle=True
     )
     val_loader = DataLoader(
-        TensorDataset(x_val, y_val, last_val), batch_size=config["batch_size"], shuffle=False
+        TensorDataset(x_val, y_val), batch_size=config["batch_size"], shuffle=False
     )
 
     # --- Model & Optimizer ---
@@ -152,7 +154,7 @@ def main(config):
     print("Starting training...")
     for epoch in range(config["n_epochs"]):
         train_loss = train_epoch(model, train_loader, loss_fn, optimizer, device)
-        val_loss, val_rmse = validate_model(model, val_loader, loss_fn, device)
+        val_rmse = validate_model(model, val_loader, device)
 
         lr = scheduler.get_last_lr()[0]
         scheduler.step(val_rmse)
@@ -167,7 +169,7 @@ def main(config):
         log_metrics = {
             "epoch": epoch,
             "train_loss": train_loss,
-            "validation_loss": val_loss,
+            # "validation_loss": val_loss,
             "learning_rate": float(lr),
             "RMSE": val_rmse,
         }

@@ -49,13 +49,15 @@ def main(config):
 
     # Initialize wandb
     wandb.init(
-        project=f"{model_type},global_min_max",
+        project=f"{model_type},LSTM with magnitude and derivative loss ",
         entity=os.environ.get("WANDB_ENTITY"),
         config=config,
         name=f"{model_type}_pred{config['num_pred']}_r{config['rid_of_top']}_i{config['num_in']}_n{config['num_layers']}_h{config['hidden_size']}_e{config['n_epochs']}_l{config['learning_rate']:.5f}_d{config['dropout']:.2f}",
         notes=f"{model_type} training with lr={config['learning_rate']}, dropout={config['dropout']}",
     )
-
+    rot = 4
+    num_in = 110
+    num_pred = 12
     # --- Data Loading ---
     print("Loading and preparing training data...")
     train_ars = [
@@ -105,9 +107,9 @@ def main(config):
         prepare_dataset(
             train_ars,
             9,
-            config["rid_of_top"],
-            config["num_in"],
-            config["num_pred"],
+            rot,
+            num_in,
+            num_pred,
         )
     )
 
@@ -116,9 +118,9 @@ def main(config):
     x_val, y_val, last_all, _, _, _, _ = prepare_dataset(
         val_ars,
         9,
-        config["rid_of_top"],
-        config["num_in"],
-        config["num_pred"],
+        rot,
+        num_in,
+        num_pred,
         m_scale,
         flux_scale,
         cont_int_scale,
@@ -132,7 +134,7 @@ def main(config):
         TensorDataset(x_train, y_train), batch_size=config["batch_size"], shuffle=True
     )
     val_loader = DataLoader(
-        TensorDataset(x_val, y_val, last_all),
+        TensorDataset(x_val, y_val),
         batch_size=config["batch_size"],
         shuffle=False,
     )
@@ -142,7 +144,7 @@ def main(config):
         input_size,
         config["hidden_size"],
         config["num_layers"],
-        config["num_pred"],
+        num_pred,
         dropout=config["dropout"],
     ).to(device)
     loss_fn = nn.MSELoss()
@@ -153,8 +155,8 @@ def main(config):
     # --- Training Loop ---
     print("Starting training...")
     for epoch in range(config["n_epochs"]):
-        train_loss = train_epoch(model, train_loader, loss_fn, optimizer, device)
-        val_loss, val_rmse = validate_model(model, val_loader, loss_fn, device)
+        train_loss = train_epoch(model, train_loader, loss_fn, optimizer, device, config['teacher_forcing_ratio'], config['alpha'])
+        val_rmse = validate_model(model, val_loader, device)
 
         lr = scheduler.get_last_lr()[0]
         scheduler.step(val_rmse)
@@ -162,7 +164,7 @@ def main(config):
         log_metrics = {
             "epoch": epoch,
             "train_loss": train_loss,
-            "validation_loss": val_loss,
+            # "validation_loss": val_loss,
             "learning_rate": float(lr),
             "RMSE": val_rmse,
         }
@@ -220,42 +222,51 @@ def parse_args():
 
 
 if __name__ == "__main__":
-    # For this refactoring to be fully functional, you must provide
-    # the implementations for these functions from your 'functions.py' file.
-    config = parse_args()
+    # Define the search space from the section above
     search_space = {
-        "num_pred": tune.choice([12]),
-        "rid_of_top": tune.choice([4]),
-        "num_in": tune.choice([110]),
-        "num_layers": tune.choice([1, 2, 3, 4]),
-        "hidden_size": tune.choice([10, 32, 64, 128, 150]),
-        "n_epochs": tune.choice([500]),
-        "learning_rate": tune.loguniform(1e-5, 1e-3),
-        "dropout": tune.choice([0, 0.01, 0.1]),
-        "batch_size": tune.choice([4, 8, 16, 32]),
+        "learning_rate": tune.loguniform(1e-5, 1e-2),
+        "alpha": tune.choice([0.1, 0.3, 0.5, 0.7, 0.9]),
+        "teacher_forcing_ratio": tune.choice([0.1, 0.25, 0.5]),
+        "hidden_size": tune.choice([32, 64, 128]),
+        "num_layers": tune.choice([2, 3, 4]),
+        "dropout": tune.choice([0.1, 0.2, 0.3]),
+        "batch_size": tune.choice([32, 64]),
+        # Add any other fixed parameters your train function needs
+        "n_epochs": 100, # Example fixed parameter
     }
-    algo = OptunaSearch()
-    scheduler = ASHAScheduler(max_t=500, grace_period=10, reduction_factor=3)
-
-    custom_stopper = PlateauStopper(
-        "RMSE", min_epochs=50, patience=10, min_improvement_percent=0.5
+    
+    # Scheduler to early-stop bad trials
+    scheduler = ASHAScheduler(
+        metric="RMSE",
+        mode="min",
+        grace_period=10, # Min epochs before a trial can be stopped
+        reduction_factor=2
     )
 
-    ray.init(num_cpus=4, num_gpus=2, include_dashboard=False)
-    tuner = tune.Tuner(  # ③
-        tune.with_resources(main, {"gpu": 1}),
-        tune_config=tune.TuneConfig(
-            metric="RMSE",
-            mode="min",
-            search_alg=algo,
-            scheduler=scheduler,
-            num_samples=config["sample_size"],
-            trial_dirname_creator=lambda trial: str(trial.trial_id),
-        ),
-        run_config=tune.RunConfig(
-            stop=custom_stopper,
-        ),
+    # Search algorithm
+    search_alg = OptunaSearch(
+        metric="RMSE",
+        mode="min"
+    )
+
+    # Set up the Tuner
+    tuner = tune.Tuner(
+        main,
         param_space=search_space,
+        tune_config=tune.TuneConfig(
+            num_samples=50,  # Number of different hyperparameter combinations to try
+            scheduler=scheduler,
+            search_alg=search_alg,
+        ),
+        run_config=ray.train.RunConfig(
+            name="lstm_hyperparameter_search",
+            stop={"training_iteration": 100}, # Max epochs per trial
+        )
     )
+
+    # Run the hyperparameter search
     results = tuner.fit()
-    print("Best config is:", results.get_best_result().config)
+
+    # Get the best result
+    best_config = results.get_best_result(metric="RMSE", mode="min").config
+    print("Best config found: ", best_config)
