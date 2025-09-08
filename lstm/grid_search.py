@@ -253,12 +253,13 @@ if __name__ == "__main__":
 
     # Search algorithm
     search_alg = OptunaSearch(metric="RMSE", mode="min")
-    scaling_config = ray.train.ScalingConfig(
-        use_gpu=True, resources_per_worker={"CPU": 1, "GPU": 1}
+    trainable_with_resources = tune.with_resources(
+        main,
+        resources={"cpu": 2, "gpu": 1}
     )
     # Set up the Tuner
     tuner = tune.Tuner(
-        main,
+        trainable_with_resources,
         param_space=search_space,
         tune_config=tune.TuneConfig(
             num_samples=50,  # Number of different hyperparameter combinations to try
@@ -268,8 +269,8 @@ if __name__ == "__main__":
         run_config=ray.train.RunConfig(
             name="lstm_hyperparameter_search",
             stop={"training_iteration": 100},  # Max epochs per trial
-            scaling_config=scaling_config,
         ),
+        
     )
 
     # Run the hyperparameter search
