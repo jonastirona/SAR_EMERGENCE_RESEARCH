@@ -254,10 +254,6 @@ if __name__ == "__main__":
 
     # Search algorithm
     search_alg = OptunaSearch(metric="RMSE", mode="min")
-    trainable_with_resources = tune.with_resources(
-        main,
-        resources={"cpu": 2, "gpu": 1}
-    )
 
     early_stopper = TrialPlateauStopper(
         metric="RMSE",
@@ -265,8 +261,9 @@ if __name__ == "__main__":
         grace_period=10, # Number of epochs to wait for improvement
     )
     # Set up the Tuner
+    ray.init(num_cpus=4, num_gpus=2, include_dashboard=False)
     tuner = tune.Tuner(
-        trainable_with_resources,
+        tune.with_resources(main, {"gpu": 1}),
         param_space=search_space,
         tune_config=tune.TuneConfig(
             num_samples=200,  # Number of different hyperparameter combinations to try
