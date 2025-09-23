@@ -309,7 +309,7 @@ def process_data(maps, flux, cont_int, m_scale, f_scale, cont_int_scale):
 def get_params(path):
     pth_files = glob.glob(
         path
-        + "SAR_EMERGENCE_RESEARCH/lstm/results/pred12_r4_i110_n2_h32_e50_lr0.00200000_d0.1.pth"
+        + "SAR_EMERGENCE_RESEARCH/lstm/results/pred12_r4_i110_n1_h32_e10_lr0.00050000_d0.0.pth"
     )  # Assuming there's only one .pth file and its naming follows the specific pattern
     filename = pth_files[0]
     matches = re.findall(
