@@ -18,7 +18,7 @@ import re
 from collections import OrderedDict
 import glob
 
-isVanillaLSTM = False
+isVanillaLSTM = True
 warnings.filterwarnings("ignore")
 l = re.split(r"[\\/]", os.path.abspath(os.getcwd()))
 BASE_PATH = "/".join(l[:-1]) + "/"
@@ -306,10 +306,9 @@ def process_data(maps, flux, cont_int, m_scale, f_scale, cont_int_scale):
     return inputs, mag_flux
 
 
-def get_params(path):
+def get_params(path, file):
     pth_files = glob.glob(
-        path
-        + "SAR_EMERGENCE_RESEARCH/lstm/results/pred12_r4_i110_n1_h32_e10_lr0.00050000_d0.0.pth"
+        path + "SAR_EMERGENCE_RESEARCH/lstm/results/" + file
     )  # Assuming there's only one .pth file and its naming follows the specific pattern
     filename = pth_files[0]
     matches = re.findall(
@@ -478,7 +477,9 @@ def prepare_dataset(
 
 
 # --- Model Training & Evaluation ---
-def train_epoch(model, dataloader, loss_fn, optimizer, device, teacher_ratio, alpha):
+def train_epochHybrid(
+    model, dataloader, loss_fn, optimizer, device, teacher_ratio, alpha
+):
     model.train()
     total_loss = 0
     loss_scaler = 100.0
@@ -507,6 +508,33 @@ def train_epoch(model, dataloader, loss_fn, optimizer, device, teacher_ratio, al
         scaled_loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         optimizer.step()
+        total_loss += loss.item()
+
+    return total_loss / len(dataloader)
+
+
+def train_epoch(model, dataloader, loss_fn, optimizer, device):
+    """Runs a single training epoch."""
+
+    model.train()
+
+    total_loss = 0
+
+    for x, y in dataloader:
+        x, y = x.to(device), y.to(device)
+
+        optimizer.zero_grad()
+
+        outputs = model(x)
+
+        loss = loss_fn(outputs, y)
+
+        loss.backward()
+
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+
+        optimizer.step()
+
         total_loss += loss.item()
 
     return total_loss / len(dataloader)
@@ -573,9 +601,7 @@ def validate_model(model, dataloader, device):
         for x, y in dataloader:
             x, y = x.to(device), y.to(device)
 
-            # --- KEY CHANGE ---
-            # Do NOT pass 'y' during validation/inference
-            preds = model(x, y=None)
+            preds = model(x)
 
             all_preds.append(preds.cpu().numpy())
             all_y.append(y.cpu().numpy())

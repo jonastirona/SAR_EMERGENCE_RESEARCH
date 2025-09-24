@@ -75,7 +75,7 @@ def eval_AR_emergence_with_plots(
         learning_rate,
         dropout,
         filename,
-    ) = get_params(path)
+    ) = get_params(path, 'pred12_r4_i110_n4_h10_e5_lr0.00093000_d0.0.pth')
     # print(
     #     f"Extracted from filename: Time Window: {num_pred}, Rid of Top: {rid_of_top}, Number of Inputs: {num_in}, Number of Layers: {num_layers}, Hidden Size: {hidden_size}, Number of Epochs: {n_epochs}, Learning Rate: {learning_rate}"
     # )  # Print extracted values for confirmation
