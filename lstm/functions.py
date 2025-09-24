@@ -271,7 +271,9 @@ def load_ar_data(ar_num, size, rid_of_top, starting_tile):
         time = power_maps["arr_4"]
 
         # Unpack arrays
+        # print(power_maps)
         power_maps = [power_maps[f"arr_{i}"] for i in range(4)]
+        # print(power_maps)
         mag_flux = mag_flux_data["arr_0"]
         intensities = intensities_data["arr_0"]
 
