@@ -23,7 +23,7 @@ from ray import tune
 import ray
 from ray.tune.search.optuna import OptunaSearch
 from ray.tune.schedulers import ASHAScheduler
-from eval import eval_AR_emergence as eval
+
 
 if isVanillaLSTM:
     from functions import VanillaLSTM as LSTM
@@ -154,7 +154,16 @@ def main(config):
     # --- Training Loop ---
     print("Starting training...")
     for epoch in range(config["n_epochs"]):
-        train_loss = train_epochHybrid(model, train_loader, loss_fn, optimizer, device, 0.1, 0.5)
+        teacher = max(0.0, 0.6 * (1 - epoch / config["n_epochs"]))
+        train_loss = train_epochHybrid(
+            model,
+            train_loader,
+            loss_fn,
+            optimizer,
+            device,
+            teacher_ratio=teacher,
+            alpha=0.7,
+        )
         val_rmse = validate_model(model, val_loader, device)
 
         lr = scheduler.get_last_lr()[0]
@@ -182,6 +191,12 @@ def main(config):
     model_path = os.path.join(RESULTS_PATH, model_name)
     torch.save(model.state_dict(), model_path)
     print(f"Model saved to {model_path}")
+    scales = {
+        "m_scale": m_scale,
+        "flux_scale": flux_scale,
+        "cont_int_scale": cont_int_scale,
+    }
+    np.savez(os.path.join(RESULTS_PATH, "model_scales.npz"), **scales)
 
     # model_artifact = wandb.Artifact(
     #     name=f"lstm-model-{wandb.run.id}",

@@ -18,13 +18,15 @@ import re
 from collections import OrderedDict
 import glob
 
-isVanillaLSTM = True
+isVanillaLSTM = False
 warnings.filterwarnings("ignore")
 l = re.split(r"[\\/]", os.path.abspath(os.getcwd()))
 BASE_PATH = "/".join(l[:-1]) + "/"
 
 DATA_PATH = BASE_PATH + "SAR_EMERGENCE_RESEARCH/data"
 RESULTS_PATH = BASE_PATH + "SAR_EMERGENCE_RESEARCH/lstm/results"
+
+scaling_factor = 1000
 
 
 ##### Sept 18th and later
@@ -214,7 +216,7 @@ def smooth_with_numpy(d_true, window_size=5):
 def recalibrate(pred, previous_value):
     trend = pred - pred[0]
     new_pred = trend + previous_value
-    return new_pred
+    return pred
 
 
 def highlight_tile(ax, tile_number, divisions=9, color="r", linewidth=2):
@@ -280,7 +282,8 @@ def load_ar_data(ar_num, size, rid_of_top, starting_tile):
         # Trim, stack, and handle NaNs
         trim_slice = slice(starting_tile, starting_tile + size)
         power_maps = [pm[trim_slice, :] for pm in power_maps]
-        mag_flux = mag_flux[trim_slice, :]
+        a = mag_flux[trim_slice, :]
+        mag_flux = np.diff(mag_flux[trim_slice, :], axis=1, prepend=0) * scaling_factor
         intensities = intensities[trim_slice, :]
 
         stacked_maps = np.stack(power_maps, axis=1)
@@ -343,7 +346,7 @@ def get_params(path, file):
 
 
 def AR_defs(val_AR):
-    before_plot, num_in, NOAA_first, NOAA_second = None, None, None, None
+    before_plot, num_in, NOAA_first, NOAA_second, starting_tile, window_s = None, None, None, None, None, None
     if val_AR == 11698:
         window_s = 98
         starting_tile = 46
@@ -542,77 +545,85 @@ def train_epoch(model, dataloader, loss_fn, optimizer, device):
     return total_loss / len(dataloader)
 
 
-# def validate_model(model, dataloader, loss_fn, device):
-#     """
-#     Validates the model, calculating both loss and RMSE for a specific future time step.
-#     """
-#     model.eval()
-#     total_loss = 0
-#     all_calibrated_preds = []
-#     all_y = []
+"""def validate_model(model, dataloader, loss_fn, device):
+    \"\"\"
+    Validates the model, calculating both loss and RMSE for a specific future time step.
+    \"\"\"
+    model.eval()
+    total_loss = 0
+    all_calibrated_preds = []
+    all_y = []
 
-#     # This is the specific time step you want to evaluate (12th hour)
-#     future = 11
+    # This is the specific time step you want to evaluate (12th hour)
+    future = 11
 
-#     with torch.no_grad():
-#         for x, y, last_vals in dataloader:
-#             x, y, last_vals = x.to(device), y.to(device), last_vals.to(device)
+    with torch.no_grad():
+        for x, y, last_vals in dataloader:
+            x, y, last_vals = x.to(device), y.to(device), last_vals.to(device)
 
-#             # Get model predictions (full sequence)
-#             preds = model(x)
+            # Get model predictions (full sequence)
+            preds = model(x)
 
-#             # --- Calibrate the entire batch of sequences first ---
-#             calibrated_preds_batch = torch.zeros_like(preds)
-#             for i in range(preds.shape[0]):
-#                 calibrated_sequence = recalibrate(preds[i].cpu().numpy(), last_vals[i].cpu().item())
-#                 calibrated_preds_batch[i,:] = torch.tensor(calibrated_sequence, device=device)
+            # --- Calibrate the entire batch of sequences first ---
+            calibrated_preds_batch = torch.zeros_like(preds)
+            for i in range(preds.shape[0]):
+                calibrated_sequence = recalibrate(preds[i].cpu().numpy(), last_vals[i].cpu().item())
+                calibrated_preds_batch[i,:] = torch.tensor(calibrated_sequence, device=device)
 
-#             # --- KEY CHANGE FOR LOSS CALCULATION ---
-#             # Slice the calibrated predictions and true values to get only the 12th hour
-#             preds_at_12h = calibrated_preds_batch[:, future]
-#             y_at_12h = y[:, future]
+            # --- KEY CHANGE FOR LOSS CALCULATION ---
+            # Slice the calibrated predictions and true values to get only the 12th hour
+            preds_at_12h = calibrated_preds_batch[:, future]
+            y_at_12h = y[:, future]
 
-#             # Calculate loss for this batch on the specific time step
-#             loss = loss_fn(preds_at_12h, y_at_12h)
-#             total_loss += loss.item()
+            # Calculate loss for this batch on the specific time step
+            loss = loss_fn(preds_at_12h, y_at_12h)
+            total_loss += loss.item()
 
-#             # Store the results for the final RMSE calculation
-#             all_calibrated_preds.append(calibrated_preds_batch.cpu().numpy())
-#             all_y.append(y.cpu().numpy())
+            # Store the results for the final RMSE calculation
+            all_calibrated_preds.append(calibrated_preds_batch.cpu().numpy())
+            all_y.append(y.cpu().numpy())
 
-#     # --- RMSE Calculation (remains the same) ---
-#     all_calibrated_preds_array = np.concatenate(all_calibrated_preds, axis=0)
-#     all_y_array = np.concatenate(all_y, axis=0)
+    # --- RMSE Calculation (remains the same) ---
+    all_calibrated_preds_array = np.concatenate(all_calibrated_preds, axis=0)
+    all_y_array = np.concatenate(all_y, axis=0)
 
-#     preds_at_12h_all = all_calibrated_preds_array[:, future]
-#     y_at_12h_all = all_y_array[:, future]
+    preds_at_12h_all = all_calibrated_preds_array[:, future]
+    y_at_12h_all = all_y_array[:, future]
 
-#     rmse = np.sqrt(np.mean((preds_at_12h_all - y_at_12h_all)**2))
+    rmse = np.sqrt(np.mean((preds_at_12h_all - y_at_12h_all)**2))
 
-#     # Return both the average loss and the final RMSE
-#     avg_loss = total_loss / len(dataloader)
-#     return avg_loss, rmse
+    # Return both the average loss and the final RMSE
+    avg_loss = total_loss / len(dataloader)
+    return avg_loss, rmse
+"""
 
 
 def validate_model(model, dataloader, device):
     model.eval()
     all_preds = []
     all_y = []
-
+    # fig, ax = plt.subplots()
     with torch.no_grad():
         for x, y in dataloader:
             x, y = x.to(device), y.to(device)
-
             preds = model(x)
+            predscpu = preds.cpu().numpy()
+            all_preds.append(predscpu)
+            ycpu = y.cpu().numpy()
+            all_y.append(ycpu)
+    #         ax.plot(predscpu[0])
+    #         ax.plot(ycpu[0])
+    # fig.show()    
+    # CORRECT: Calculate RMSE directly on the model's output
+    # because 'preds' is now the predicted derivative and 'y' is the true derivative.
+    all_preds_array = np.concatenate(all_preds, axis=0)
+    all_y_array = np.concatenate(all_y, axis=0)
 
-            all_preds.append(preds.cpu().numpy())
-            all_y.append(y.cpu().numpy())
+    # SCALE PREDICTIONS DOWN before calculating the error
+    rescaled_preds = all_preds_array
+    rescaled_y = all_y_array 
 
-    # (The rest of the derivative RMSE calculation is the same)
-    # ...
-    pred_derivatives = np.diff(np.concatenate(all_preds, axis=0), axis=1)
-    true_derivatives = np.diff(np.concatenate(all_y, axis=0), axis=1)
-    derivative_rmse = np.sqrt(np.mean((pred_derivatives - true_derivatives) ** 2))
+    derivative_rmse = np.sqrt(np.mean((rescaled_preds - rescaled_y) ** 2))
 
     return derivative_rmse
 
