@@ -19,12 +19,16 @@ from collections import OrderedDict
 import glob
 
 isVanillaLSTM = True
+if isVanillaLSTM:
+    model_type = "VanillaLSTM"
+else:
+    model_type = "LSTM"
 warnings.filterwarnings("ignore")
 l = re.split(r"[\\/]", os.path.abspath(os.getcwd()))
 BASE_PATH = "/".join(l[:-1]) + "/"
 
 DATA_PATH = BASE_PATH + "SAR_EMERGENCE_RESEARCH/data"
-RESULTS_PATH = BASE_PATH + "SAR_EMERGENCE_RESEARCH/lstm/results"
+RESULTS_PATH = BASE_PATH + "SAR_EMERGENCE_RESEARCH/lstm/results/" + model_type + "shuffling"
 
 
 ##### Sept 18th and later
@@ -307,13 +311,9 @@ def process_data(maps, flux, cont_int, m_scale, f_scale, cont_int_scale):
 
 
 def get_params(path, file):
-    pth_files = glob.glob(
-        path + "SAR_EMERGENCE_RESEARCH/lstm/results/" + file
-    )  # Assuming there's only one .pth file and its naming follows the specific pattern
-    filename = pth_files[0]
     matches = re.findall(
         r"pred(\d+)_r(\d+)_i(\d+)_n(\d+)_h(\d+)_e(\d+)_lr([0-9.]+)_d([0-9.]+)\.pth",
-        filename,
+        file,
     )  # Extract numbers from the filename
     (
         num_pred,
@@ -336,7 +336,6 @@ def get_params(path, file):
         n_epochs,
         learning_rate,
         dropout,
-        filename,
     )
 
 

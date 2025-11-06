@@ -3,36 +3,29 @@ import sys
 import time
 import warnings
 
-import numpy as np
 import torch
 import wandb
 from torch import nn
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader, TensorDataset
 from functions import (
-    PlateauStopper,
     prepare_dataset,
-    train_epoch,
+    train_epochHybrid,
     validate_model,
     isVanillaLSTM,
-    BASE_PATH,
     RESULTS_PATH,
+    model_type,
 )
 from ray import tune
 import ray
 from ray.tune.search.optuna import OptunaSearch
 from ray.tune.schedulers import ASHAScheduler
-from eval import eval_AR_emergence as eval
 from ray.tune.stopper import TrialPlateauStopper
 
 if isVanillaLSTM:
     from functions import VanillaLSTM as LSTM
-
-    model_type = "VanillaLSTM"
 else:
     from functions import LSTM as LSTM
-
-    model_type = "LSTM"
 
 
 # Assume these are defined in a 'functions.py' file or similar
@@ -55,10 +48,11 @@ def main(config):
     model_name = f"{model_type}_n{config['num_layers']}_h{config['hidden_size']}_lr{config['learning_rate']:.8f}_d{config['dropout']}_t{config['teacher_forcing_ratio']}_a{config['alpha']}"
     # Initialize wandb
     wandb.init(
-        project=f"{model_type},LSTM w magnitude&derivative loss & weight decay & earlystopper",
+        project=f"{model_type},hybridloss,shuffle,",
         entity=os.environ.get("WANDB_ENTITY"),
         config=config,
         name=f"{model_name}",
+        notes="",
     )
 
     # --- Data Loading ---
@@ -151,13 +145,17 @@ def main(config):
         dropout=config["dropout"],
     ).to(device)
     loss_fn = nn.MSELoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=config["learning_rate"], weight_decay=config['weight_decay'])
+    optimizer = torch.optim.Adam(
+        model.parameters(),
+        lr=config["learning_rate"],
+        weight_decay=config["weight_decay"],
+    )
     scheduler = ReduceLROnPlateau(optimizer, "min", factor=0.2, patience=10)
 
     # --- Training Loop ---
     print("Starting training...")
     for epoch in range(config["n_epochs"]):
-        train_loss = train_epoch(
+        train_loss = train_epochHybrid(
             model,
             train_loader,
             loss_fn,
@@ -178,22 +176,6 @@ def main(config):
             "learning_rate": float(lr),
             "RMSE": val_rmse,
         }
-        # if val_rmse <= 0.07:
-        #     result = BASE_PATH + f"SAR_EMERGENCE_RESEARCH/lstm/results/{val_rmse:.8f}"
-        #     os.makedirs(result, exist_ok=True)  # Ensure the results directory exists
-        #     model_path = os.path.join(result, model_name)
-        #     torch.save(model.state_dict(), model_path)
-        #     print(f"Model saved to {model_path}")
-
-        #     model_artifact = wandb.Artifact(
-        #         name=f"RMSE-{val_rmse:.8f}-{model_type}-model-{wandb.run.id}",
-        #         type="model",
-        #         description=f"{model_type} Model for SAR emergence prediction",
-        #         metadata=config,
-        #     )
-        #     model_artifact.add_file(model_path)
-        #     wandb.log_artifact(model_artifact)
-        # print(log_metrics)
         wandb.log(log_metrics)
         tune.report(log_metrics)
 
@@ -203,9 +185,9 @@ def main(config):
     print(f"Model saved to {model_path}")
 
     model_artifact = wandb.Artifact(
-        name=f"lstm-model-{wandb.run.id}",
+        name=f"{model_type}-model-{wandb.run.id}",
         type="model",
-        description="LSTM Model for SAR emergence prediction",
+        description=f"{model_type} model for SAR emergence prediction",
         metadata=config,
     )
     model_artifact.add_file(model_path)
@@ -241,7 +223,7 @@ if __name__ == "__main__":
         "dropout": tune.choice([0.1, 0.2, 0.3]),
         "batch_size": tune.choice([32, 64]),
         "weight_decay": tune.loguniform(1e-6, 1e-3),
-        "n_epochs": 100,  
+        "n_epochs": 100,
     }
 
     # Scheduler to early-stop bad trials
@@ -258,7 +240,7 @@ if __name__ == "__main__":
     early_stopper = TrialPlateauStopper(
         metric="RMSE",
         mode="min",
-        grace_period=10, # Number of epochs to wait for improvement
+        grace_period=10,  # Number of epochs to wait for improvement
     )
     # Set up the Tuner
     ray.init(num_cpus=4, num_gpus=2, include_dashboard=False)
@@ -274,7 +256,6 @@ if __name__ == "__main__":
             name="lstm_hyperparameter_search",
             stop=early_stopper,  # Max epochs per trial
         ),
-        
     )
 
     # Run the hyperparameter search

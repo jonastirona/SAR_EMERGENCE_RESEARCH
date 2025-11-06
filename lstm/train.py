@@ -2,37 +2,22 @@ import os
 import sys
 import time
 import warnings
-
-import numpy as np
 import torch
-import wandb
 from torch import nn
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader, TensorDataset
 from functions import (
-    PlateauStopper,
     prepare_dataset,
     train_epoch,
     validate_model,
     isVanillaLSTM,
-    BASE_PATH,
     RESULTS_PATH,
 )
-from ray import tune
-import ray
-from ray.tune.search.optuna import OptunaSearch
-from ray.tune.schedulers import ASHAScheduler
-from eval import eval_AR_emergence as eval
 
 if isVanillaLSTM:
     from functions import VanillaLSTM as LSTM
-
-    model_type = "VanillaLSTM"
 else:
     from functions import LSTM as LSTM
-
-    model_type = "LSTM"
-
 
 # Assume these are defined in a 'functions.py' file or similar
 # from functions import LSTM, lstm_ready, min_max_scaling
@@ -47,16 +32,6 @@ def main(config):
     start_time = time.time()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Runs on: {device}")
-
-    # Initialize wandb
-    # wandb.init(
-    #     project="LSTM,Future_11,NUM_IN_110,pred_12",
-    #     entity=os.environ.get("WANDB_ENTITY"),
-    #     config=config,
-
-    #     name=f"LSTM_pred{config['num_pred']}_r{config['rid_of_top']}_i{config['num_in']}_n{config['num_layers']}_h{config['hidden_size']}_e{config['n_epochs']}_l{config['learning_rate']:.5f}_d{config['dropout']:.2f}",
-    #     notes=f"LSTM training with lr={config['learning_rate']}, dropout={config['dropout']}",
-    # )
 
     # --- Data Loading ---
     print("Batch size:", config["batch_size"])
@@ -160,11 +135,11 @@ def main(config):
         scheduler.step(val_rmse)
 
         # Evaluate every 10 epochs and on the last epoch
-        # scores = []
-        # for AR in [11698, 11726, 13165, 13179, 13183]:
-        #     score = eval(device, AR, False, BASE_PATH, model.state_dict(), **config)
-        #     scores.append(score)
-        # val_rmse = float(np.mean(scores))
+        """        scores = []
+        for AR in [11698, 11726, 13165, 13179, 13183]:
+            score = eval(device, AR, False, BASE_PATH, model.state_dict(), **config)
+            scores.append(score)
+        val_rmse = float(np.mean(scores))"""
 
         log_metrics = {
             "epoch": epoch,
@@ -181,15 +156,6 @@ def main(config):
     model_path = os.path.join(RESULTS_PATH, model_name)
     torch.save(model.state_dict(), model_path)
     print(f"Model saved to {model_path}")
-
-    # model_artifact = wandb.Artifact(
-    #     name=f"lstm-model-{wandb.run.id}",
-    #     type="model",
-    #     description="LSTM Model for SAR emergence prediction",
-    #     metadata=config,
-    # )
-    # model_artifact.add_file(model_path)
-    # wandb.log_artifact(model_artifact)
 
     end_time = time.time()
     print(f"Elapsed time: {(end_time - start_time) / 60:.2f} minutes")

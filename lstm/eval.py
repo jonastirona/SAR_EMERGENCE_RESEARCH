@@ -11,6 +11,8 @@ from functions import (
     AR_defs,
     load_ar_data,
     isVanillaLSTM,
+    RESULTS_PATH,
+    model_type
 )
 from sklearn.metrics import mean_squared_error
 from datetime import timedelta
@@ -24,6 +26,7 @@ import os
 from collections import OrderedDict
 from datetime import datetime
 
+
 if isVanillaLSTM:
     from functions import VanillaLSTM as LSTM
 else:
@@ -33,13 +36,13 @@ warnings.filterwarnings("ignore")
 
 
 def initialize_lstm(
-    inputs, hidden_size, num_layers, num_pred, state_dict, filename, device
+    inputs, hidden_size, num_layers, num_pred, state_dict, filepath, device
 ):
     input_size = np.shape(inputs)[1]
 
     # Initialize the LSTM and move it to GPU
     lstm = LSTM(input_size, hidden_size, num_layers, num_pred).to(device)
-    saved_state_dict = state_dict or torch.load(filename, map_location=device)
+    saved_state_dict = state_dict or torch.load(filepath, map_location=device)
     new_state_dict = OrderedDict()
     for k, v in saved_state_dict.items():
         name = k[7:] if k.startswith("module.") else k  # remove 'module.' prefix
@@ -64,7 +67,8 @@ def eval_AR_emergence_with_plots(
     learning_rate=None,
     dropout=None,
 ):
-    filename = None
+    filename = 'pred12_r4_i110_n2_h32_e50_lr0.00100000_d0.0.pth'
+    filepath = RESULTS_PATH + "/" + filename
     (
         num_pred,
         rid_of_top,
@@ -74,8 +78,7 @@ def eval_AR_emergence_with_plots(
         n_epochs,
         learning_rate,
         dropout,
-        filename,
-    ) = get_params(path, 'pred12_r4_i110_n4_h10_e5_lr0.00093000_d0.0.pth')
+    ) = get_params(path, filename)
     # print(
     #     f"Extracted from filename: Time Window: {num_pred}, Rid of Top: {rid_of_top}, Number of Inputs: {num_in}, Number of Layers: {num_layers}, Hidden Size: {hidden_size}, Number of Epochs: {n_epochs}, Learning Rate: {learning_rate}"
     # )  # Print extracted values for confirmation
@@ -99,7 +102,7 @@ def eval_AR_emergence_with_plots(
         maps, flux, cont_int, time = load_ar_data(test_AR, size, rid_of_top, starting_tile)
         inputs, mag_flux = process_data(maps, flux, cont_int, m_scale, flux_scale, cont_int_scale)
         lstm = initialize_lstm(
-            inputs, hidden_size, num_layers, num_pred, state_dict, filename, device
+            inputs, hidden_size, num_layers, num_pred, state_dict, filepath, device
     )
 
         # Assuming prediction, y_test_tensors, ARs, learning_rate, and n_epochs are already defined
@@ -420,7 +423,7 @@ def eval_AR_emergence_with_plots(
             np.concatenate((mag_before_pred, true)), np.concatenate((zeros_array, pred))
         )
 
-        save_path = path + "SAR_EMERGENCE_RESEARCH/lstm/results/AR{}_{}.png".format(
+        save_path = RESULTS_PATH +"/AR{}_{}.png".format(
             test_AR, os.path.splitext(os.path.basename(filename))[0]
         )
         plt.savefig(save_path)
@@ -432,7 +435,7 @@ def eval_AR_emergence_with_plots(
 
     fig = sb.figure
     fig.savefig(
-        path + "SAR_EMERGENCE_RESEARCH/lstm/results/table.png", bbox_inches="tight", pad_inches=0, dpi=300
+        RESULTS_PATH+ "/table.png", bbox_inches="tight", pad_inches=0, dpi=300
     )  # add transparent=True if desired
     plt.close(fig)
 
