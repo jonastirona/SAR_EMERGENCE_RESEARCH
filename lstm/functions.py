@@ -19,7 +19,7 @@ import re
 from collections import OrderedDict
 import glob
 
-isVanillaLSTM = False
+isVanillaLSTM = True
 if isVanillaLSTM:
     model_type = "VanillaLSTM"
 else:
@@ -477,7 +477,7 @@ def prepare_dataset(
 
 
 # --- Model Training & Evaluation ---
-def train_epochHybrid(
+def train_epochHybridLSTM(
     model, dataloader, loss_fn, optimizer, device, teacher_ratio, alpha
 ):
     model.train()
@@ -538,6 +538,41 @@ def train_epochTeacherForcingLSTM(model, dataloader, loss_fn, optimizer, device,
 
     return total_loss / len(dataloader)
 
+
+def train_epochHybridVanillaLSTM(
+    model, dataloader, loss_fn, optimizer, device, alpha
+):
+    model.train()
+    total_loss = 0
+    loss_scaler = 100.0
+
+    # Weighting factor for the two loss components
+    # alpha
+
+    for x, y in dataloader:
+        x, y = x.to(device), y.to(device)
+        optimizer.zero_grad()
+
+        outputs = model(x)
+
+        # 1. Calculate loss on the actual values
+        value_loss = loss_fn(outputs, y)
+
+        # 2. Calculate loss on the derivatives
+        outputs_deriv = outputs[:, 1:] - outputs[:, :-1]
+        y_deriv = y[:, 1:] - y[:, :-1]
+        derivative_loss = loss_fn(outputs_deriv, y_deriv)
+
+        # 3. Combine them into a hybrid loss
+        loss = alpha * value_loss + (1 - alpha) * derivative_loss
+
+        scaled_loss = loss * loss_scaler
+        scaled_loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+        optimizer.step()
+        total_loss += loss.item()
+
+    return total_loss / len(dataloader)
 
 
 def train_epoch(model, dataloader, loss_fn, optimizer, device):
