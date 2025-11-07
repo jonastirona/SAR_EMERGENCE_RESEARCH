@@ -19,7 +19,7 @@ import re
 from collections import OrderedDict
 import glob
 
-isVanillaLSTM = True
+isVanillaLSTM = False
 if isVanillaLSTM:
     model_type = "VanillaLSTM"
 else:
@@ -511,6 +511,33 @@ def train_epochHybrid(
         total_loss += loss.item()
 
     return total_loss / len(dataloader)
+
+def train_epochTeacherForcingLSTM(model, dataloader, loss_fn, optimizer, device, teacher_forcing):
+    """Runs a single training epoch."""
+
+    model.train()
+
+    total_loss = 0
+
+    for x, y in dataloader:
+        x, y = x.to(device), y.to(device)
+
+        optimizer.zero_grad()
+
+        outputs = model(x,y,  teacher_forcing_ratio=teacher_forcing)
+
+        loss = loss_fn(outputs, y)
+
+        loss.backward()
+
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+
+        optimizer.step()
+
+        total_loss += loss.item()
+
+    return total_loss / len(dataloader)
+
 
 
 def train_epoch(model, dataloader, loss_fn, optimizer, device):

@@ -11,6 +11,7 @@ from torch.utils.data import DataLoader, TensorDataset
 from functions import (
     prepare_dataset,
     train_epochHybrid,
+    train_epochTeacherForcingLSTM,
     train_epoch,
     validate_model,
     isVanillaLSTM,
@@ -46,14 +47,14 @@ def main(config):
     num_in = 110
     num_pred = 12
 
-    model_name = f"{model_type}_n{config['num_layers']}_h{config['hidden_size']}_lr{config['learning_rate']:.8f}_d{config['dropout']}_w{config['weight_decay']}"
+    model_name = f"{model_type}_n{config['num_layers']}_h{config['hidden_size']}_lr{config['learning_rate']:.8f}_d{config['dropout']}_w{config['weight_decay']}_t{config['teacher_forcing_ratio']}"
     # Initialize wandb
     wandb.init(
-        project=f"{model_type},loss,shuffle",
+        project=f"{model_type},loss,teacher_forcing",
         entity=os.environ.get("WANDB_ENTITY"),
         config=config,
         name=f"{model_name}",
-        notes="",
+        notes="LSTM model with teacher forcing enabled and search values from 0.0 - 0.5. Hybrid loss function not used. value loss is done. shuffling turned on. github: 'LSTM,loss,teacher_forcing0-0.5,shuffle'",
     )
 
     # --- Data Loading ---
@@ -156,12 +157,13 @@ def main(config):
     # --- Training Loop ---
     print("Starting training...")
     for epoch in range(config["n_epochs"]):
-        train_loss = train_epoch(
+        train_loss = train_epochTeacherForcingLSTM(
             model,
             train_loader,
             loss_fn,
             optimizer,
             device,
+            config['teacher_forcing_ratio']
         )
         val_rmse = validate_model(model, val_loader, device)
 
@@ -216,7 +218,7 @@ if __name__ == "__main__":
     search_space = {
         "learning_rate": tune.loguniform(1e-5, 1e-2),
         # "alpha": tune.choice([0.1, 0.3, 0.5, 0.7, 0.9]),
-        # "teacher_forcing_ratio": tune.choice([0.1, 0.25, 0.5]),
+        "teacher_forcing_ratio": tune.choice([0.0, 0.1, 0.25, 0.5]),
         "hidden_size": tune.choice([32, 64, 128]),
         "num_layers": tune.choice([2, 3, 4]),
         "dropout": tune.choice([0.1, 0.2, 0.3]),
