@@ -47,14 +47,14 @@ def main(config):
     num_in = 110
     num_pred = 12
 
-    model_name = f"{model_type}_n{config['num_layers']}_h{config['hidden_size']}_lr{config['learning_rate']:.8f}_d{config['dropout']}_w{config['weight_decay']}_a{config['alpha']}"
+    model_name = f"{model_type}_n{config['num_layers']}_h{config['hidden_size']}_lr{config['learning_rate']:.8f}_d{config['dropout']}_w{config['weight_decay']}"
     # Initialize wandb
     wandb.init(
-        project=f"{model_type},hybridloss,shuffle,",
+        project=f"{model_type},loss,shuffle,",
         entity=os.environ.get("WANDB_ENTITY"),
         config=config,
         name=f"{model_name}",
-        notes="VanillaLSTM model with hybridloss function tested. shuffle on. github: 'VanillaLSTM,hybridloss,shuffle'",
+        notes="VanillaLSTM model with loss function tested. shuffle on. github: 'VanillaLSTM,loss,shuffle'",
     )
 
     # --- Data Loading ---
@@ -157,13 +157,12 @@ def main(config):
     # --- Training Loop ---
     print("Starting training...")
     for epoch in range(config["n_epochs"]):
-        train_loss = train_epochHybridVanillaLSTM(
+        train_loss = train_epoch(
             model,
             train_loader,
             loss_fn,
             optimizer,
             device,
-            config['alpha']
         )
         val_rmse = validate_model(model, val_loader, device)
 
@@ -217,7 +216,7 @@ if __name__ == "__main__":
     # Define the search space from the section above
     search_space = {
         "learning_rate": tune.loguniform(1e-5, 1e-2),
-        "alpha": tune.choice([0.1, 0.3, 0.5, 0.7, 0.9]),
+        # "alpha": tune.choice([0.1, 0.3, 0.5, 0.7, 0.9]),
         # "teacher_forcing_ratio": tune.choice([0.0, 0.1, 0.25, 0.5]),
         "hidden_size": tune.choice([32, 64, 128]),
         "num_layers": tune.choice([2, 3, 4]),
