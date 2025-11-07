@@ -48,7 +48,7 @@ def main(config):
     model_name = f"{model_type}_n{config['num_layers']}_h{config['hidden_size']}_lr{config['learning_rate']:.8f}_d{config['dropout']}_t{config['teacher_forcing_ratio']}_a{config['alpha']}"
     # Initialize wandb
     wandb.init(
-        project=f"{model_type},hybridloss,shuffle,",
+        project=f"{model_type},hybridloss,noshuffle,",
         entity=os.environ.get("WANDB_ENTITY"),
         config=config,
         name=f"{model_name}",
@@ -128,7 +128,7 @@ def main(config):
         return
 
     train_loader = DataLoader(
-        TensorDataset(x_train, y_train), batch_size=config["batch_size"], shuffle=True
+        TensorDataset(x_train, y_train), batch_size=config["batch_size"], shuffle=False
     )
     val_loader = DataLoader(
         TensorDataset(x_val, y_val),
