@@ -11,6 +11,7 @@ import torch
 import torch.nn as nn
 from torch.optim.lr_scheduler import StepLR
 from scipy.signal import detrend
+from scipy.signal import detrend
 import warnings
 import random
 from ray import tune
@@ -18,7 +19,7 @@ import re
 from collections import OrderedDict
 import glob
 
-isVanillaLSTM = True
+isVanillaLSTM = False
 if isVanillaLSTM:
     model_type = "VanillaLSTM"
 else:
