@@ -4,7 +4,7 @@ import time
 import warnings
 
 import torch
-os.environ['WANDB_MODE'] = 'disabled'
+# os.environ['WANDB_MODE'] = 'disabled'
 import wandb
 from torch import nn
 from torch.optim.lr_scheduler import ReduceLROnPlateau
