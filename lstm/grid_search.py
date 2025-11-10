@@ -4,6 +4,7 @@ import time
 import warnings
 
 import torch
+os.environ['WANDB_MODE'] = 'disabled'
 import wandb
 from torch import nn
 from torch.optim.lr_scheduler import ReduceLROnPlateau
@@ -48,11 +49,22 @@ def main(config):
     model_name = f"{model_type}_n{config['num_layers']}_h{config['hidden_size']}_lr{config['learning_rate']:.8f}_d{config['dropout']}_t{config['teacher_forcing_ratio']}_a{config['alpha']}"
     # Initialize wandb
     wandb.init(
-        project=f"{model_type},hybridloss,shuffle,",
+        project=f"{model_type},hybridloss",
         entity=os.environ.get("WANDB_ENTITY"),
         config=config,
         name=f"{model_name}",
-        notes="",
+        notes="""search_space = {
+        "learning_rate": tune.loguniform(1e-5, 1e-2),
+        "alpha": tune.choice([0.1, 0.3, 0.5, 0.7, 0.9]),
+        "teacher_forcing_ratio": tune.choice([0.1, 0.25, 0.5]),
+        "hidden_size": tune.choice([32, 64, 128]),
+        "num_layers": tune.choice([2, 3, 4]),
+        "dropout": tune.choice([0.1, 0.2, 0.3]),
+        "batch_size": tune.choice([32, 64]),
+        "weight_decay": tune.loguniform(1e-6, 1e-3),
+        "shuffle": tune.choice([True, False]),
+        "n_epochs": 100,
+    }""",
     )
 
     # --- Data Loading ---
@@ -128,7 +140,7 @@ def main(config):
         return
 
     train_loader = DataLoader(
-        TensorDataset(x_train, y_train), batch_size=config["batch_size"], shuffle=True
+        TensorDataset(x_train, y_train), batch_size=config["batch_size"], shuffle=config['shuffle']
     )
     val_loader = DataLoader(
         TensorDataset(x_val, y_val),
@@ -222,6 +234,7 @@ if __name__ == "__main__":
         "num_layers": tune.choice([2, 3, 4]),
         "dropout": tune.choice([0.1, 0.2, 0.3]),
         "batch_size": tune.choice([32, 64]),
+        "shuffle": tune.choice([True, False]),
         "weight_decay": tune.loguniform(1e-6, 1e-3),
         "n_epochs": 100,
     }
@@ -248,7 +261,7 @@ if __name__ == "__main__":
         tune.with_resources(main, {"gpu": 1}),
         param_space=search_space,
         tune_config=tune.TuneConfig(
-            num_samples=200,  # Number of different hyperparameter combinations to try
+            num_samples=parse_args()['sample_size'],  # Number of different hyperparameter combinations to try
             scheduler=scheduler,
             search_alg=search_alg,
         ),
