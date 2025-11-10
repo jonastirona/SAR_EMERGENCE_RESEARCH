@@ -6,7 +6,7 @@ import warnings
 import torch
 from math import log
 
-# os.environ['WANDB_MODE'] = 'disabled'
+# os.environ["WANDB_MODE"] = "disabled"
 
 import wandb
 from torch import nn
@@ -112,7 +112,6 @@ if x_train is None or x_val is None:
 
 tensor_train = TensorDataset(x_train, y_train)
 tensor_val = TensorDataset(x_val, y_val)
-
 
 
 def main(config, train_ref, val_ref):
@@ -287,7 +286,9 @@ if __name__ == "__main__":
                 },
                 {
                     "model": "LSTM",
-                    "teacher_forcing_ratio": hp.choice("teacher_forcing_ratio",[0, 0.1, 0.15, 0.25, 0.5]),
+                    "teacher_forcing_ratio": hp.choice(
+                        "teacher_forcing_ratio", [0, 0.1, 0.15, 0.25, 0.5]
+                    ),
                 },
             ],
         ),
@@ -321,11 +322,18 @@ if __name__ == "__main__":
     )
 
     # Set up the Tuner
-    ray.init(num_cpus=4, num_gpus=4, include_dashboard=False)
+    ray.init(num_cpus=16, num_gpus=1, include_dashboard=False)
     train_ref = ray.put(tensor_train)
     val_ref = ray.put(tensor_val)
     tuner = tune.Tuner(
-        tune.with_parameters(main, train_ref=train_ref, val_ref=val_ref),
+        tune.with_resources(
+            tune.with_parameters(
+                main,
+                train_ref=train_ref,
+                val_ref=val_ref,
+            ),
+            {"gpu": 1 / 16},
+        ),
         tune_config=tune.TuneConfig(
             num_samples=parse_args()[
                 "sample_size"
