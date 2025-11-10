@@ -322,7 +322,7 @@ if __name__ == "__main__":
     )
 
     # Set up the Tuner
-    ray.init(num_cpus=32, num_gpus=1, include_dashboard=False, _temp_dir="/mmfs1/project/mx6/ebd/SAR_EMERGENCE_RESEARCH/ray_tune_logs")
+    ray.init(num_cpus=32, num_gpus=1, include_dashboard=False, _temp_dir="/tmp/ray")
     train_ref = ray.put(tensor_train)
     val_ref = ray.put(tensor_val)
     tuner = tune.Tuner(
