@@ -4,7 +4,10 @@ import time
 import warnings
 
 import torch
+from math import log
+
 # os.environ['WANDB_MODE'] = 'disabled'
+
 import wandb
 from torch import nn
 from torch.optim.lr_scheduler import ReduceLROnPlateau
@@ -12,22 +15,20 @@ from torch.utils.data import DataLoader, TensorDataset
 from functions import (
     prepare_dataset,
     train_epochHybridLSTM,
+    train_epochHybridVanillaLSTM,
+    train_epochTeacherForcingLSTM,
     train_epoch,
     validate_model,
-    isVanillaLSTM,
     RESULTS_PATH,
-    model_type,
+    VanillaLSTM,
+    LSTM,
 )
+from hyperopt import hp
 from ray import tune
 import ray
-from ray.tune.search.optuna import OptunaSearch
+from ray.tune.search.hyperopt import HyperOptSearch
 from ray.tune.schedulers import ASHAScheduler
 from ray.tune.stopper import TrialPlateauStopper
-
-if isVanillaLSTM:
-    from functions import VanillaLSTM as LSTM
-else:
-    from functions import LSTM as LSTM
 
 
 # Assume these are defined in a 'functions.py' file or similar
@@ -36,116 +37,132 @@ else:
 warnings.filterwarnings("ignore")
 os.makedirs(RESULTS_PATH, exist_ok=True)  # Ensure the results directory exists
 
+rot = 4
+num_in = 110
+num_pred = 12
+# --- Data Loading ---
+print("Loading and preparing training data...")
+train_ars = [
+    11130,
+    11149,
+    11158,
+    11162,
+    11199,
+    11327,
+    11344,
+    11387,
+    11393,
+    11416,
+    11422,
+    11455,
+    11619,
+    11640,
+    11660,
+    11678,
+    11682,
+    11765,
+    11768,
+    11776,
+    11916,
+    11928,
+    12036,
+    12051,
+    12085,
+    12089,
+    12144,
+    12175,
+    12203,
+    12257,
+    12331,
+    12494,
+    12659,
+    12778,
+    12864,
+    12877,
+    12900,
+    12929,
+    13004,
+    13085,
+    13098,
+]
+x_train, y_train, _, input_size, m_scale, flux_scale, cont_int_scale = prepare_dataset(
+    train_ars,
+    9,
+    rot,
+    num_in,
+    num_pred,
+)
 
-def main(config):
+print("Loading and preparing test data...")
+val_ars = [11462, 11521, 11907, 12219, 12271, 12275, 12567]
+x_val, y_val, last_all, _, _, _, _ = prepare_dataset(
+    val_ars,
+    9,
+    rot,
+    num_in,
+    num_pred,
+    m_scale,
+    flux_scale,
+    cont_int_scale,
+)
+
+if x_train is None or x_val is None:
+    print("Could not create datasets. Exiting.")
+    sys.exit()
+
+tensor_train = TensorDataset(x_train, y_train)
+tensor_val = TensorDataset(x_val, y_val)
+
+
+
+def main(config, train_ref, val_ref):
+    model_type = config["model"]["model"]
+    lossFn = config["lossFn"]["lossFn"]
     """Main function to run the experiment."""
     start_time = time.time()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Runs on: {device}")
 
-    rot = 4
-    num_in = 110
-    num_pred = 12
-
-    model_name = f"{model_type}_n{config['num_layers']}_h{config['hidden_size']}_lr{config['learning_rate']:.8f}_d{config['dropout']}_w{config['weight_decay']}"
+    model_name = f"{model_type}_n{config['num_layers']}_h{config['hidden_size']}_lr{config['learning_rate']:.8f}_d{config['dropout']}_w{config['weight_decay']}_{'shuffle' if config['shuffle'] else 'noshuffle'}"
     # Initialize wandb
     wandb.init(
-        project=f"{model_type},loss",
+        project="All Search Parameters",
         entity=os.environ.get("WANDB_ENTITY"),
         config=config,
         name=f"{model_name}",
         notes="",
     )
 
-    # --- Data Loading ---
-    print("Loading and preparing training data...")
-    train_ars = [
-        11130,
-        11149,
-        11158,
-        11162,
-        11199,
-        11327,
-        11344,
-        11387,
-        11393,
-        11416,
-        11422,
-        11455,
-        11619,
-        11640,
-        11660,
-        11678,
-        11682,
-        11765,
-        11768,
-        11776,
-        11916,
-        11928,
-        12036,
-        12051,
-        12085,
-        12089,
-        12144,
-        12175,
-        12203,
-        12257,
-        12331,
-        12494,
-        12659,
-        12778,
-        12864,
-        12877,
-        12900,
-        12929,
-        13004,
-        13085,
-        13098,
-    ]
-    x_train, y_train, _, input_size, m_scale, flux_scale, cont_int_scale = (
-        prepare_dataset(
-            train_ars,
-            9,
-            rot,
-            num_in,
-            num_pred,
-        )
-    )
-
-    print("Loading and preparing test data...")
-    val_ars = [11462, 11521, 11907, 12219, 12271, 12275, 12567]
-    x_val, y_val, last_all, _, _, _, _ = prepare_dataset(
-        val_ars,
-        9,
-        rot,
-        num_in,
-        num_pred,
-        m_scale,
-        flux_scale,
-        cont_int_scale,
-    )
-
-    if x_train is None or x_val is None:
-        print("Could not create datasets. Exiting.")
-        return
-
     train_loader = DataLoader(
-        TensorDataset(x_train, y_train), batch_size=config["batch_size"], shuffle=config['shuffle']
+        train_ref,
+        batch_size=config["batch_size"],
+        shuffle=config["shuffle"],
     )
     val_loader = DataLoader(
-        TensorDataset(x_val, y_val),
+        val_ref,
         batch_size=config["batch_size"],
         shuffle=False,
     )
 
     # --- Model & Optimizer ---
-    model = LSTM(
-        input_size,
-        config["hidden_size"],
-        config["num_layers"],
-        num_pred,
-        dropout=config["dropout"],
-    ).to(device)
+    model = None
+    if model_type == "LSTM":
+        model = LSTM(
+            input_size,
+            config["hidden_size"],
+            config["num_layers"],
+            num_pred,
+            dropout=config["dropout"],
+        ).to(device)
+    else:
+        model = VanillaLSTM(
+            input_size,
+            config["hidden_size"],
+            config["num_layers"],
+            num_pred,
+            dropout=config["dropout"],
+        ).to(device)
+
     loss_fn = nn.MSELoss()
     optimizer = torch.optim.Adam(
         model.parameters(),
@@ -157,13 +174,45 @@ def main(config):
     # --- Training Loop ---
     print("Starting training...")
     for epoch in range(config["n_epochs"]):
-        train_loss = train_epoch(
-            model,
-            train_loader,
-            loss_fn,
-            optimizer,
-            device,
-        )
+        train_loss = None
+        if model_type == "LSTM":
+            if lossFn == "hybrid":
+                train_loss = train_epochHybridLSTM(
+                    model,
+                    train_loader,
+                    loss_fn,
+                    optimizer,
+                    device,
+                    config["model"]["teacher_forcing_ratio"],
+                    config["lossFn"]["alpha"],
+                )
+            else:
+                train_loss = train_epochTeacherForcingLSTM(
+                    model,
+                    train_loader,
+                    loss_fn,
+                    optimizer,
+                    device,
+                    config["model"]["teacher_forcing_ratio"],
+                )
+        else:
+            if lossFn == "hybrid":
+                train_loss = train_epochHybridVanillaLSTM(
+                    model,
+                    train_loader,
+                    loss_fn,
+                    optimizer,
+                    device,
+                    config["lossFn"]["alpha"],
+                )
+            else:
+                train_loss = train_epoch(
+                    model,
+                    train_loader,
+                    loss_fn,
+                    optimizer,
+                    device,
+                )
         val_rmse = validate_model(model, val_loader, device)
 
         lr = scheduler.get_last_lr()[0]
@@ -215,16 +264,43 @@ def parse_args():
 if __name__ == "__main__":
     # Define the search space from the section above
     search_space = {
-        "learning_rate": tune.loguniform(1e-5, 1e-2),
+        "learning_rate": hp.loguniform("learning_rate", log(1e-5), log(1e-2)),
+        # tune.loguniform(1e-5, 1e-2),
         # "alpha": tune.choice([0.1, 0.3, 0.5, 0.7, 0.9]),
         # "teacher_forcing_ratio": tune.choice([0.1, 0.25, 0.5]),
-        "hidden_size": tune.choice([32, 64, 128]),
-        "num_layers": tune.choice([2, 3, 4]),
-        "dropout": tune.choice([0.1, 0.2, 0.3]),
-        "batch_size": tune.choice([32, 64]),
-        "weight_decay": tune.loguniform(1e-6, 1e-3),
-        "shuffle": tune.choice([True, False]),
+        "hidden_size": hp.choice("hidden_size", [2, 4, 8, 16, 32, 64, 128]),
+        # tune.choice([32, 64, 128]),
+        "num_layers": hp.choice("num_layers", [1, 2, 3, 4]),
+        # tune.choice([2, 3, 4]),
+        "dropout": hp.choice("dropout", [0.1, 0.2, 0.3]),
+        "batch_size": hp.choice("batch_size", [32, 64]),
+        "weight_decay": hp.loguniform("weight_decay", log(1e-6), log(1e-3)),
         "n_epochs": 100,
+        # Dataset
+        "shuffle": hp.choice("shuffle", [True, False]),
+        # Model architecture | Conditional Search Space
+        "model": hp.choice(
+            "model_branch",
+            [
+                {
+                    "model": "VanillaLSTM",
+                },
+                {
+                    "model": "LSTM",
+                    "teacher_forcing_ratio": hp.choice("teacher_forcing_ratio",[0, 0.1, 0.15, 0.25, 0.5]),
+                },
+            ],
+        ),
+        "lossFn": hp.choice(
+            "lossFn_branch",
+            [
+                {
+                    "lossFn": "hybrid",
+                    "alpha": hp.choice("alpha", [0.1, 0.3, 0.5, 0.7, 0.9]),
+                },
+                {"lossFn": "value"},
+            ],
+        ),
     }
 
     # Scheduler to early-stop bad trials
@@ -236,20 +312,24 @@ if __name__ == "__main__":
     )
 
     # Search algorithm
-    search_alg = OptunaSearch(metric="RMSE", mode="min")
+    search_alg = HyperOptSearch(space=search_space, metric="RMSE", mode="min")
 
     early_stopper = TrialPlateauStopper(
         metric="RMSE",
         mode="min",
         grace_period=10,  # Number of epochs to wait for improvement
     )
+
     # Set up the Tuner
-    ray.init(num_cpus=4, num_gpus=2, include_dashboard=False)
+    ray.init(num_cpus=4, num_gpus=4, include_dashboard=False)
+    train_ref = ray.put(tensor_train)
+    val_ref = ray.put(tensor_val)
     tuner = tune.Tuner(
-        tune.with_resources(main, {"gpu": 1}),
-        param_space=search_space,
+        tune.with_parameters(main, train_ref=train_ref, val_ref=val_ref),
         tune_config=tune.TuneConfig(
-            num_samples=200,  # Number of different hyperparameter combinations to try
+            num_samples=parse_args()[
+                "sample_size"
+            ],  # Number of different hyperparameter combinations to try
             scheduler=scheduler,
             search_alg=search_alg,
         ),
