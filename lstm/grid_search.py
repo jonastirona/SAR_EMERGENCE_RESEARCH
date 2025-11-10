@@ -4,6 +4,7 @@ import time
 import warnings
 
 import torch
+# os.environ['WANDB_MODE'] = 'disabled'
 import wandb
 from torch import nn
 from torch.optim.lr_scheduler import ReduceLROnPlateau
@@ -130,7 +131,7 @@ def main(config):
         return
 
     train_loader = DataLoader(
-        TensorDataset(x_train, y_train), batch_size=config["batch_size"], shuffle=True
+        TensorDataset(x_train, y_train), batch_size=config["batch_size"], shuffle=config['shuffle']
     )
     val_loader = DataLoader(
         TensorDataset(x_val, y_val),
@@ -205,8 +206,7 @@ def parse_args():
         sys.exit(1)
 
     try:
-        config = {"sample_size": int(sys.argv[1])}
-        return config
+        return int(sys.argv[1])
     except (ValueError, IndexError) as e:
         print(f"Error parsing arguments: {e}")
         sys.exit(1)
@@ -223,6 +223,7 @@ if __name__ == "__main__":
         "dropout": tune.choice([0.1, 0.2, 0.3]),
         "batch_size": tune.choice([32, 64]),
         "weight_decay": tune.loguniform(1e-6, 1e-3),
+        "shuffle": tune.choice([True, False]),
         "n_epochs": 100,
     }
 
@@ -243,18 +244,18 @@ if __name__ == "__main__":
         grace_period=10,  # Number of epochs to wait for improvement
     )
     # Set up the Tuner
-    ray.init(num_cpus=4, num_gpus=2, include_dashboard=False)
+    ray.init(num_cpus=4, num_gpus=1, include_dashboard=False)
     tuner = tune.Tuner(
         tune.with_resources(main, {"gpu": 1}),
         param_space=search_space,
         tune_config=tune.TuneConfig(
-            num_samples=200,  # Number of different hyperparameter combinations to try
+            num_samples=parse_args(),  # Number of different hyperparameter combinations to try
             scheduler=scheduler,
             search_alg=search_alg,
         ),
         run_config=ray.train.RunConfig(
             name="lstm_hyperparameter_search",
-            stop=early_stopper,  # Max epochs per trial
+            stop=early_stopper
         ),
     )
 
