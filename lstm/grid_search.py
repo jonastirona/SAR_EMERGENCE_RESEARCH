@@ -4,15 +4,14 @@ import time
 import warnings
 
 import torch
-# os.environ['WANDB_MODE'] = 'disabled'
+os.environ['WANDB_MODE'] = 'disabled'
 import wandb
 from torch import nn
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader, TensorDataset
 from functions import (
     prepare_dataset,
-    train_epochHybridVanillaLSTM,
-    train_epochTeacherForcingLSTM,
+    train_epochHybridLSTM,
     train_epoch,
     validate_model,
     isVanillaLSTM,
@@ -51,11 +50,11 @@ def main(config):
     model_name = f"{model_type}_n{config['num_layers']}_h{config['hidden_size']}_lr{config['learning_rate']:.8f}_d{config['dropout']}_w{config['weight_decay']}"
     # Initialize wandb
     wandb.init(
-        project=f"{model_type},loss,shuffle,",
+        project=f"{model_type},loss",
         entity=os.environ.get("WANDB_ENTITY"),
         config=config,
         name=f"{model_name}",
-        notes="VanillaLSTM model with loss function tested. shuffle on. github: 'VanillaLSTM,loss,shuffle'",
+        notes="",
     )
 
     # --- Data Loading ---
@@ -206,7 +205,8 @@ def parse_args():
         sys.exit(1)
 
     try:
-        return int(sys.argv[1])
+        config = {"sample_size": int(sys.argv[1])}
+        return config
     except (ValueError, IndexError) as e:
         print(f"Error parsing arguments: {e}")
         sys.exit(1)
@@ -217,7 +217,7 @@ if __name__ == "__main__":
     search_space = {
         "learning_rate": tune.loguniform(1e-5, 1e-2),
         # "alpha": tune.choice([0.1, 0.3, 0.5, 0.7, 0.9]),
-        # "teacher_forcing_ratio": tune.choice([0.0, 0.1, 0.25, 0.5]),
+        # "teacher_forcing_ratio": tune.choice([0.1, 0.25, 0.5]),
         "hidden_size": tune.choice([32, 64, 128]),
         "num_layers": tune.choice([2, 3, 4]),
         "dropout": tune.choice([0.1, 0.2, 0.3]),
@@ -244,18 +244,18 @@ if __name__ == "__main__":
         grace_period=10,  # Number of epochs to wait for improvement
     )
     # Set up the Tuner
-    ray.init(num_cpus=4, num_gpus=1, include_dashboard=False)
+    ray.init(num_cpus=4, num_gpus=2, include_dashboard=False)
     tuner = tune.Tuner(
         tune.with_resources(main, {"gpu": 1}),
         param_space=search_space,
         tune_config=tune.TuneConfig(
-            num_samples=parse_args(),  # Number of different hyperparameter combinations to try
+            num_samples=200,  # Number of different hyperparameter combinations to try
             scheduler=scheduler,
             search_alg=search_alg,
         ),
         run_config=ray.train.RunConfig(
             name="lstm_hyperparameter_search",
-            stop=early_stopper
+            stop=early_stopper,  # Max epochs per trial
         ),
     )
 

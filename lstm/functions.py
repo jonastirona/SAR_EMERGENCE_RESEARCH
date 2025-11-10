@@ -19,7 +19,7 @@ import re
 from collections import OrderedDict
 import glob
 
-isVanillaLSTM = True
+isVanillaLSTM = False
 if isVanillaLSTM:
     model_type = "VanillaLSTM"
 else:
