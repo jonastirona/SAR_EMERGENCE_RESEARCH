@@ -12,8 +12,10 @@ from functions import (
     load_ar_data,
     isVanillaLSTM,
     RESULTS_PATH,
-    model_type
+    model_type,
 )
+import matplotlib.ticker as mticker
+import matplotlib.image as mpimg
 from sklearn.metrics import mean_squared_error
 from datetime import timedelta
 import matplotlib.dates as mdates
@@ -67,7 +69,7 @@ def eval_AR_emergence_with_plots(
     learning_rate=None,
     dropout=None,
 ):
-    filename = 'pred12_r4_i110_n2_h32_e50_lr0.00100000_d0.0.pth'
+    filename = "pred12_r4_i110_n4_h128_e10_lr0.00700000_d0.1.pth"
     filepath = RESULTS_PATH + "/" + filename
     (
         num_pred,
@@ -84,11 +86,19 @@ def eval_AR_emergence_with_plots(
     # )  # Print extracted values for confirmation
     all_emergences = []
     rows = ["AR11698", "AR11726", "AR13165", "AR13179", "AR13183"]
+    AR_pred = []
     for test_AR in [11698, 11726, 13165, 13179, 13183]:
         AR_emergences = []
-        before_plot, num_in, NOAA_first, NOAA_second, starting_tile, window_start = (
-            AR_defs(test_AR)
-        )
+        (
+            before_plot,
+            num_in,
+            NOAA_first,
+            NOAA_second,
+            starting_tile,
+            window_start,
+            end,
+            start,
+        ) = AR_defs(test_AR)
         if not before_plot:
             return
 
@@ -99,11 +109,15 @@ def eval_AR_emergence_with_plots(
         cont_int_scale = (-12419.59375, 3119.267578125)
         flux_scale = (-78.26012229919434, 490.13057708740234)
         m_scale = (-365079096.0, 118424064.0)
-        maps, flux, cont_int, time = load_ar_data(test_AR, size, rid_of_top, starting_tile)
-        inputs, mag_flux = process_data(maps, flux, cont_int, m_scale, flux_scale, cont_int_scale)
+        maps, flux, cont_int, time = load_ar_data(
+            test_AR, size, rid_of_top, starting_tile
+        )
+        inputs, mag_flux = process_data(
+            maps, flux, cont_int, m_scale, flux_scale, cont_int_scale
+        )
         lstm = initialize_lstm(
             inputs, hidden_size, num_layers, num_pred, state_dict, filepath, device
-    )
+        )
 
         # Assuming prediction, y_test_tensors, ARs, learning_rate, and n_epochs are already defined
         fig = plt.figure(figsize=(12, 10))  # Adjust the figure size if necessary
@@ -117,6 +131,13 @@ def eval_AR_emergence_with_plots(
         threshold = 0.01  # -0.006
         sust_time = 4
         window_end = window_start + 72
+        allNeeded = []
+        firstTimePred = float("inf")
+        firstTimeTrue = float("inf")
+        lineStylesTrue = set()
+        lineStylesPred = set()
+        minIpred = set()
+        minItrue = set()
         for i in range(7):
             print()
             print("Tile {}".format(starting_tile + i + 1))
@@ -135,11 +156,64 @@ def eval_AR_emergence_with_plots(
             print("pred:", pred.shape)
             print("y_test:", y_test.shape)
             true = y_test[:, future].numpy()
+            allNeeded.append([pred, true])
 
             last_known_idx = (
                 np.shape(mag_flux[1 + i, :])[0] - np.shape(true)[0] - 1
             )  # the index in the timeline before we start predicting
+
+            mag_before_pred = mag_flux[
+                1 + i,
+                last_known_idx - before_plot - num_pred - future : last_known_idx
+                - num_pred
+                - future,
+            ]
+            d_true = np.gradient(
+                smooth_with_numpy(np.concatenate((mag_before_pred, true)))
+            )  # ; d_true = smooth_with_numpy(d_true) # Assuming d_true is your data derivative
+            indicator_true = emergence_indication(
+                d_true, threshold, sust_time
+            )  # emergence_indication2(dd_true) #
+
+            for idx, indic in enumerate(indicator_true):
+                if indic == 1:
+                    if idx < firstTimeTrue:
+                        lineStylesTrue = {i}
+                        minItrue = {i}
+                        firstTimeTrue = idx
+                    elif idx == firstTimeTrue:
+                        lineStylesTrue.add(i)
+                        minItrue.add(i)
+                    break
+
+            d_pred = np.gradient(
+                pred
+            )  # np.gradient(pred) # Assuming d_pred is your data derivative
+            dd_pred = np.gradient(d_pred)
+            indicator_pred = emergence_indication(
+                d_pred, threshold, sust_time
+            )  # emergence_indication2(dd_pred) #
+            for idx, indic in enumerate(indicator_pred):
+                if indic == 1:
+                    if idx < firstTimePred:
+                        lineStylesPred = {i}
+                        minIpred = {i}
+                        firstTimePred = idx
+                    elif idx == firstTimePred:
+                        lineStylesPred.add(i)
+                        minIpred.add(i)
+                    break
+
+        firstTimePred -= 12
+        for i in range(7):
+            pred, true = allNeeded[i]
+            last_known_idx = (
+                np.shape(mag_flux[1 + i, :])[0] - np.shape(true)[0] - 1
+            )  # the index in the timeline before we start predicting
             pred = recalibrate(pred, mag_flux[1 + i, last_known_idx])
+            pred = pred[start : len(pred) + end]
+            true = true[start : len(true) + end]
+
             first_pred_time = mdates.date2num(
                 time[last_known_idx] - timedelta(hours=num_pred)
             )
@@ -152,12 +226,18 @@ def eval_AR_emergence_with_plots(
             time_cut = time[
                 last_known_idx - before_plot : last_known_idx + np.shape(pred)[0]
             ]
+
             time_cut_mpl = mdates.date2num(time_cut)
+            print("WINDOW START:", time_cut[window_start])
+            print("WINDOW END:", time_cut[window_end])
             nan_array = np.full(mag_before_pred.shape, np.nan)
             zeros_array = np.full(mag_before_pred.shape, 0)
 
             true_emergence = None
             pred_emergence = None
+
+            x_time_true = time_cut_mpl[firstTimeTrue]
+            x_time_pred = time_cut_mpl[firstTimePred + len(mag_before_pred)]
 
             ### Plot
             gs = gridspec.GridSpecFromSubplotSpec(
@@ -179,22 +259,23 @@ def eval_AR_emergence_with_plots(
                 color="black",
                 label="Observed",
             )
-            ax0.plot(
-                time_cut_mpl,
-                smooth_with_numpy(np.concatenate((mag_before_pred, true))),
-                color="black",
-                alpha=0.25,
-                label="Smooth Obs.",
-            )
+            # ax0.plot(
+            #     time_cut_mpl,
+            #     smooth_with_numpy(np.concatenate((mag_before_pred, true))),
+            #     color="black",
+            #     alpha=0.25,
+            #     label="Smooth Obs.",
+            # )
             ax0.axvspan(
                 time_cut_mpl[window_start],
                 time_cut_mpl[window_end],
                 color="yellow",
                 alpha=0.25,
             )
-            ax0.legend(loc="upper left")
+            if i == 0:
+                ax0.legend(loc="upper left")
             ax0.set_ylabel(
-                f"Tile {starting_tile + i + 1}"
+                f"Tile {starting_tile + i + 2}"
             )  # Title for each plot (optional)
             # ax0.axvline(x=first_pred_time, color='darkturquoise', linestyle='--')
             ### ax0.axvline(x=NOAA_first_record, color='magenta', linestyle='--')  # Adjust color, linestyle, linewidth as needed
@@ -214,6 +295,39 @@ def eval_AR_emergence_with_plots(
             ax0.xaxis.set_major_formatter(
                 mdates.DateFormatter("%Y-%m-%d")
             )  # Format the date
+            ax0.axvline(
+                x=x_time_pred,  # convert datetime to Matplotlib's internal format
+                color="blue",
+                linestyle="-" if i in lineStylesPred else "--",
+                linewidth=1.2,
+                label="First Warning",
+            )
+            ax0.axvline(
+                x=x_time_true,  # convert datetime to Matplotlib's internal format
+                color="red",
+                linestyle="-" if i in lineStylesTrue else "--",
+                linewidth=1.2,
+                label="First Emergence",
+            )
+            if i == 0:
+                ax0.text(
+                    x_time_pred,
+                    ax0.get_ylim()[1],  # top of y-axis
+                    "First Warning ⚑",
+                    color="blue",
+                    fontsize=10,
+                    ha="right",
+                    va="bottom",
+                )
+                ax0.text(
+                    x_time_true,
+                    ax0.get_ylim()[1],
+                    "⚑ First Emergence",
+                    color="red",
+                    fontsize=10,
+                    ha="left",
+                    va="bottom",
+                )
             plt.xticks(
                 rotation=45, ha="right"
             )  # Rotate x-tick labels for better readability
@@ -226,6 +340,11 @@ def eval_AR_emergence_with_plots(
             indicator_true = emergence_indication(
                 d_true, threshold, sust_time
             )  # emergence_indication2(dd_true) #
+            currTileTimeTrue = float("inf")
+            for idx, indic in enumerate(indicator_true):
+                if indic == 1:
+                    currTileTimeTrue = min(idx, firstTimeTrue)
+                    break
             first = True
             for j in range(len(d_true) - 1):  # Now, plot using time_cut_mpl as x-values
                 current_color = "g" if indicator_true[j] == 0 else "r"
@@ -258,7 +377,20 @@ def eval_AR_emergence_with_plots(
             ax1.set_yticks([0])
             ax1.grid(True, which="both", axis="both", linestyle="--", linewidth=0.5)
             ax1.set_ylabel(r"$\frac{d Obs}{dt}$")
-
+            ax1.axvline(
+                x=x_time_pred,  # convert datetime to Matplotlib's internal format
+                color="blue",
+                linestyle="-" if i in lineStylesPred else "--",
+                linewidth=1.2,
+                label="First Warning",
+            )
+            ax1.axvline(
+                x=x_time_true,  # convert datetime to Matplotlib's internal format
+                color="red",
+                linestyle="-" if i in lineStylesTrue else "--",
+                linewidth=1.2,
+                label="First Emergence",
+            )
             # Subplot d_pred
             ax2 = plt.subplot(gs[2])
             d_pred = np.gradient(
@@ -320,6 +452,20 @@ def eval_AR_emergence_with_plots(
             ax2.set_yticks([0])  # Set the y-axis to only have a tick at 0
             ax2.grid(True, which="both", axis="both", linestyle="--", linewidth=0.5)
             ax2.set_ylabel(r"$\frac{d Pred}{dt}$")
+            ax2.axvline(
+                x=x_time_true,  # convert datetime to Matplotlib's internal format
+                color="red",
+                linestyle="-" if i in lineStylesTrue else "--",
+                linewidth=1.2,
+                label="First Emergence",
+            )
+            ax2.axvline(
+                x=x_time_pred,  # convert datetime to Matplotlib's internal format
+                color="blue",
+                linestyle="-" if i in lineStylesPred else "--",
+                linewidth=1.2,
+                label="First Warning",
+            )
 
             # Evaluation metrics
             metrics = calculate_metrics(
@@ -344,56 +490,64 @@ def eval_AR_emergence_with_plots(
                 to_append += f"{hours:.0f}h Alarm"
             AR_emergences.append(to_append)
 
+        diff = mdates.num2date(x_time_true) - mdates.num2date(x_time_pred)
+        hours = (diff.days * 24 * 60 + (diff.seconds / 60)) // 60
+        AR_pred.append(hours)
         all_emergences.append(AR_emergences)
         # Last subplot with mag flux
         plt.subplot(4, 2, 8)
         gs_last = gridspec.GridSpecFromSubplotSpec(
             1, 2, subplot_spec=main_gs[7], wspace=0.05
         )  # Create a GridSpec for the last subplot area with 1 row and 2 columns
-        ax_image1 = plt.subplot(gs_last[0, 0])  # Plot the first image
-        ### ax_image1.imshow(NOAA_first_int_map, cmap='gray')
-        add_grid_lines(ax_image1)  # Add grid lines to the first image
-        for tile_num in range(starting_tile, starting_tile + 7):
-            highlight_tile(
-                ax_image1, tile_num
-            )  # Loop to highlight tiles from starting_tile to starting_tile + 7
-        ax_image1.set_xlabel("{}".format(NOAA_first.strftime("%d/%m/%y %H:%M")))
-        ax_image1.tick_params(
-            axis="both",
-            which="both",
-            bottom=False,
-            top=False,
-            left=False,
-            right=False,
-            labelleft=False,
-            labelbottom=True,
+        ax_image1 = plt.subplot(gs_last[0, 0])
+        ax_image2 = plt.subplot(gs_last[0, 1])
+        img1 = mpimg.imread(f"lstm/imgs/AR{test_AR}s.png")
+        img2 = mpimg.imread(f"lstm/imgs/AR{test_AR}e.png")
+        ax_image1.imshow(
+            img1,
+            origin="lower",
+            extent=[0, 9, 0, 9],        # map image to a 9x9 domain
+            interpolation="nearest",
+            zorder=0,
         )
-        ax_image1.set_xticks([])
-        ax_image1.set_yticks([])
-        ax_image2 = plt.subplot(gs_last[0, 1])  # Plot the second image
-        ### ax_image2.imshow(NOAA_second_int_map, cmap='gray')
-        add_grid_lines(ax_image2)  # Add grid lines to the first image
-        for tile_num in range(starting_tile, starting_tile + 7):
-            highlight_tile(
-                ax_image2, tile_num
-            )  # Loop to highlight tiles from starting_tile to starting_tile + 7
-        ax_image1.set_title("Magnetic Flux", fontsize=10)
-        ax_image2.set_title("Magnetic Flux", fontsize=10)
-        ax_image2.set_xlabel("{}".format(NOAA_second.strftime("%d/%m/%y %H:%M")))
-        ax_image2.tick_params(
-            axis="both",
-            which="both",
-            bottom=False,
-            top=False,
-            left=False,
-            right=False,
-            labelleft=False,
-            labelbottom=True,
+        ax_image2.imshow(
+            img2,
+            origin="lower",
+            extent=[0, 9, 0, 9],        # map image to a 9x9 domain
+            interpolation="nearest",
+            zorder=0,
         )
-        ax_image2.set_xticks([])
-        ax_image2.set_yticks([])
+        ax_image1.set_title("Window Start", fontsize=10) 
+        ax_image2.set_title("Window End", fontsize=10)
 
-        # Print the metrics at the bottom
+        # --- (optionally) if you have a second image, do the same for ax_image2 ---
+        # img2 = mpimg.imread("path/to/second.png")
+        # ax_image2.imshow(img2, origin="lower", extent=[0, 9, 0, 9], interpolation="nearest", zorder=0)
+
+        # --- make both axes a 9x9 square and draw tile gridlines ---
+        for ax in (ax_image1, ax_image2):
+            ax.set_xlim(0, 9)
+            ax.set_ylim(0, 9)
+            ax.set_box_aspect(1)
+            ax.set_aspect("equal", adjustable="box")
+            ax.set_anchor("C")
+
+            # grid at every integer line (0..9)
+            ax.xaxis.set_major_locator(mticker.FixedLocator(np.arange(0, 10, 1)))
+            ax.yaxis.set_major_locator(mticker.FixedLocator(np.arange(0, 10, 1)))
+            ax.grid(True, which="major", linestyle="-", linewidth=0.6, alpha=0.4)
+
+            # (you can still hide tick labels if you want)
+            ax.tick_params(
+                axis="both", which="both",
+                bottom=False, top=False, left=False, right=False,
+                labelleft=False, labelbottom=False,
+            )
+
+        # now your overlays will align to tile coordinates 0..8 in x and y
+        for tile_num in range(starting_tile, starting_tile + 7):
+            highlight_tile(ax_image1, tile_num+2)
+            highlight_tile(ax_image2, tile_num+2)
         all_metrics_np = np.array(
             all_metrics
         )  # Convert all_metrics to a NumPy array for easier manipulation
@@ -423,19 +577,20 @@ def eval_AR_emergence_with_plots(
             np.concatenate((mag_before_pred, true)), np.concatenate((zeros_array, pred))
         )
 
-        save_path = RESULTS_PATH +"/AR{}_{}.png".format(
+        save_path = RESULTS_PATH + "/AR{}_{}.png".format(
             test_AR, os.path.splitext(os.path.basename(filename))[0]
         )
         plt.savefig(save_path)
         plt.close("all")
+    print(AR_pred)
     sb = plt.subplot()
     sb.axis("off")
     tbl = sb.table(cellText=all_emergences, rowLabels=rows, loc="center")
-    tbl.scale(1, 1.8) 
+    tbl.scale(1, 1.8)
 
     fig = sb.figure
     fig.savefig(
-        RESULTS_PATH+ "/table.png", bbox_inches="tight", pad_inches=0, dpi=300
+        RESULTS_PATH + "/table.png", bbox_inches="tight", pad_inches=0, dpi=300
     )  # add transparent=True if desired
     plt.close(fig)
 
@@ -486,7 +641,9 @@ def eval_AR_emergence(
     flux_scale = (-78.26012229919434, 490.13057708740234)
     m_scale = (-365079096.0, 118424064.0)
     maps, flux, cont_int, time = load_ar_data(test_AR, size, rid_of_top, starting_tile)
-    inputs, mag_flux = process_data(maps, flux, cont_int, m_scale, flux_scale, cont_int_scale)
+    inputs, mag_flux = process_data(
+        maps, flux, cont_int, m_scale, flux_scale, cont_int_scale
+    )
     lstm = initialize_lstm(
         inputs, hidden_size, num_layers, num_pred, state_dict, filename, device
     )

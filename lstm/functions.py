@@ -19,7 +19,7 @@ import re
 from collections import OrderedDict
 import glob
 
-isVanillaLSTM = False
+isVanillaLSTM = True
 if isVanillaLSTM:
     model_type = "VanillaLSTM"
 else:
@@ -29,7 +29,10 @@ l = re.split(r"[\\/]", os.path.abspath(os.getcwd()))
 BASE_PATH = "/".join(l[:-1]) + "/"
 
 DATA_PATH = BASE_PATH + "SAR_EMERGENCE_RESEARCH/data"
-RESULTS_PATH = BASE_PATH + "SAR_EMERGENCE_RESEARCH/lstm/results/" + model_type + "shuffling"
+RESULTS_PATH = (
+    BASE_PATH + "SAR_EMERGENCE_RESEARCH/lstm/results/" + model_type + "shuffling"
+)
+MODELS_PATH = BASE_PATH + "SAR_EMERGENCE_RESEARCH/lstm/models"
 
 
 ##### Sept 18th and later
@@ -222,7 +225,7 @@ def recalibrate(pred, previous_value):
     return new_pred
 
 
-def highlight_tile(ax, tile_number, divisions=9, color="r", linewidth=2):
+def highlight_tile(ax, tile_number, divisions=9, color="r", linewidth=1):
     """
     Highlights a specific tile in the grid with a colored box.
 
@@ -342,8 +345,10 @@ def get_params(path, file):
 
 def AR_defs(val_AR):
     before_plot, num_in, NOAA_first, NOAA_second = None, None, None, None
+    end = 0
+    start = 0
     if val_AR == 11698:
-        window_s = 98
+        window_s = 74
         starting_tile = 46
         before_plot = 50
         num_in = 96
@@ -353,6 +358,7 @@ def AR_defs(val_AR):
         window_s = 50
         starting_tile = 37
         before_plot = 50
+        end = -24
         num_in = 72  # decrease even more -> 60
         NOAA_first = datetime(2013, 4, 20, 0, 0, 0)
         NOAA_second = datetime(2013, 4, 22, 0, 0, 0)
@@ -361,6 +367,7 @@ def AR_defs(val_AR):
         starting_tile = 28
         before_plot = 40
         num_in = 96
+        end = -12
         NOAA_first = datetime(2022, 12, 12, 0, 0, 0)
         NOAA_second = datetime(2022, 12, 14, 0, 0, 0)
     elif val_AR == 13179:
@@ -368,6 +375,7 @@ def AR_defs(val_AR):
         starting_tile = 37
         before_plot = 40
         num_in = 96
+        end = -12
         NOAA_first = datetime(2022, 12, 30, 0, 0, 0)
         NOAA_second = datetime(2023, 1, 1, 0, 0, 0)
     elif val_AR == 13183:
@@ -375,13 +383,14 @@ def AR_defs(val_AR):
         starting_tile = 37
         before_plot = 40
         num_in = 96
+        end = -12
         NOAA_first = datetime(2023, 1, 6, 0, 0, 0)
         NOAA_second = datetime(2023, 1, 8, 0, 0, 0)
     else:
         print(
             "Invalid validation Active Region value. Please use 11698, 11726, 13165, 13179, or 13183."
         )
-    return before_plot, num_in, NOAA_first, NOAA_second, starting_tile, window_s
+    return before_plot, num_in, NOAA_first, NOAA_second, starting_tile, window_s, end, start
 
 
 # --- Data Loading & Preparation ---
@@ -512,7 +521,10 @@ def train_epochHybridLSTM(
 
     return total_loss / len(dataloader)
 
-def train_epochTeacherForcingLSTM(model, dataloader, loss_fn, optimizer, device, teacher_forcing):
+
+def train_epochTeacherForcingLSTM(
+    model, dataloader, loss_fn, optimizer, device, teacher_forcing
+):
     """Runs a single training epoch."""
 
     model.train()
@@ -524,7 +536,7 @@ def train_epochTeacherForcingLSTM(model, dataloader, loss_fn, optimizer, device,
 
         optimizer.zero_grad()
 
-        outputs = model(x,y,  teacher_forcing_ratio=teacher_forcing)
+        outputs = model(x, y, teacher_forcing_ratio=teacher_forcing)
 
         loss = loss_fn(outputs, y)
 
@@ -539,9 +551,7 @@ def train_epochTeacherForcingLSTM(model, dataloader, loss_fn, optimizer, device,
     return total_loss / len(dataloader)
 
 
-def train_epochHybridVanillaLSTM(
-    model, dataloader, loss_fn, optimizer, device, alpha
-):
+def train_epochHybridVanillaLSTM(model, dataloader, loss_fn, optimizer, device, alpha):
     model.train()
     total_loss = 0
     loss_scaler = 100.0

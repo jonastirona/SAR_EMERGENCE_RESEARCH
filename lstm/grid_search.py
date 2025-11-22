@@ -20,6 +20,7 @@ from functions import (
     train_epoch,
     validate_model,
     RESULTS_PATH,
+    MODELS_PATH,
     VanillaLSTM,
     LSTM,
 )
@@ -224,6 +225,11 @@ def main(config, train_ref, val_ref):
             "learning_rate": float(lr),
             "RMSE": val_rmse,
         }
+        
+        save_filename = f"{model_name}.pth" 
+        save_path = os.path.join(MODELS_PATH, save_filename)
+        torch.save(model.state_dict(), save_path)
+
         wandb.log(log_metrics)
         tune.report(log_metrics)
 
@@ -264,14 +270,9 @@ if __name__ == "__main__":
     # Define the search space from the section above
     search_space = {
         "learning_rate": hp.loguniform("learning_rate", log(1e-5), log(1e-2)),
-        # tune.loguniform(1e-5, 1e-2),
-        # "alpha": tune.choice([0.1, 0.3, 0.5, 0.7, 0.9]),
-        # "teacher_forcing_ratio": tune.choice([0.1, 0.25, 0.5]),
         "hidden_size": hp.choice("hidden_size", [2, 4, 8, 16, 32, 64, 128]),
-        # tune.choice([32, 64, 128]),
         "num_layers": hp.choice("num_layers", [1, 2, 3, 4]),
-        # tune.choice([2, 3, 4]),
-        "dropout": hp.choice("dropout", [0.1, 0.2, 0.3]),
+        "dropout": hp.choice("dropout", [0,0.1, 0.2, 0.3]),
         "batch_size": hp.choice("batch_size", [32, 64]),
         "weight_decay": hp.loguniform("weight_decay", log(1e-6), log(1e-3)),
         "n_epochs": 100,

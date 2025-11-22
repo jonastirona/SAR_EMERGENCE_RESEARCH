@@ -9,6 +9,7 @@ from torch.utils.data import DataLoader, TensorDataset
 from functions import (
     prepare_dataset,
     train_epoch,
+    train_epochHybridVanillaLSTM,
     validate_model,
     isVanillaLSTM,
     RESULTS_PATH,
@@ -181,6 +182,7 @@ def parse_args():
             "learning_rate": float(sys.argv[7]),
             "dropout": float(sys.argv[8]),
             "batch_size": int(sys.argv[9]),
+            "alpha": 0.7
         }
         return config
     except (ValueError, IndexError) as e:
