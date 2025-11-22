@@ -126,7 +126,7 @@ def main(config, train_ref, val_ref):
     model_name = f"{model_type}_n{config['num_layers']}_h{config['hidden_size']}_lr{config['learning_rate']:.8f}_d{config['dropout']}_w{config['weight_decay']}_{'shuffle' if config['shuffle'] else 'noshuffle'}"
     # Initialize wandb
     wandb.init(
-        project="All Search Parameters",
+        project="All Search Parameters 1",
         entity=os.environ.get("WANDB_ENTITY"),
         config=config,
         name=f"{model_name}",
@@ -225,7 +225,7 @@ def main(config, train_ref, val_ref):
             "learning_rate": float(lr),
             "RMSE": val_rmse,
         }
-        
+
         save_filename = f"{model_name}.pth" 
         save_path = os.path.join(MODELS_PATH, save_filename)
         torch.save(model.state_dict(), save_path)
