@@ -58,4 +58,5 @@ Thumbs.db
 # pth files
 *.pth
 
+ray_tune_logs/
 lstm/results.txt
