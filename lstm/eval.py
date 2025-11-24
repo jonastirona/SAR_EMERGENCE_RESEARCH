@@ -12,6 +12,9 @@ from functions import (
     load_ar_data,
     isVanillaLSTM,
     RESULTS_PATH,
+    MODELS_PATH,
+    THRESHOLD,
+    SUST_TIME,
     model_type,
 )
 import matplotlib.ticker as mticker
@@ -69,7 +72,7 @@ def eval_AR_emergence_with_plots(
     learning_rate=None,
     dropout=None,
 ):
-    filename = "pred12_r4_i110_n4_h128_e10_lr0.00700000_d0.1.pth"
+    filename = "pred12_r4_i110_n4_h128_e15_lr0.00706000_d0.1.pth"
     filepath = RESULTS_PATH + "/" + filename
     (
         num_pred,
@@ -128,8 +131,8 @@ def eval_AR_emergence_with_plots(
         # Loop to create 8 plots
         future = 11
         all_metrics = []
-        threshold = 0.01  # -0.006
-        sust_time = 4
+        threshold = THRESHOLD
+        sust_time = SUST_TIME
         window_end = window_start + 72
         allNeeded = []
         firstTimePred = float("inf")

@@ -29,10 +29,10 @@ l = re.split(r"[\\/]", os.path.abspath(os.getcwd()))
 BASE_PATH = "/".join(l[:-1]) + "/"
 
 DATA_PATH = BASE_PATH + "SAR_EMERGENCE_RESEARCH/data"
-RESULTS_PATH = (
-    BASE_PATH + "SAR_EMERGENCE_RESEARCH/lstm/results/" + model_type + "shuffling"
-)
+RESULTS_PATH = BASE_PATH + "SAR_EMERGENCE_RESEARCH/lstm/results/"
 MODELS_PATH = BASE_PATH + "SAR_EMERGENCE_RESEARCH/lstm/models"
+THRESHOLD = 0.01
+SUST_TIME = 4
 
 
 ##### Sept 18th and later
@@ -390,7 +390,16 @@ def AR_defs(val_AR):
         print(
             "Invalid validation Active Region value. Please use 11698, 11726, 13165, 13179, or 13183."
         )
-    return before_plot, num_in, NOAA_first, NOAA_second, starting_tile, window_s, end, start
+    return (
+        before_plot,
+        num_in,
+        NOAA_first,
+        NOAA_second,
+        starting_tile,
+        window_s,
+        end,
+        start,
+    )
 
 
 # --- Data Loading & Preparation ---
@@ -612,56 +621,373 @@ def train_epoch(model, dataloader, loss_fn, optimizer, device):
     return total_loss / len(dataloader)
 
 
-# def validate_model(model, dataloader, loss_fn, device):
-#     """
-#     Validates the model, calculating both loss and RMSE for a specific future time step.
-#     """
-#     model.eval()
-#     total_loss = 0
-#     all_calibrated_preds = []
-#     all_y = []
+def get_first_emergence_index(signal, threshold, sust_time):
+    """
+    Returns the INDEX where emergence starts.
+    """
+    # signal = np.gradient(smooth_with_numpy(signal))
+    indicator = emergence_indication(signal, threshold, sust_time)
+    emergence_indices = np.where(indicator == 1)[0]
+    if len(emergence_indices) > 0:
+        return emergence_indices[0]
+    return None
 
-#     # This is the specific time step you want to evaluate (12th hour)
-#     future = 11
 
-#     with torch.no_grad():
-#         for x, y, last_vals in dataloader:
-#             x, y, last_vals = x.to(device), y.to(device), last_vals.to(device)
+def calculate_lead_time_score(
+    y_true_batch, y_pred_batch, threshold, sust_time, horizon_hours=12.0
+):
+    """
+    Calculates the Mean Lead Time (in hours).
+    Goal: MAXIMIZE this metric.
 
-#             # Get model predictions (full sequence)
-#             preds = model(x)
+    Args:
+        horizon_hours: The real-world duration the sequence represents (e.g., 12 hours).
+    """
+    scores = []
+    seq_len = y_true_batch.shape[1]
 
-#             # --- Calibrate the entire batch of sequences first ---
-#             calibrated_preds_batch = torch.zeros_like(preds)
-#             for i in range(preds.shape[0]):
-#                 calibrated_sequence = recalibrate(preds[i].cpu().numpy(), last_vals[i].cpu().item())
-#                 calibrated_preds_batch[i,:] = torch.tensor(calibrated_sequence, device=device)
+    # Calculate how many hours one array index represents
+    hours_per_step = horizon_hours / seq_len
 
-#             # --- KEY CHANGE FOR LOSS CALCULATION ---
-#             # Slice the calibrated predictions and true values to get only the 12th hour
-#             preds_at_12h = calibrated_preds_batch[:, future]
-#             y_at_12h = y[:, future]
+    # Define Penalties (in hours)
+    # Penalty for missing an event that happened (False Negative)
+    missed_event_penalty = -2.0
+    # Penalty for predicting an event that never happened (False Positive)
+    false_alarm_penalty = -2.0
 
-#             # Calculate loss for this batch on the specific time step
-#             loss = loss_fn(preds_at_12h, y_at_12h)
-#             total_loss += loss.item()
+    for i in range(len(y_true_batch)):
+        true_idx = get_first_emergence_index(y_true_batch[i], threshold, sust_time)
+        pred_idx = get_first_emergence_index(y_pred_batch[i], threshold, sust_time)
 
-#             # Store the results for the final RMSE calculation
-#             all_calibrated_preds.append(calibrated_preds_batch.cpu().numpy())
-#             all_y.append(y.cpu().numpy())
+        # 1. Successful Detection (Hit)
+        if true_idx is not None and pred_idx is not None:
+            true_time_hours = true_idx * hours_per_step
+            pred_time_hours = pred_idx * hours_per_step
 
-#     # --- RMSE Calculation (remains the same) ---
-#     all_calibrated_preds_array = np.concatenate(all_calibrated_preds, axis=0)
-#     all_y_array = np.concatenate(all_y, axis=0)
+            # Lead Time = True - Pred
+            # If True=10h, Pred=4h -> Lead=6h (Positive/Good)
+            # If True=4h,  Pred=6h -> Lead=-2h (Negative/Late)
+            lead_time = true_time_hours - pred_time_hours
+            scores.append(lead_time)
 
-#     preds_at_12h_all = all_calibrated_preds_array[:, future]
-#     y_at_12h_all = all_y_array[:, future]
+        # 2. False Negative (Event happened, Model missed it)
+        elif true_idx is not None and pred_idx is None:
+            # You get a negative score for failing to predict a real event
+            scores.append(missed_event_penalty)
 
-#     rmse = np.sqrt(np.mean((preds_at_12h_all - y_at_12h_all)**2))
+        # 3. False Positive (No event, Model predicted one)
+        elif true_idx is None and pred_idx is not None:
+            # You get a negative score for crying wolf
+            scores.append(false_alarm_penalty)
 
-#     # Return both the average loss and the final RMSE
-#     avg_loss = total_loss / len(dataloader)
-#     return avg_loss, rmse
+        # 4. True Negative (Nothing happened, Model predicted nothing)
+        elif true_idx is None and pred_idx is None:
+            # Neutral score, or 0. Since we want to maximize lead time,
+            # 0 is an acceptable "neutral" for non-events.
+            scores.append(0.0)
+
+    return np.mean(scores)
+
+
+def calculate_horizon_deficit(
+    y_true_batch, y_pred_batch, threshold, sust_time, horizon_hours=12.0
+):
+    """
+    Calculates deficit based on GRADIENTS (Rate of Change).
+    Uses np.gradient (central difference) to maintain sequence length.
+    Goal: MINIMIZE this value (0 is perfect).
+    """
+    deficits = []
+
+    # 1. Calculate Gradients along the time axis (axis=1)
+    # np.gradient returns a list of arrays if not handled carefully,
+    # but specifying axis=1 ensures we get the gradient for time.
+    true_grads = np.gradient(y_true_batch, axis=1)
+    pred_grads = np.gradient(y_pred_batch, axis=1)
+
+    # Sequence length remains the same as input (unlike np.diff)
+    seq_len = true_grads.shape[1]
+    hours_per_step = horizon_hours / seq_len
+
+    missed_penalty = horizon_hours
+    false_alarm_penalty = horizon_hours
+
+    # Debug counters
+    n_hits = 0
+    n_misses = 0
+    n_false_alarms = 0
+    n_true_negatives = 0
+
+    for i in range(len(true_grads)):
+        # Pass the GRADIENT vector to the emergence checker
+        true_idx = get_first_emergence_index(true_grads[i], threshold, sust_time)
+        pred_idx = get_first_emergence_index(pred_grads[i], threshold, sust_time)
+
+        # 1. Hit (Event happened & predicted)
+        if true_idx is not None and pred_idx is not None:
+            true_time = true_idx * hours_per_step
+            pred_time = pred_idx * hours_per_step
+
+            # Lead Time = True - Pred
+            raw_lead = true_time - pred_time
+
+            lead_time = min(max(raw_lead, 0.0), horizon_hours)
+            # Deficit = Distance from ideal 12h lead
+            # 12 - (12) = 0 (Perfect)
+            # 12 - (-2) = 14 (Late)
+            deficit = horizon_hours - lead_time
+            deficits.append(deficit)
+            n_hits += 1
+
+        # 2. Miss (False Negative)
+        elif true_idx is not None and pred_idx is None:
+            deficits.append(missed_penalty)
+            n_misses += 1
+
+        # 3. False Alarm (False Positive)
+        elif true_idx is None and pred_idx is not None:
+            deficits.append(false_alarm_penalty)
+            n_false_alarms += 1
+
+        # 4. Quiet (True Negative)
+        elif true_idx is None and pred_idx is None:
+            # deficits.append(0.0)
+            n_true_negatives += 1
+
+    # DEBUG PRINT
+    if len(y_true_batch) > 0:
+        max_true_g = np.max(true_grads)
+        max_pred_g = np.max(pred_grads)
+        print(
+            f"\n[DEBUG] Max True Grad: {max_true_g:.4f} | Max Pred Grad: {max_pred_g:.4f} | Thresh: {threshold}"
+        )
+        print(
+            f"[DEBUG] Stats -> Hits: {n_hits}, Miss: {n_misses}, FA: {n_false_alarms}, TN: {n_true_negatives}"
+        )
+
+    return np.mean(deficits) if deficits else 0.0
+
+def calculate_log_horizon_deficit(
+    y_true_batch, y_pred_batch, threshold, sust_time,
+    horizon_hours=12.0, eps=1e-3, event_only=True
+):
+    """
+    Log-scaled distance from the ideal H-hour warning.
+    Goal: MINIMIZE this (0 is perfect; larger = worse).
+
+    For sequences with an event:
+        penalty = -log(lead_time / H), with lead_time in (0, H]
+    For misses / late detections: lead_time ~ 0 -> huge penalty.
+    For false alarms: use a large fixed penalty.
+
+    If event_only=True, we average only over sequences where an event actually occurs.
+    """
+    penalties = []
+    seq_len = y_true_batch.shape[1]
+    hours_per_step = horizon_hours / seq_len
+
+    # How bad is "worst possible"?
+    # Treat L ≈ eps as "virtually no lead":
+    max_penalty = -np.log(eps / horizon_hours)
+
+    for i in range(len(y_true_batch)):
+        true_idx = get_first_emergence_index(y_true_batch[i], threshold, sust_time)
+        pred_idx = get_first_emergence_index(y_pred_batch[i], threshold, sust_time)
+
+        # No event in the true signal
+        if true_idx is None:
+            if event_only:
+                # Skip TN/FA in this metric when event_only=True
+                if pred_idx is not None:
+                    # You can optionally track FA penalties separately
+                    penalties.append(max_penalty)  # or skip & log FAs separately
+                continue
+            else:
+                # Non-event sequences also count:
+                if pred_idx is None:
+                    penalties.append(0.0)  # quiet when quiet
+                else:
+                    penalties.append(max_penalty)  # false alarm
+            continue
+
+        # There *is* an event:
+        true_time = true_idx * hours_per_step
+
+        if pred_idx is None:
+            # Missed: no lead time
+            lead_time = 0.0
+        else:
+            pred_time = pred_idx * hours_per_step
+            # Lead time cannot be negative; if late, treat as 0
+            lead_time = max(true_time - pred_time, 0.0)
+
+        # Make sure 0 < lead_time <= H for the log
+        lead_time = np.clip(lead_time, eps, horizon_hours)
+
+        # Log-scaled penalty
+        penalty = -np.log(lead_time / horizon_hours)
+        penalties.append(penalty)
+
+    if len(penalties) == 0:
+        return 0.0  # or np.nan, depending on how you want to handle "no events"
+
+    return np.mean(penalties)
+
+
+def calculate_exponential_deficit(y_true_batch, y_pred_batch, threshold, sust_time, horizon_hours=12.0):
+    """
+    Calculates deficit using an EXPONENTIAL penalty.
+    Small deviations are okay, but missing the 12h mark gets expensive fast.
+    """
+    deficits = []
+    
+    # 1. Calculate Gradients
+    true_grads = np.gradient(y_true_batch, axis=1)
+    pred_grads = np.gradient(y_pred_batch, axis=1)
+    
+    seq_len = true_grads.shape[1]
+    hours_per_step = horizon_hours / seq_len
+    
+    # --- TUNING THE EXPONENTIAL CURVE ---
+    # A scale of 0.5 makes the curve steep but prevents math overflow.
+    # Formula: Cost = exp(Deficit * scale) - 1
+    scale = 0.5 
+    
+    # Calculate the max possible cost (Deficit = 12 hours -> Lead Time 0)
+    # exp(12 * 0.5) - 1 = exp(6) - 1 ≈ 402.4
+    max_horizon_cost = np.exp(horizon_hours * scale) - 1
+
+    # --- PENALTY LOGIC ---
+    # CRITICAL: Miss Penalty must be HIGHER than the cost of a late prediction
+    # to force the model to attempt predictions.
+    missed_penalty = max_horizon_cost * 1.5  # ~600.0 cost
+    
+    # False Alarm should be cheaper than a Miss to encourage sensitivity
+    false_alarm_penalty = max_horizon_cost * 0.5 # ~200.0 cost
+
+    n_hits = 0
+    n_misses = 0
+    n_false_alarms = 0
+    n_true_negatives = 0
+
+    for i in range(len(true_grads)):
+        true_idx = get_first_emergence_index(true_grads[i], threshold, sust_time)
+        pred_idx = get_first_emergence_index(pred_grads[i], threshold, sust_time)
+        
+        # 1. Hit
+        if true_idx is not None and pred_idx is not None:
+            true_time = true_idx * hours_per_step
+            pred_time = pred_idx * hours_per_step
+            
+            lead_time = true_time - pred_time
+            
+            # Linear Deficit: 12 - Lead Time
+            # If Lead is 12, Deficit is 0.
+            # If Lead is 0, Deficit is 12.
+            # If Lead is -2 (Late), Deficit is 14.
+            lin_deficit = horizon_hours - lead_time
+            
+            # Exponential Cost Calculation
+            # We use absolute deficit to ensure punishment goes both ways, 
+            # but we technically only care about being late or too early.
+            # Given your prompt: "farther from 12h = more exponential"
+            
+            # If lin_deficit is negative (e.g. predicted 14 hours before), treat as positive error
+            abs_deficit = abs(lin_deficit)
+            
+            exp_cost = np.exp(abs_deficit * scale) - 1
+            deficits.append(exp_cost)
+            n_hits += 1
+
+        # 2. Miss (False Negative)
+        elif true_idx is not None and pred_idx is None:
+            deficits.append(missed_penalty)
+            n_misses += 1
+
+        # 3. False Alarm (False Positive)
+        elif true_idx is None and pred_idx is not None:
+            deficits.append(false_alarm_penalty)
+            n_false_alarms += 1
+
+        # 4. Quiet (True Negative)
+        elif true_idx is None and pred_idx is None:
+            deficits.append(0.0) 
+            n_true_negatives += 1
+
+    # DEBUG PRINT
+    if len(y_true_batch) > 0:
+        max_true_g = np.max(true_grads)
+        max_pred_g = np.max(pred_grads)
+        print(f"\n[DEBUG] Max True Grad: {max_true_g:.4f} | Max Pred Grad: {max_pred_g:.4f} | Thresh: {threshold}")
+        print(f"[DEBUG] Stats -> Hits: {n_hits}, Miss: {n_misses}, FA: {n_false_alarms}, TN: {n_true_negatives}")
+        print(f"[DEBUG] Avg Exp Cost: {np.mean(deficits) if deficits else 0:.2f}")
+
+    return np.mean(deficits) if deficits else 0.0
+
+def validate_modelv2(
+    model, dataloader, device, threshold=THRESHOLD, sust_time=SUST_TIME
+):
+    model.eval()
+    all_preds = []
+    all_y = []
+
+    with torch.no_grad():
+        for x, y in dataloader:
+            x, y = x.to(device), y.to(device)
+            preds = model(x)
+            all_preds.append(preds.cpu().numpy())
+            all_y.append(y.cpu().numpy())
+
+    np_preds = np.concatenate(all_preds, axis=0)
+    np_y = np.concatenate(all_y, axis=0)
+
+    # 1. Standard RMSE
+    pred_derivatives = np.diff(np_preds, axis=1)
+    true_derivatives = np.diff(np_y, axis=1)
+    deriv_rmse = np.sqrt(np.mean((pred_derivatives - true_derivatives) ** 2))
+
+    # 2. Horizon Deficit (LOWER IS BETTER)
+    log_deficit = calculate_exponential_deficit(
+        np_y, np_preds, threshold, sust_time,
+        horizon_hours=12.0
+    )
+
+    return deriv_rmse, log_deficit
+
+
+def validate_modelv1(
+    model, dataloader, device, threshold=THRESHOLD, sust_time=SUST_TIME
+):
+    model.eval()
+    all_preds = []
+    all_y = []
+
+    with torch.no_grad():
+        for x, y in dataloader:
+            x, y = x.to(device), y.to(device)
+            preds = model(x)
+            all_preds.append(preds.cpu().numpy())
+            all_y.append(y.cpu().numpy())
+
+    np_preds = np.concatenate(all_preds, axis=0)
+    np_y = np.concatenate(all_y, axis=0)
+
+    # 1. Derivative RMSE (Keep this to ensure signal shape is generally correct)
+    pred_derivatives = np.diff(np_preds, axis=1)
+    true_derivatives = np.diff(np_y, axis=1)
+    deriv_rmse = np.sqrt(np.mean((pred_derivatives - true_derivatives) ** 2))
+
+    # 2. Mean Lead Time Score (The metric you actually care about)
+    # returns a value in HOURS. (e.g., 4.5 means on average 4.5 hours early)
+    avg_lead_time = calculate_lead_time_score(
+        np_y, np_preds, threshold, sust_time, horizon_hours=12.0
+    )
+
+    print(f"Validation Results:")
+    print(f"  Signal Shape Error (RMSE): {deriv_rmse:.4f}")
+    print(f"  Avg Lead Time (Hours):     {avg_lead_time:.4f} (Higher is better)")
+
+    return deriv_rmse, avg_lead_time
 
 
 def validate_model(model, dataloader, device):
@@ -745,6 +1071,30 @@ class PlateauStopper(tune.stopper.Stopper):
         """This function is used to stop all trials at once. We don't need it here."""
         return False
 
+class WeightedMSELoss(nn.Module):
+    def __init__(self, high_val_weight=50.0, threshold=0.01):
+        super(WeightedMSELoss, self).__init__()
+        self.high_val_weight = high_val_weight
+        self.threshold = threshold
+
+    def forward(self, input, target):
+        # Calculate standard squared error
+        loss = (input - target) ** 2
+        
+        # Create a weight map
+        # If the TARGET has a high gradient/value, multiply the loss by 50
+        # This forces the model to pay attention to the events
+        
+        # Option A: Weight by Value Magnitude
+        weights = torch.ones_like(loss)
+        weights[target > self.threshold] = self.high_val_weight
+        
+        # Option B (Better for you): Weight by Gradient Magnitude
+        # (Requires computing gradient inside the loss, can be slow, 
+        #  so Option A is usually a good proxy if peaks are high value)
+        
+        return torch.mean(loss * weights)
+    
 
 def add_grid_lines(ax, divisions=9, color="w", linewidth=1):
     """
