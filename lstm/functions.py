@@ -29,9 +29,7 @@ l = re.split(r"[\\/]", os.path.abspath(os.getcwd()))
 BASE_PATH = "/".join(l[:-1]) + "/"
 
 DATA_PATH = BASE_PATH + "SAR_EMERGENCE_RESEARCH/data"
-RESULTS_PATH = (
-    BASE_PATH + "SAR_EMERGENCE_RESEARCH/lstm/results/" + model_type + "shuffling"
-)
+RESULTS_PATH = BASE_PATH + "SAR_EMERGENCE_RESEARCH/lstm/results/"
 MODELS_PATH = BASE_PATH + "SAR_EMERGENCE_RESEARCH/lstm/models"
 
 
@@ -314,10 +312,18 @@ def process_data(maps, flux, cont_int, m_scale, f_scale, cont_int_scale):
     return inputs, mag_flux
 
 
-def get_params(path, file):
+def get_params(filename):
+    model_type = "LSTM"
+    if "VanillaLSTM" in filename:
+        model_type = "VanillaLSTM"
+    elif "LSTM" in filename:
+        pass
+    else:
+        raise Exception("UNKNOWN NAME", filename)
+
     matches = re.findall(
-        r"pred(\d+)_r(\d+)_i(\d+)_n(\d+)_h(\d+)_e(\d+)_lr([0-9.]+)_d([0-9.]+)\.pth",
-        file,
+        r"(\d+)_r(\d+)_i(\d+)_n(\d+)_h(\d+)_e(\d+)_lr([0-9.]+)_d([0-9.]+)\.pth",
+        filename,
     )  # Extract numbers from the filename
     (
         num_pred,
@@ -332,12 +338,9 @@ def get_params(path, file):
         float(val) if i >= 6 else int(val) for i, val in enumerate(matches[0])
     ]  # Unpack the matched values into variables
     return (
-        num_pred,
-        rid_of_top,
-        num_in,
+        model_type,
         num_layers,
         hidden_size,
-        n_epochs,
         learning_rate,
         dropout,
     )
@@ -390,7 +393,16 @@ def AR_defs(val_AR):
         print(
             "Invalid validation Active Region value. Please use 11698, 11726, 13165, 13179, or 13183."
         )
-    return before_plot, num_in, NOAA_first, NOAA_second, starting_tile, window_s, end, start
+    return (
+        before_plot,
+        num_in,
+        NOAA_first,
+        NOAA_second,
+        starting_tile,
+        window_s,
+        end,
+        start,
+    )
 
 
 # --- Data Loading & Preparation ---
@@ -612,58 +624,6 @@ def train_epoch(model, dataloader, loss_fn, optimizer, device):
     return total_loss / len(dataloader)
 
 
-# def validate_model(model, dataloader, loss_fn, device):
-#     """
-#     Validates the model, calculating both loss and RMSE for a specific future time step.
-#     """
-#     model.eval()
-#     total_loss = 0
-#     all_calibrated_preds = []
-#     all_y = []
-
-#     # This is the specific time step you want to evaluate (12th hour)
-#     future = 11
-
-#     with torch.no_grad():
-#         for x, y, last_vals in dataloader:
-#             x, y, last_vals = x.to(device), y.to(device), last_vals.to(device)
-
-#             # Get model predictions (full sequence)
-#             preds = model(x)
-
-#             # --- Calibrate the entire batch of sequences first ---
-#             calibrated_preds_batch = torch.zeros_like(preds)
-#             for i in range(preds.shape[0]):
-#                 calibrated_sequence = recalibrate(preds[i].cpu().numpy(), last_vals[i].cpu().item())
-#                 calibrated_preds_batch[i,:] = torch.tensor(calibrated_sequence, device=device)
-
-#             # --- KEY CHANGE FOR LOSS CALCULATION ---
-#             # Slice the calibrated predictions and true values to get only the 12th hour
-#             preds_at_12h = calibrated_preds_batch[:, future]
-#             y_at_12h = y[:, future]
-
-#             # Calculate loss for this batch on the specific time step
-#             loss = loss_fn(preds_at_12h, y_at_12h)
-#             total_loss += loss.item()
-
-#             # Store the results for the final RMSE calculation
-#             all_calibrated_preds.append(calibrated_preds_batch.cpu().numpy())
-#             all_y.append(y.cpu().numpy())
-
-#     # --- RMSE Calculation (remains the same) ---
-#     all_calibrated_preds_array = np.concatenate(all_calibrated_preds, axis=0)
-#     all_y_array = np.concatenate(all_y, axis=0)
-
-#     preds_at_12h_all = all_calibrated_preds_array[:, future]
-#     y_at_12h_all = all_y_array[:, future]
-
-#     rmse = np.sqrt(np.mean((preds_at_12h_all - y_at_12h_all)**2))
-
-#     # Return both the average loss and the final RMSE
-#     avg_loss = total_loss / len(dataloader)
-#     return avg_loss, rmse
-
-
 def validate_model(model, dataloader, device):
     model.eval()
     all_preds = []
@@ -678,8 +638,6 @@ def validate_model(model, dataloader, device):
             all_preds.append(preds.cpu().numpy())
             all_y.append(y.cpu().numpy())
 
-    # (The rest of the derivative RMSE calculation is the same)
-    # ...
     pred_derivatives = np.diff(np.concatenate(all_preds, axis=0), axis=1)
     true_derivatives = np.diff(np.concatenate(all_y, axis=0), axis=1)
     derivative_rmse = np.sqrt(np.mean((pred_derivatives - true_derivatives) ** 2))

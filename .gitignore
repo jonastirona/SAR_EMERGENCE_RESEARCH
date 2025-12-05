@@ -55,8 +55,5 @@ Thumbs.db
 # env
 .env
 
-# pth files
-*.pth
-
 ray_tune_logs/
 lstm/results.txt
