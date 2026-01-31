@@ -262,6 +262,11 @@ def highlight_tile(ax, tile_number, divisions=9, color="r", linewidth=1):
     )
     ax.add_patch(rect)
 
+    # Add tile number alternating between top and bottom
+    text_y = y + 1.2 if (x + y) % 2 == 0 else y + -0.35
+    ax.text(x + 0.5, text_y, str(tile_number), ha='center', va='center', 
+            fontsize=11, color='black', weight='bold', zorder=2)
+
 
 def load_ar_data(ar_num, size, rid_of_top, starting_tile):
     """Loads and preprocesses data for a single Active Region (AR)."""
@@ -352,7 +357,7 @@ def AR_defs(val_AR):
     start = 0
     if val_AR == 11698:
         window_s = 74
-        starting_tile = 46
+        starting_tile = 45
         before_plot = 50
         num_in = 96
         NOAA_first = datetime(2013, 3, 15, 0, 0, 0)

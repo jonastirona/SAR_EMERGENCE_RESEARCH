@@ -15,7 +15,7 @@ from functions import (
 from functions import VanillaLSTM
 from functions import LSTM
 
-import matplotlib.patches as patches 
+import matplotlib.patches as patches
 import matplotlib.image as mpimg
 import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
@@ -197,9 +197,7 @@ def eval_AR_emergence_with_plots(
                 - future : last_known_idx - p_params["num_pred"] - future,
             ]
 
-            d_true = np.gradient(
-                np.concatenate((mag_before_pred, true_p))
-            )
+            d_true = np.gradient(np.concatenate((mag_before_pred, true_p)))
             indicator_true = emergence_indication(d_true, threshold, sust_time)
 
             for idx, indic in enumerate(indicator_true):
@@ -225,7 +223,9 @@ def eval_AR_emergence_with_plots(
                     break
         print(firstTimePred)
         firstTimePred -= 12
-
+        maxObserved = -float("inf")
+        minObserved = float("inf")
+        axArray = []
         # --- 2. PLOTTING LOOP ---
         for i in range(7):
             print()
@@ -292,9 +292,11 @@ def eval_AR_emergence_with_plots(
                 time_cut_mpl,
                 true_plot,
                 color="black",
-                label="Observed",
+                label="Observed  $\Phi_m$",
                 linewidth=1.5,
             )
+            maxObserved = max(maxObserved, np.max(true_plot))
+            minObserved = min(minObserved, np.min(true_plot))
 
             # Overlay Predictions
             colors = ["blue", "orange", "purple", "green"]
@@ -334,25 +336,27 @@ def eval_AR_emergence_with_plots(
                     pad = np.full((len(time_cut_mpl) - len(plot_data),), np.nan)
                     plot_data = np.concatenate((plot_data, pad))
 
+                maxObserved = max(np.max(pred_recal_denorm), maxObserved)
+                minObserved = min(np.min(pred_recal_denorm), minObserved)
                 ax0.plot(
                     time_cut_mpl,
                     plot_data,
                     color=colors[m_idx % len(colors)],
-                    label=m_data["graphName"],  # Simple label
+                    label=" $\Phi_m$ for " + m_data["graphName"],  # Simple label
                     linestyle="-" if m_idx == len(loaded_models) - 1 else "--",
-                    alpha=0.8 if m_idx == len(loaded_models) - 1 else 0.3,
+                    alpha=0.8 if m_idx == len(loaded_models) - 1 else 0.7,
+                    linewidth=2.2 if m_idx == len(loaded_models) - 1 else 1.5,
                 )
-
-            # Formatting
-            ax0.axvspan(
-                time_cut_mpl[window_start],
-                time_cut_mpl[window_end],
-                color="yellow",
-                alpha=0.25,
+            # Metrics (Primary)
+            metrics = calculate_metrics(
+                true_plot[len(nan_array):],
+                pred_recal_denorm,
             )
-            if i == 0:
-                ax0.legend(loc="upper left", fontsize=8)
-            ax0.set_ylabel(f"Flux for Tile {starting_tile + i + 2}", fontsize=12)
+            all_metrics.append(metrics)
+            print(f"RMSE (Primary): {metrics[2]}")
+            # Formatting
+            ax0.set_ylabel(f"Tile {starting_tile + i + 2}", fontsize=12)
+            ax0.set_ylim([minObserved, maxObserved])
             ax0.grid(True, which="both", axis="both", linestyle="--", linewidth=0.5)
             ax0.tick_params(axis="x", which="both", labelbottom=False)
             ax0.xaxis_date()
@@ -373,31 +377,30 @@ def eval_AR_emergence_with_plots(
                 linewidth=1.2,
             )
 
-            if i == 0:
-                ax0.text(
-                    x_time_pred,
-                    ax0.get_ylim()[1],
-                    "First Warning ⚑",
-                    color="blue",
-                    fontsize=10,
-                    ha="right",
-                    va="bottom",
-                )
-                ax0.text(
-                    x_time_true,
-                    ax0.get_ylim()[1],
-                    "⚑ First Emergence",
-                    color="red",
-                    fontsize=10,
-                    ha="left",
-                    va="bottom",
-                )
+            # if i == 0:
+            #     ax0.text(
+            #         x_time_pred,
+            #         ax0.get_ylim()[1],
+            #         "First Warning ⚑",
+            #         color="blue",
+            #         fontsize=10,
+            #         ha="right",
+            #         va="bottom",
+            #     )
+            #     ax0.text(
+            #         x_time_true,
+            #         ax0.get_ylim()[1],
+            #         "⚑ First Emergence",
+            #         color="red",
+            #         fontsize=10,
+            #         ha="left",
+            #         va="bottom",
+            #     )
+            axArray.append(ax0)
 
             # --- AX1: dObs/dt ---
             ax1 = plt.subplot(gs[1])
-            d_true = np.gradient(
-                np.concatenate((mag_before_pred, true))
-            )
+            d_true = np.gradient(np.concatenate((mag_before_pred, true)))
             indicator_true = emergence_indication(d_true, threshold, sust_time)
 
             first = True
@@ -419,7 +422,7 @@ def eval_AR_emergence_with_plots(
             ax1.set_ylim([-0.05, 0.05])
             ax1.set_yticks([0])
             ax1.grid(True, linestyle="--", linewidth=0.5)
-            ax1.set_ylabel(r"$\frac{d\Phi_m}{dt}$")
+            ax1.set_ylabel(r"$\frac{d \Phi_m}{dt}$", fontsize=14)
             ax1.axvline(
                 x=x_time_pred,
                 color="blue",
@@ -498,7 +501,7 @@ def eval_AR_emergence_with_plots(
                 ax_pred.set_ylim([-0.05, 0.05])
                 ax_pred.set_yticks([0])
                 ax_pred.grid(True, linestyle="--", linewidth=0.5)
-                ax_pred.set_ylabel(r"$\frac{d P}{dt}$ ")
+                ax_pred.set_ylabel(r"$\frac{d P}{dt}$", fontsize=14)
                 ax_pred.axvline(
                     x=x_time_true,
                     color="red",
@@ -512,13 +515,7 @@ def eval_AR_emergence_with_plots(
                     linewidth=1.2,
                 )
 
-            # Metrics (Primary)
-            metrics = calculate_metrics(
-                true_plot[window_start:window_end],
-                plot_data[window_start:window_end],
-            )
-            all_metrics.append(metrics)
-            print(f"RMSE (Primary): {metrics[2]}")
+            
 
             # Table (Primary)
             to_append = f"Tile {starting_tile + i + 1} \n"
@@ -537,7 +534,28 @@ def eval_AR_emergence_with_plots(
                     to_append += "N/A"
             AR_emergences.append(to_append)
 
-        # Table data cleanup
+        for ax in axArray:
+            ax.set_ylim([minObserved, maxObserved])
+        ax0 = axArray[0]
+        leftAligned = x_time_pred < x_time_true
+        ax0.text(
+            x_time_pred,
+            ax0.get_ylim()[1],
+            "First Warning ⚑",
+            color="blue",
+            fontsize=10,
+            ha="right" if leftAligned else "left",
+            va="bottom",
+        )
+        ax0.text(
+            x_time_true,
+            ax0.get_ylim()[1],
+            "⚑ First Emergence",
+            color="red",
+            fontsize=10,
+            ha="left" if leftAligned else "right",
+            va="bottom",
+        )
         diff_final = mdates.num2date(x_time_true) - mdates.num2date(x_time_pred)
         hours_final = (diff_final.days * 24 * 60 + (diff_final.seconds / 60)) // 60
         AR_pred.append(hours_final)
@@ -554,8 +572,18 @@ def eval_AR_emergence_with_plots(
         try:
             img1 = mpimg.imread(f"lstm/imgs/AR{test_AR}s.png")
             img2 = mpimg.imread(f"lstm/imgs/AR{test_AR}e.png")
-            for ax, img, title in zip(
-                [ax_image1, ax_image2], [img1, img2], ["Window Start", "Window End"]
+            # Get timestamps for window start and end
+            start_time = mdates.num2date(time_cut_mpl[window_start]).strftime(
+                "%Y-%m-%d %H:%M"
+            )
+            end_time = mdates.num2date(time_cut_mpl[window_end]).strftime(
+                "%Y-%m-%d %H:%M"
+            )
+            for ax, img, title, is_start in zip(
+                [ax_image1, ax_image2],
+                [img1, img2],
+                [start_time, end_time],
+                [True, False],
             ):
                 ax.imshow(
                     img,
@@ -566,6 +594,7 @@ def eval_AR_emergence_with_plots(
                 )
 
                 # --- draw 9x9 tile grid (1x1 squares from 0..9 in x and y) ---
+                tile_num = starting_tile + i + 2
                 for ix in range(9):  # columns
                     for iy in range(9):  # rows
                         rect = patches.Rectangle(
@@ -579,7 +608,49 @@ def eval_AR_emergence_with_plots(
                         )
                         ax.add_patch(rect)
 
-                ax.set_title(title, fontsize=12)
+                # Place time at bottom of image
+                ax.text(
+                    4.5, -0.3, title, ha="center", va="top", fontsize=10, color="black"
+                )
+
+                # Place AR number vertically on left side of start image
+                if is_start:
+                    # Add "pre-emergence" label to left of first image
+                    ax.text(
+                        -0.5,
+                        4.5,
+                        "Pre-Emergence",
+                        ha="right",
+                        va="center",
+                        fontsize=11,
+                        color="black",
+                        rotation=90,
+                    )
+                else:
+                    # Add "post-emergence" label to left of second image
+                    ax.text(
+                        -0.5,
+                        4.5,
+                        "Post-Emergence",
+                        ha="right",
+                        va="center",
+                        fontsize=11,
+                        color="black",
+                        rotation=90
+                    )
+                    # Add time text to right of second image
+                    ax.text(
+                        9.3,
+                        4.5,
+                        f"AR{test_AR}",
+                        ha="left",
+                        va="center",
+                        fontsize=12,
+                        rotation=-90,
+                        color="black",
+                        weight="bold",
+                    )
+
                 ax.axis("off")
                 for tile_num in range(starting_tile, starting_tile + 7):
                     highlight_tile(ax, tile_num + 2)
@@ -595,14 +666,18 @@ def eval_AR_emergence_with_plots(
             round(means[4], 3),
         )
         print(mae_string)
-
+        # Add figure-level legend at the bottom
+        handles, labels = ax0.get_legend_handles_labels()
+        fig.legend(
+            handles,
+            labels,
+            loc="lower center",
+            bbox_to_anchor=(0.5, 0.02),
+            ncol=5,
+            fontsize=9,
+        )
         plt.tight_layout()
         plt.subplots_adjust(top=0.96, bottom=0.075)
-        plt.suptitle(
-            "Comparison Results for AR{}".format(test_AR),
-            y=0.99,
-            fontsize=15
-        )
 
         save_path = RESULTS_PATH + "/AR{}_comparison_denormalized.png".format(test_AR)
         plt.savefig(save_path)
@@ -629,11 +704,11 @@ if __name__ == "__main__":
     # Format: ("Vanilla" or "Regular", "filename.pth")
     models_to_compare = [
         (
-            "MagFluxSeq2Seq MSE Loss",
+            "MagFluxEnc-Dec MSE Loss",
             "../models/LSTM12_r4_i110_n4_h32_e8_lr0.00170074_d0.3.pth",
         ),
         (
-            "MagFluxSeq2Seq Hybrid Loss",
+            "MagFluxEnc-Dec hybrid Loss",
             "../models/LSTM12_r4_i110_n4_h64_e10_lr0.00972080_d0.2.pth",
         ),
         (
@@ -641,7 +716,7 @@ if __name__ == "__main__":
             "../models/VanillaLSTM12_r4_i110_n1_h64_e10_lr0.00232000_d0.2.pth",
         ),
         (
-            "MagFluxLSTM Hybrid Loss",
+            "MagFluxLSTM hybrid Loss",
             "../models/VanillaLSTM12_r4_i110_n4_h128_e8_lr0.00700000_d0.1.pth",
         ),
     ]
