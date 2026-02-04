@@ -400,7 +400,7 @@ if __name__ == "__main__":
                 train_data_raw=train_data_ref,
                 val_data_raw=val_data_ref,
             ),
-            {"gpu": 1, "cpu": 8},
+            {"gpu": 1/32, "cpu": 1},
         ),
         tune_config=tune.TuneConfig(
             num_samples=parse_args()[
