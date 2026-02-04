@@ -6,7 +6,7 @@ import warnings
 import torch
 from math import log
 
-# os.environ["WANDB_MODE"] = "disabled"
+os.environ["WANDB_MODE"] = "disabled"
 
 import wandb
 from torch import nn
@@ -19,6 +19,7 @@ from functions import (
     train_epochTeacherForcingLSTM,
     train_epoch,
     validate_model,
+    load_all_ar_data,
     RESULTS_PATH,
     MODELS_PATH,
     VanillaLSTM,
@@ -86,46 +87,37 @@ train_ars = [
     13085,
     13098,
 ]
-(
-    x_train,
-    y_train,
-    _,
-    weights_train,
-    tile_indices_train,
-    input_size,
-    m_scale,
-    flux_scale,
-    cont_int_scale,
-) = prepare_dataset(
-    train_ars,
-    9,
-    rot,
-    num_in,
-    num_pred,
-)
+
+# PRE-LOAD DATA ONCE
+print("Pre-loading all AR data...")
+train_data_raw = load_all_ar_data(train_ars, 9, rot)
 
 print("Loading and preparing test data...")
 val_ars = [11462, 11521, 11907, 12219, 12271, 12275, 12567]
-x_val, y_val, last_all, weights_val, tile_indices_val, _,_, _, _ = prepare_dataset(
-    val_ars,
-    9,
-    rot,
-    num_in,
-    num_pred,
-    m_scale,
-    flux_scale,
-    cont_int_scale,
-)
+# Val data can be prepared once as it doesn't depend on hyperparams (unless we change rot/num_in/num_pred which are constants here)
+# However, scalers come from training data.
+# The original code loaded scaled training data then valid data using those scalers.
+# Since scalers only depend on raw values, we can compute them once if we assume the training split is constant.
+# BUT, prepare_dataset calculates scalers if not provided.
 
-if x_train is None or x_val is None:
+# Let's keep validation loading inside or pass raw validation data too?
+# Validation dataset doesn't change between trials, so we can prepare it fully ONCE.
+# Wait, prepare_dataset returns scalers. We need those scalers to prepare validation data.
+# So we run prepare_dataset on raw training data ONCE to get scalers and initial X/y (with default weights 1.0 maybe?)
+# Actually prepare_dataset logic is: calculate scalers -> scale -> create sequences.
+
+# To be safe and support the flow:
+# We will pass raw training data to the loop.
+# Validation data: we can pre-load raw validation data too.
+
+val_data_raw = load_all_ar_data(val_ars, 9, rot)  # Load raw val data
+
+if train_data_raw[0] is None:
     print("Could not create datasets. Exiting.")
     sys.exit()
 
-tensor_train = TensorDataset(x_train, y_train, weights_train)
-tensor_val = TensorDataset(x_val, y_val, weights_val)
 
-
-def main(config, x_train, y_train, tile_indices_train, val_ref):
+def main(config, train_data_raw, val_data_raw):  # Accept raw data
     model_type = config["model"]["model"]
     lossFn = config["lossFn"]["lossFn"]
     """Main function to run the experiment."""
@@ -143,31 +135,72 @@ def main(config, x_train, y_train, tile_indices_train, val_ref):
         notes="",
     )
 
-    # --- Compute Weights Dynamicallly ---
+    best_val_rmse = float("inf")
+
+    # --- Compute Weights Dynamically ---
     proportion = config["proportion"]
-    size = 9
+    # size = 9 # Implicit in prepare_dataset call if we used it, but here we just pass proportion.
+    # Wait, prepare_dataset needs tile_weights list.
+    # Logic from original grid_search:
+    # weights[rows < 4] = proportion
+    # weights[rows >= (size - 4)] = proportion
+    # So for size 9, rows 0,1,2,3 are weighted, 5,6,7,8 are weighted. Row 4 is 1.0?
+    # Index 0-3: prop. Index 5-8: prop. Index 4: 1.0 (default).
 
-    # Calculate row for each sample using tile indices
-    # We copy to CPU for indexing logic or stay on device if tensors are on CPU initially (usually they are CPU here)
-    rows = torch.div(tile_indices_train, size, rounding_mode="floor")
+    # Construct tile_weights list of length 9
+    tile_weights = [proportion] * 4 + [1.0] + [proportion] * 4
 
-    weights = torch.ones(x_train.shape[0])
+    # Generate Training Dataset
+    (
+        x_train,
+        y_train,
+        _,
+        weights_train,  # These will be correctly weighted now
+        tile_indices_train,
+        input_size,
+        m_scale,
+        flux_scale,
+        cont_int_scale,
+    ) = prepare_dataset(
+        None,  # ar_list is None because we use pre_loaded_data
+        9,
+        rot,
+        num_in,
+        num_pred,
+        tile_weights=tile_weights,
+        pre_loaded_data=train_data_raw,
+    )
 
-    # Apply proportion to first 4 and last 4 rows
-    # Rows 0, 1, 2, 3
-    weights[rows < 4] = proportion
-    # Rows 5, 6, 7, 8 (assuming size 9)
-    weights[rows >= (size - 4)] = proportion
+    # Generate Validation Dataset (using scalers from train)
+    x_val, y_val, last_all, weights_val, tile_indices_val, _, _, _, _ = prepare_dataset(
+        None,
+        9,
+        rot,
+        num_in,
+        num_pred,
+        m_scale,
+        flux_scale,
+        cont_int_scale,
+        pre_loaded_data=val_data_raw,
+    )
 
-    train_dataset = TensorDataset(x_train, y_train, weights)
+    train_dataset = TensorDataset(
+        x_train, y_train, weights_train
+    )  # Use returned weights
 
+    # Validation dataset commonly uses equal weights or we just ignore them in validation metric (RMSE)
+    # The original code set validation weights to 1.0 (implicitly via prepare_dataset default)
+
+    # Create Loaders
     train_loader = DataLoader(
         train_dataset,
         batch_size=config["batch_size"],
         shuffle=config["shuffle"],
     )
+
+    val_dataset = TensorDataset(x_val, y_val, weights_val)
     val_loader = DataLoader(
-        val_ref,
+        val_dataset,
         batch_size=config["batch_size"],
         shuffle=False,
     )
@@ -254,26 +287,28 @@ def main(config, x_train, y_train, tile_indices_train, val_ref):
             "RMSE": val_rmse,
         }
 
-        save_filename = f"{model_name}.pth"
-        save_path = os.path.join(MODELS_PATH, save_filename)
-        torch.save(model.state_dict(), save_path)
+        if val_rmse < best_val_rmse:
+            best_val_rmse = val_rmse
+            # Save strictly for upload purposes
+            save_filename = f"{model_name}.pth"
+            save_path = os.path.join(MODELS_PATH, save_filename)
+            torch.save(model.state_dict(), save_path)
+
+            model_artifact = wandb.Artifact(
+                name=f"{model_type}-model-{wandb.run.id}",
+                type="model",
+                description=f"Best {model_type} model (RMSE: {best_val_rmse:.4f})",
+                metadata={**config, "best_rmse": best_val_rmse, "epoch": epoch},
+            )
+            model_artifact.add_file(save_path)
+            wandb.log_artifact(model_artifact)
 
         wandb.log(log_metrics)
         tune.report(log_metrics)
 
     # --- Save Model & Artifacts ---
-    model_path = os.path.join(RESULTS_PATH, model_name + ".pth")
-    torch.save(model.state_dict(), model_path)
-    print(f"Model saved to {model_path}")
-
-    model_artifact = wandb.Artifact(
-        name=f"{model_type}-model-{wandb.run.id}",
-        type="model",
-        description=f"{model_type} model for SAR emergence prediction",
-        metadata=config,
-    )
-    model_artifact.add_file(model_path)
-    wandb.log_artifact(model_artifact)
+    # We already saved the best model during the loop to wandb.
+    # The local file at MODELS_PATH might be the last best one.
 
     end_time = time.time()
     print(f"Elapsed time: {(end_time - start_time) / 60:.2f} minutes")
@@ -353,20 +388,19 @@ if __name__ == "__main__":
 
     # Set up the Tuner
     ray.init(num_cpus=32, num_gpus=1, include_dashboard=False, _temp_dir="/tmp/ray")
-    x_train_ref = ray.put(x_train)
-    y_train_ref = ray.put(y_train)
-    tile_indices_train_ref = ray.put(tile_indices_train)
-    val_ref = ray.put(tensor_val)
+
+    # Put large data in Ray object store
+    train_data_ref = ray.put(train_data_raw)
+    val_data_ref = ray.put(val_data_raw)
+
     tuner = tune.Tuner(
         tune.with_resources(
             tune.with_parameters(
                 main,
-                x_train=x_train_ref,
-                y_train=y_train_ref,
-                tile_indices_train=tile_indices_train_ref,
-                val_ref=val_ref,
+                train_data_raw=train_data_ref,
+                val_data_raw=val_data_ref,
             ),
-            {"gpu": 1 / 32, "cpu": 1},
+            {"gpu": 1, "cpu": 1},
         ),
         tune_config=tune.TuneConfig(
             num_samples=parse_args()[

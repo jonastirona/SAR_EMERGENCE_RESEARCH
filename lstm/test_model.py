@@ -4,7 +4,7 @@ from functions import (
     emergence_indication,
     recalibrate,
     highlight_tile,
-    process_data,
+    scale_and_combine_data,
     get_params,
     AR_defs,
     load_ar_data,
@@ -102,18 +102,13 @@ def eval_AR_emergence_with_plots(
         size = 9
         rid_of_top = 4
 
-
-        #SCALES FOR DATA
+        # SCALES FOR DATA
         cont_int_scale = (-12419.59375, 3119.267578125)
         flux_scale = (-78.26012229919434, 490.13057708740234)
-        m_scale = (-365079096.0, 118424064.0) 
+        m_scale = (-365079096.0, 118424064.0)
 
-
-
-        maps, flux, cont_int, time = load_ar_data(
-            test_AR, size, rid_of_top
-        )
-        inputs, mag_flux = process_data(
+        maps, flux, cont_int, time = load_ar_data(test_AR, size, rid_of_top)
+        inputs, mag_flux = scale_and_combine_data(
             maps, flux, cont_int, m_scale, flux_scale, cont_int_scale
         )
         lstm = initialize_lstm(
@@ -167,12 +162,8 @@ def eval_AR_emergence_with_plots(
                 1 + i, last_known_idx - before_plot : last_known_idx
             ]
 
-            d_true = np.gradient(
-                np.concatenate((mag_before_pred, true))
-            ) 
-            indicator_true = emergence_indication(
-                d_true, threshold, sust_time
-            ) 
+            d_true = np.gradient(np.concatenate((mag_before_pred, true)))
+            indicator_true = emergence_indication(d_true, threshold, sust_time)
 
             for idx, indic in enumerate(indicator_true):
                 if indic == 1:
@@ -185,10 +176,8 @@ def eval_AR_emergence_with_plots(
                         minItrue.add(i)
                     break
 
-            d_pred = np.gradient(
-                pred)
-            indicator_pred = emergence_indication(
-                d_pred, threshold, sust_time)
+            d_pred = np.gradient(pred)
+            indicator_pred = emergence_indication(d_pred, threshold, sust_time)
             for idx, indic in enumerate(indicator_pred):
                 if indic == 1:
                     if idx < firstTimePred:
@@ -313,12 +302,8 @@ def eval_AR_emergence_with_plots(
 
             # Subplot d_true
             ax1 = plt.subplot(gs[1])
-            d_true = np.gradient(
-                np.concatenate((mag_before_pred, true))
-            )  
-            indicator_true = emergence_indication(
-                d_true, threshold, sust_time
-            )  
+            d_true = np.gradient(np.concatenate((mag_before_pred, true)))
+            indicator_true = emergence_indication(d_true, threshold, sust_time)
             for idx, indic in enumerate(indicator_true):
                 if indic == 1:
                     break
@@ -367,13 +352,9 @@ def eval_AR_emergence_with_plots(
             )
             # Subplot d_pred
             ax2 = plt.subplot(gs[2])
-            d_pred = np.gradient(
-                pred
-            )  
+            d_pred = np.gradient(pred)
             dd_pred = np.gradient(d_pred)
-            indicator_pred = emergence_indication(
-                d_pred, threshold, sust_time
-            ) 
+            indicator_pred = emergence_indication(d_pred, threshold, sust_time)
             dd_pred = np.concatenate((zeros_array, dd_pred))
             d_pred = np.concatenate((zeros_array, d_pred))
             indicator_pred = np.concatenate((nan_array, indicator_pred))

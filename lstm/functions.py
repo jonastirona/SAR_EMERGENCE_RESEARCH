@@ -313,6 +313,19 @@ def load_ar_data(ar_num, size, rid_of_top):
         return None, None, None
 
 
+def load_all_ar_data(ar_list, size, rid_of_top):
+    all_power_maps = []
+    all_flux = []
+    all_cont_int = []
+    for ar in ar_list:
+        power_maps, flux, cont_int, time = load_ar_data(ar, size, rid_of_top)
+        if power_maps is not None:
+            all_power_maps.append(power_maps)
+            all_flux.append(flux)
+            all_cont_int.append(cont_int)
+    return all_power_maps, all_flux, all_cont_int
+
+
 def scale_and_combine_data(maps, flux, cont_int, m_scale, f_scale, cont_int_scale):
     stacked_maps = min_max_scaling(maps, *m_scale)
     mag_flux = min_max_scaling(flux, *f_scale)
@@ -430,6 +443,7 @@ def prepare_dataset(
     flux_scale=None,
     cont_int_scale=None,
     tile_weights=None,  # Added tile_weights parameter
+    pre_loaded_data=None,  # Added pre_loaded_data parameter
 ):
     """Builds a complete dataset (X, y) for a list of ARs."""
     processed_inputs, processed_flux = [], []
@@ -438,36 +452,29 @@ def prepare_dataset(
     all_cont_int = []
 
     # Load data for all ARs
-    if power_maps_scale is None:
-        for ar in ar_list:
-            power_maps, flux, cont_int, time = load_ar_data(ar, size, rid_of_top)
-            all_power_maps.append(power_maps)
-            all_flux.append(flux)
-            all_cont_int.append(cont_int)
+    if pre_loaded_data is not None:
+        all_power_maps, all_flux, all_cont_int = pre_loaded_data
+    elif ar_list is not None:
+        all_power_maps, all_flux, all_cont_int = load_all_ar_data(
+            ar_list, size, rid_of_top
+        )
 
+    if power_maps_scale is None:
         power_maps_scale = (np.min(all_power_maps), np.max(all_power_maps))
         flux_scale = (np.min(all_flux), np.max(all_flux))
         cont_int_scale = (np.min(all_cont_int), np.max(all_cont_int))
 
-        for i in range(len(all_power_maps)):
-            combined_inputs, flux = scale_and_combine_data(
-                all_power_maps[i],
-                all_flux[i],
-                all_cont_int[i],
-                power_maps_scale,
-                flux_scale,
-                cont_int_scale,
-            )
-            processed_inputs.append(combined_inputs)
-            processed_flux.append(flux)
-    else:
-        for ar in ar_list:
-            maps, flux, cont_int, time = load_ar_data(ar, size, rid_of_top)
-            combined_inputs, flux = scale_and_combine_data(
-                maps, flux, cont_int, power_maps_scale, flux_scale, cont_int_scale
-            )
-            processed_inputs.append(combined_inputs)
-            processed_flux.append(flux)
+    for i in range(len(all_power_maps)):
+        combined_inputs, flux = scale_and_combine_data(
+            all_power_maps[i],
+            all_flux[i],
+            all_cont_int[i],
+            power_maps_scale,
+            flux_scale,
+            cont_int_scale,
+        )
+        processed_inputs.append(combined_inputs)
+        processed_flux.append(flux)
 
     if not processed_inputs:
         print("all_inputs_list does not exist")
@@ -690,7 +697,12 @@ def validate_model(model, dataloader, device):
     all_y = []
 
     with torch.no_grad():
-        for x, y in dataloader:
+        for batch in dataloader:
+            if len(batch) == 3:
+                x, y, weights = batch
+            else:
+                x, y = batch
+
             x, y = x.to(device), y.to(device)
 
             preds = model(x)
