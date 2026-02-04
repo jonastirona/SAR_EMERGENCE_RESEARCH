@@ -21,7 +21,7 @@ from functions import LSTM
 
 
 warnings.filterwarnings("ignore")
-os.makedirs(RESULTS_PATH, exist_ok=True) 
+os.makedirs(RESULTS_PATH, exist_ok=True)
 
 
 # --- Main Execution ---
@@ -77,19 +77,30 @@ def main(config):
         13085,
         13098,
     ]
-    x_train, y_train, _, input_size, m_scale, flux_scale, cont_int_scale = (
-        prepare_dataset(
-            train_ars,
-            9,
-            config["rid_of_top"],
-            config["num_in"],
-            config["num_pred"],
-        )
+    # row indexes
+    tile_weights = [1.0, 1.0, 1.0, 1.0, 5.0, 1.0, 1.0, 1.0, 1.0]
+
+    (
+        x_train,
+        y_train,
+        _,
+        weights_train,
+        input_size,
+        m_scale,
+        flux_scale,
+        cont_int_scale,
+    ) = prepare_dataset(
+        train_ars,
+        9,
+        config["rid_of_top"],
+        config["num_in"],
+        config["num_pred"],
+        tile_weights=tile_weights,
     )
 
     print("Loading and preparing test data...")
     val_ars = [11462, 11521, 11907, 12219, 12271, 12275, 12567]
-    x_val, y_val, last_val, _, _, _, _ = prepare_dataset(
+    x_val, y_val, last_val, weights_val, _, _, _ = prepare_dataset(
         val_ars,
         9,
         config["rid_of_top"],
@@ -98,6 +109,7 @@ def main(config):
         m_scale,
         flux_scale,
         cont_int_scale,
+        tile_weights=tile_weights,
     )
 
     if x_train is None or x_val is None:
@@ -105,10 +117,14 @@ def main(config):
         return
 
     train_loader = DataLoader(
-        TensorDataset(x_train, y_train), batch_size=config["batch_size"], shuffle=False
+        TensorDataset(x_train, y_train, weights_train),
+        batch_size=config["batch_size"],
+        shuffle=False,
     )
     val_loader = DataLoader(
-        TensorDataset(x_val, y_val), batch_size=config["batch_size"], shuffle=False
+        TensorDataset(x_val, y_val, weights_val),
+        batch_size=config["batch_size"],
+        shuffle=False,
     )
 
     # --- Model & Optimizer ---
@@ -132,7 +148,9 @@ def main(config):
     # --- Training Loop ---
     print("Starting training...")
     for epoch in range(config["n_epochs"]):
-        train_loss = train_epochTeacherForcingLSTM(model, train_loader, loss_fn, optimizer, device, config['tfr'])
+        train_loss = train_epochTeacherForcingLSTM(
+            model, train_loader, loss_fn, optimizer, device, config["tfr"]
+        )
         val_rmse = validate_model(model, val_loader, device)
 
         lr = scheduler.get_last_lr()[0]
@@ -161,7 +179,7 @@ def parse_args():
     """Parses command-line arguments."""
     if len(sys.argv) != 9:
         print(
-            "Usage: python train_one_epoch.p <num_layers> <hidden_size> <n_epochs> <learning_rate> <dropout> <batch_size>"
+            "Usage: python train_one_epoch.p <num_layers> <hidden_size> <n_epochs> <learning_rate> <dropout> <batch_size> <weight_decay> <model_type>"
         )
         sys.exit(1)
 
@@ -176,7 +194,7 @@ def parse_args():
             "weight_decay": float(sys.argv[7]),
             "model_type": sys.argv[8],
             "alpha": 0.9,
-            "rid_of_top": 4,
+            "rid_of_top": 0,
             "num_in": 110,
             "num_pred": 12,
             "tfr": 0.5,

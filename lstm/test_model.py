@@ -111,7 +111,7 @@ def eval_AR_emergence_with_plots(
 
 
         maps, flux, cont_int, time = load_ar_data(
-            test_AR, size, rid_of_top, starting_tile
+            test_AR, size, rid_of_top
         )
         inputs, mag_flux = process_data(
             maps, flux, cont_int, m_scale, flux_scale, cont_int_scale
@@ -603,7 +603,7 @@ def eval_AR_emergence(
     cont_int_scale = (-12419.59375, 3119.267578125)
     flux_scale = (-78.26012229919434, 490.13057708740234)
     m_scale = (-365079096.0, 118424064.0)
-    maps, flux, cont_int, time = load_ar_data(test_AR, size, rid_of_top, starting_tile)
+    maps, flux, cont_int, time = load_ar_data(test_AR, size, rid_of_top)
     inputs, mag_flux = process_data(
         maps, flux, cont_int, m_scale, flux_scale, cont_int_scale
     )

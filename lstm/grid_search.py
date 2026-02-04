@@ -38,7 +38,7 @@ from ray.tune.stopper import TrialPlateauStopper
 warnings.filterwarnings("ignore")
 os.makedirs(RESULTS_PATH, exist_ok=True)  # Ensure the results directory exists
 
-rot = 4
+rot = 0
 num_in = 110
 num_pred = 12
 # --- Data Loading ---
@@ -86,7 +86,17 @@ train_ars = [
     13085,
     13098,
 ]
-x_train, y_train, _, input_size, m_scale, flux_scale, cont_int_scale = prepare_dataset(
+(
+    x_train,
+    y_train,
+    _,
+    weights_train,
+    tile_indices_train,
+    input_size,
+    m_scale,
+    flux_scale,
+    cont_int_scale,
+) = prepare_dataset(
     train_ars,
     9,
     rot,
@@ -96,7 +106,7 @@ x_train, y_train, _, input_size, m_scale, flux_scale, cont_int_scale = prepare_d
 
 print("Loading and preparing test data...")
 val_ars = [11462, 11521, 11907, 12219, 12271, 12275, 12567]
-x_val, y_val, last_all, _, _, _, _ = prepare_dataset(
+x_val, y_val, last_all, weights_val, tile_indices_val, _,_, _, _ = prepare_dataset(
     val_ars,
     9,
     rot,
@@ -111,11 +121,11 @@ if x_train is None or x_val is None:
     print("Could not create datasets. Exiting.")
     sys.exit()
 
-tensor_train = TensorDataset(x_train, y_train)
-tensor_val = TensorDataset(x_val, y_val)
+tensor_train = TensorDataset(x_train, y_train, weights_train)
+tensor_val = TensorDataset(x_val, y_val, weights_val)
 
 
-def main(config, train_ref, val_ref):
+def main(config, x_train, y_train, tile_indices_train, val_ref):
     model_type = config["model"]["model"]
     lossFn = config["lossFn"]["lossFn"]
     """Main function to run the experiment."""
@@ -123,7 +133,7 @@ def main(config, train_ref, val_ref):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Runs on: {device}")
 
-    model_name = f"{model_type}_n{config['num_layers']}_h{config['hidden_size']}_lr{config['learning_rate']:.8f}_d{config['dropout']}_w{config['weight_decay']}_{'shuffle' if config['shuffle'] else 'noshuffle'}"
+    model_name = f"{model_type}_n{config['num_layers']}_h{config['hidden_size']}_lr{config['learning_rate']:.8f}_d{config['dropout']}_w{config['weight_decay']}_{'shuffle' if config['shuffle'] else 'noshuffle'}_p{config['proportion']}"
     # Initialize wandb
     wandb.init(
         project="All Search Parameters 1",
@@ -133,8 +143,26 @@ def main(config, train_ref, val_ref):
         notes="",
     )
 
+    # --- Compute Weights Dynamicallly ---
+    proportion = config["proportion"]
+    size = 9
+
+    # Calculate row for each sample using tile indices
+    # We copy to CPU for indexing logic or stay on device if tensors are on CPU initially (usually they are CPU here)
+    rows = torch.div(tile_indices_train, size, rounding_mode="floor")
+
+    weights = torch.ones(x_train.shape[0])
+
+    # Apply proportion to first 4 and last 4 rows
+    # Rows 0, 1, 2, 3
+    weights[rows < 4] = proportion
+    # Rows 5, 6, 7, 8 (assuming size 9)
+    weights[rows >= (size - 4)] = proportion
+
+    train_dataset = TensorDataset(x_train, y_train, weights)
+
     train_loader = DataLoader(
-        train_ref,
+        train_dataset,
         batch_size=config["batch_size"],
         shuffle=config["shuffle"],
     )
@@ -226,7 +254,7 @@ def main(config, train_ref, val_ref):
             "RMSE": val_rmse,
         }
 
-        save_filename = f"{model_name}.pth" 
+        save_filename = f"{model_name}.pth"
         save_path = os.path.join(MODELS_PATH, save_filename)
         torch.save(model.state_dict(), save_path)
 
@@ -272,10 +300,11 @@ if __name__ == "__main__":
         "learning_rate": hp.loguniform("learning_rate", log(1e-5), log(1e-2)),
         "hidden_size": hp.choice("hidden_size", [2, 4, 8, 16, 32, 64, 128]),
         "num_layers": hp.choice("num_layers", [1, 2, 3, 4]),
-        "dropout": hp.choice("dropout", [0,0.1, 0.2, 0.3]),
+        "dropout": hp.choice("dropout", [0, 0.1, 0.2, 0.3]),
         "batch_size": hp.choice("batch_size", [32, 64]),
         "weight_decay": hp.loguniform("weight_decay", log(1e-6), log(1e-3)),
         "n_epochs": 100,
+        "proportion": hp.choice("proportion", [0.1, 0.5, 1.0, 2.0, 5.0, 10.0]),
         # Dataset
         "shuffle": hp.choice("shuffle", [True, False]),
         # Model architecture | Conditional Search Space
@@ -324,13 +353,17 @@ if __name__ == "__main__":
 
     # Set up the Tuner
     ray.init(num_cpus=32, num_gpus=1, include_dashboard=False, _temp_dir="/tmp/ray")
-    train_ref = ray.put(tensor_train)
+    x_train_ref = ray.put(x_train)
+    y_train_ref = ray.put(y_train)
+    tile_indices_train_ref = ray.put(tile_indices_train)
     val_ref = ray.put(tensor_val)
     tuner = tune.Tuner(
         tune.with_resources(
             tune.with_parameters(
                 main,
-                train_ref=train_ref,
+                x_train=x_train_ref,
+                y_train=y_train_ref,
+                tile_indices_train=tile_indices_train_ref,
                 val_ref=val_ref,
             ),
             {"gpu": 1 / 32, "cpu": 1},

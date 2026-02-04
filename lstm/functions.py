@@ -264,11 +264,20 @@ def highlight_tile(ax, tile_number, divisions=9, color="r", linewidth=1):
 
     # Add tile number alternating between top and bottom
     text_y = y + 1.2 if (x + y) % 2 == 0 else y + -0.35
-    ax.text(x + 0.5, text_y, str(tile_number), ha='center', va='center', 
-            fontsize=11, color='black', weight='bold', zorder=2)
+    ax.text(
+        x + 0.5,
+        text_y,
+        str(tile_number),
+        ha="center",
+        va="center",
+        fontsize=11,
+        color="black",
+        weight="bold",
+        zorder=2,
+    )
 
 
-def load_ar_data(ar_num, size, rid_of_top, starting_tile):
+def load_ar_data(ar_num, size, rid_of_top):
     """Loads and preprocesses data for a single Active Region (AR)."""
     try:
         # Load data from .npz files
@@ -287,7 +296,7 @@ def load_ar_data(ar_num, size, rid_of_top, starting_tile):
         intensities = intensities_data["arr_0"]
 
         # Trim, stack, and handle NaNs
-        trim_slice = slice(starting_tile, starting_tile + size)
+        trim_slice = slice(rid_of_top * size, size**2 - rid_of_top * size)
         power_maps = [pm[trim_slice, :] for pm in power_maps]
         mag_flux = mag_flux[trim_slice, :]
         intensities = intensities[trim_slice, :]
@@ -304,7 +313,7 @@ def load_ar_data(ar_num, size, rid_of_top, starting_tile):
         return None, None, None
 
 
-def process_data(maps, flux, cont_int, m_scale, f_scale, cont_int_scale):
+def scale_and_combine_data(maps, flux, cont_int, m_scale, f_scale, cont_int_scale):
     stacked_maps = min_max_scaling(maps, *m_scale)
     mag_flux = min_max_scaling(flux, *f_scale)
     intensities = min_max_scaling(cont_int, *cont_int_scale)
@@ -417,61 +426,58 @@ def prepare_dataset(
     rid_of_top,
     num_in,
     num_pred,
-    m_scale=None,
+    power_maps_scale=None,
     flux_scale=None,
     cont_int_scale=None,
+    tile_weights=None,  # Added tile_weights parameter
 ):
     """Builds a complete dataset (X, y) for a list of ARs."""
-    all_inputs_list, all_flux_list = [], []
-    all_maps = []
+    processed_inputs, processed_flux = [], []
+    all_power_maps = []
     all_flux = []
     all_cont_int = []
 
     # Load data for all ARs
-    if m_scale is None:
+    if power_maps_scale is None:
         for ar in ar_list:
-            maps, flux, cont_int, time = load_ar_data(
-                ar, size, rid_of_top, size * rid_of_top
-            )
-            all_maps.append(maps)
+            power_maps, flux, cont_int, time = load_ar_data(ar, size, rid_of_top)
+            all_power_maps.append(power_maps)
             all_flux.append(flux)
             all_cont_int.append(cont_int)
 
-        m_scale = (np.min(all_maps), np.max(all_maps))
+        power_maps_scale = (np.min(all_power_maps), np.max(all_power_maps))
         flux_scale = (np.min(all_flux), np.max(all_flux))
         cont_int_scale = (np.min(all_cont_int), np.max(all_cont_int))
 
-        for i in range(len(all_maps)):
-            combined_inputs, flux = process_data(
-                all_maps[i],
+        for i in range(len(all_power_maps)):
+            combined_inputs, flux = scale_and_combine_data(
+                all_power_maps[i],
                 all_flux[i],
                 all_cont_int[i],
-                m_scale,
+                power_maps_scale,
                 flux_scale,
                 cont_int_scale,
             )
-            all_inputs_list.append(combined_inputs)
-            all_flux_list.append(flux)
+            processed_inputs.append(combined_inputs)
+            processed_flux.append(flux)
     else:
         for ar in ar_list:
-            maps, flux, cont_int, time = load_ar_data(
-                ar, size, rid_of_top, size * rid_of_top
+            maps, flux, cont_int, time = load_ar_data(ar, size, rid_of_top)
+            combined_inputs, flux = scale_and_combine_data(
+                maps, flux, cont_int, power_maps_scale, flux_scale, cont_int_scale
             )
-            combined_inputs, flux = process_data(
-                maps, flux, cont_int, m_scale, flux_scale, cont_int_scale
-            )
-            all_inputs_list.append(combined_inputs)
-            all_flux_list.append(flux)
+            processed_inputs.append(combined_inputs)
+            processed_flux.append(flux)
 
-    if not all_inputs_list:
+    if not processed_inputs:
         print("all_inputs_list does not exist")
         return None, None, 0
 
     # Create sequences for the LSTM
-    x_list, y_list, last_list = [], [], []
+    x_list, y_list, last_list, weight_list, tile_idx_list = [], [], [], [], []
     tiles = size**2 - 2 * size * rid_of_top
 
-    for inputs, flux in zip(all_inputs_list, all_flux_list):
+    for inputs, flux in zip(processed_inputs, processed_flux):
         for tile in range(tiles):
             x_seq, y_seq, last_seq = lstm_ready(
                 tile, size, inputs, flux, num_in, num_pred
@@ -482,21 +488,34 @@ def prepare_dataset(
                 y_list.append(y_seq)
                 last_list.append(last_seq)
 
+                # Assign weights to each sample in the sequence based on the tile
+                real_tile_idx = tile + rid_of_top * size
+                tile_row = real_tile_idx // size
+                w = tile_weights[tile_row] if tile_weights is not None else 1.0
+                weight_list.append(torch.full((x_seq.shape[0],), float(w)))
+                tile_idx_list.append(
+                    torch.full((x_seq.shape[0],), float(real_tile_idx))
+                )
+
     if not x_list:
         print("X_list does not exist")
         return None, None, 0
 
     x_all = torch.cat(x_list, dim=0)
     y_all = torch.cat(y_list, dim=0)
-    last_all = torch.cat(last_list, dim=0)  # Concatenate the last values
+    last_all = torch.cat(last_list, dim=0)
+    weights_all = torch.cat(weight_list, dim=0)
+    tile_indices_all = torch.cat(tile_idx_list, dim=0)
     input_feature_size = x_all.shape[2]
 
     return (
         x_all,
         y_all,
         last_all,
+        weights_all,
+        tile_indices_all,
         input_feature_size,
-        m_scale,
+        power_maps_scale,
         flux_scale,
         cont_int_scale,
     )
@@ -510,22 +529,36 @@ def train_epochHybridLSTM(
     total_loss = 0
     loss_scaler = 100.0
 
-    # Weighting factor for the two loss components
-    # alpha
+    for batch in dataloader:
+        if len(batch) == 3:
+            x, y, weights = batch
+            weights = weights.to(device)
+        else:
+            x, y = batch
+            weights = None
 
-    for x, y in dataloader:
         x, y = x.to(device), y.to(device)
         optimizer.zero_grad()
 
         outputs = model(x, y, teacher_forcing_ratio=teacher_ratio)
 
         # 1. Calculate loss on the actual values
-        value_loss = loss_fn(outputs, y)
+        if weights is not None:
+            # Manually calculate weighted MSE
+            value_loss = (torch.mean((outputs - y) ** 2, dim=1) * weights).mean()
+        else:
+            value_loss = loss_fn(outputs, y)
 
         # 2. Calculate loss on the derivatives
         outputs_deriv = outputs[:, 1:] - outputs[:, :-1]
         y_deriv = y[:, 1:] - y[:, :-1]
-        derivative_loss = loss_fn(outputs_deriv, y_deriv)
+
+        if weights is not None:
+            derivative_loss = (
+                torch.mean((outputs_deriv - y_deriv) ** 2, dim=1) * weights
+            ).mean()
+        else:
+            derivative_loss = loss_fn(outputs_deriv, y_deriv)
 
         # 3. Combine them into a hybrid loss
         loss = alpha * value_loss + (1 - alpha) * derivative_loss
@@ -543,26 +576,31 @@ def train_epochTeacherForcingLSTM(
     model, dataloader, loss_fn, optimizer, device, teacher_forcing
 ):
     """Runs a single training epoch."""
-
     model.train()
-
     total_loss = 0
 
-    for x, y in dataloader:
-        x, y = x.to(device), y.to(device)
+    for batch in dataloader:
+        if len(batch) == 3:
+            x, y, weights = batch
+            weights = weights.to(device)
+        else:
+            x, y = batch
+            weights = None
 
+        x, y = x.to(device), y.to(device)
         optimizer.zero_grad()
 
         outputs = model(x, y, teacher_forcing_ratio=teacher_forcing)
 
-        loss = loss_fn(outputs, y)
+        if weights is not None:
+            # Weighted MSE loss: (pred - true)^2 * weights
+            loss = (torch.mean((outputs - y) ** 2, dim=1) * weights).mean()
+        else:
+            loss = loss_fn(outputs, y)
 
         loss.backward()
-
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-
         optimizer.step()
-
         total_loss += loss.item()
 
     return total_loss / len(dataloader)
@@ -573,22 +611,35 @@ def train_epochHybridVanillaLSTM(model, dataloader, loss_fn, optimizer, device, 
     total_loss = 0
     loss_scaler = 100.0
 
-    # Weighting factor for the two loss components
-    # alpha
+    for batch in dataloader:
+        if len(batch) == 3:
+            x, y, weights = batch
+            weights = weights.to(device)
+        else:
+            x, y = batch
+            weights = None
 
-    for x, y in dataloader:
         x, y = x.to(device), y.to(device)
         optimizer.zero_grad()
 
         outputs = model(x)
 
         # 1. Calculate loss on the actual values
-        value_loss = loss_fn(outputs, y)
+        if weights is not None:
+            value_loss = (torch.mean((outputs - y) ** 2, dim=1) * weights).mean()
+        else:
+            value_loss = loss_fn(outputs, y)
 
         # 2. Calculate loss on the derivatives
         outputs_deriv = outputs[:, 1:] - outputs[:, :-1]
         y_deriv = y[:, 1:] - y[:, :-1]
-        derivative_loss = loss_fn(outputs_deriv, y_deriv)
+
+        if weights is not None:
+            derivative_loss = (
+                torch.mean((outputs_deriv - y_deriv) ** 2, dim=1) * weights
+            ).mean()
+        else:
+            derivative_loss = loss_fn(outputs_deriv, y_deriv)
 
         # 3. Combine them into a hybrid loss
         loss = alpha * value_loss + (1 - alpha) * derivative_loss
@@ -604,26 +655,30 @@ def train_epochHybridVanillaLSTM(model, dataloader, loss_fn, optimizer, device, 
 
 def train_epoch(model, dataloader, loss_fn, optimizer, device):
     """Runs a single training epoch."""
-
     model.train()
-
     total_loss = 0
 
-    for x, y in dataloader:
-        x, y = x.to(device), y.to(device)
+    for batch in dataloader:
+        if len(batch) == 3:
+            x, y, weights = batch
+            weights = weights.to(device)
+        else:
+            x, y = batch
+            weights = None
 
+        x, y = x.to(device), y.to(device)
         optimizer.zero_grad()
 
         outputs = model(x)
 
-        loss = loss_fn(outputs, y)
+        if weights is not None:
+            loss = (torch.mean((outputs - y) ** 2, dim=1) * weights).mean()
+        else:
+            loss = loss_fn(outputs, y)
 
         loss.backward()
-
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-
         optimizer.step()
-
         total_loss += loss.item()
 
     return total_loss / len(dataloader)
