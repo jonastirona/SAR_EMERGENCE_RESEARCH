@@ -9,7 +9,7 @@ sbatch <<EOT
 #SBATCH --qos=low
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=8
+#SBATCH --cpus-per-task=32
 #SBATCH --gres=gpu:1
 #SBATCH --time=15:00:00
 #SBATCH --output=%x_%j.out
