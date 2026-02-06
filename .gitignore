@@ -57,3 +57,5 @@ Thumbs.db
 
 ray_tune_logs/
 lstm/results.txt
+
+*changes.txt

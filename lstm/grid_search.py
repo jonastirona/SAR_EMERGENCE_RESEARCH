@@ -128,7 +128,7 @@ def main(config, train_data_raw, val_data_raw):  # Accept raw data
     model_name = f"{model_type}_n{config['num_layers']}_h{config['hidden_size']}_lr{config['learning_rate']:.8f}_d{config['dropout']}_w{config['weight_decay']}_{'shuffle' if config['shuffle'] else 'noshuffle'}_p{config['proportion']}"
     # Initialize wandb
     wandb.init(
-        project="Weighted Tiles Test | Only diff proportion parameter",
+        project="Weighted Tiles Test | Weighted RMSE",
         entity=os.environ.get("WANDB_ENTITY"),
         config=config,
         name=f"{model_name}",
@@ -181,6 +181,7 @@ def main(config, train_data_raw, val_data_raw):  # Accept raw data
         m_scale,
         flux_scale,
         cont_int_scale,
+        tile_weights=tile_weights,  # Pass weights to validation too
         pre_loaded_data=val_data_raw,
     )
 
@@ -274,10 +275,17 @@ def main(config, train_data_raw, val_data_raw):  # Accept raw data
                     optimizer,
                     device,
                 )
-        val_rmse = validate_model(model, val_loader, device)
+        val_metrics = validate_model(model, val_loader, device)
+        val_rmse = val_metrics["RMSE"]
+        val_deriv_rmse = val_metrics["Deriv_RMSE"]
+        val_weighted_rmse = val_metrics["Weighted_RMSE"]
+        val_weighted_deriv_rmse = val_metrics["Weighted_Deriv_RMSE"]
 
         lr = scheduler.get_last_lr()[0]
-        scheduler.step(val_rmse)
+        # Scheduler steps on the metric we want to optimize.
+        # User wants to predict emergence (slope) and uses proportion to emphasize specific regions.
+        # So we should schedule on Weighted Derivative RMSE.
+        scheduler.step(val_weighted_deriv_rmse)
 
         log_metrics = {
             "epoch": epoch,
@@ -285,10 +293,14 @@ def main(config, train_data_raw, val_data_raw):  # Accept raw data
             # "validation_loss": val_loss,
             "learning_rate": float(lr),
             "RMSE": val_rmse,
+            "Deriv_RMSE": val_deriv_rmse,
+            "Weighted_RMSE": val_weighted_rmse,
+            "Weighted_Deriv_RMSE": val_weighted_deriv_rmse,
         }
 
-        if val_rmse < best_val_rmse:
-            best_val_rmse = val_rmse
+        # Save best model based on Weighted Deriv RMSE
+        if val_weighted_deriv_rmse < best_val_rmse:
+            best_val_rmse = val_weighted_deriv_rmse
             # Save strictly for upload purposes
             save_filename = f"{model_name}.pth"
             save_path = os.path.join(MODELS_PATH, save_filename)
@@ -297,8 +309,15 @@ def main(config, train_data_raw, val_data_raw):  # Accept raw data
             model_artifact = wandb.Artifact(
                 name=f"{model_type}-model-{wandb.run.id}",
                 type="model",
-                description=f"Best {model_type} model (RMSE: {best_val_rmse:.4f})",
-                metadata={**config, "best_rmse": best_val_rmse, "epoch": epoch},
+                description=f"Best {model_type} model (Weighted Deriv RMSE: {best_val_rmse:.4f})",
+                metadata={
+                    **config,
+                    "best_rmse": val_rmse,
+                    "best_deriv_rmse": val_deriv_rmse,
+                    "best_weighted_rmse": val_weighted_rmse,
+                    "best_weighted_deriv_rmse": best_val_rmse,
+                    "epoch": epoch,
+                },
             )
             model_artifact.add_file(save_path)
             wandb.log_artifact(model_artifact)
@@ -371,17 +390,19 @@ if __name__ == "__main__":
 
     # Scheduler to early-stop bad trials
     scheduler = ASHAScheduler(
-        metric="RMSE",
+        metric="Weighted_Deriv_RMSE",  # Optimize for this!
         mode="min",
         grace_period=15,  # Min epochs before a trial can be stopped
         reduction_factor=2,
     )
 
     # Search algorithm
-    search_alg = HyperOptSearch(space=search_space, metric="RMSE", mode="min")
+    search_alg = HyperOptSearch(
+        space=search_space, metric="Weighted_Deriv_RMSE", mode="min"
+    )
 
     early_stopper = TrialPlateauStopper(
-        metric="RMSE",
+        metric="Weighted_Deriv_RMSE",
         mode="min",
         grace_period=10,  # Number of epochs to wait for improvement
     )
@@ -400,7 +421,7 @@ if __name__ == "__main__":
                 train_data_raw=train_data_ref,
                 val_data_raw=val_data_ref,
             ),
-            {"gpu": 1/32, "cpu": 1},
+            {"gpu": 1 / 32, "cpu": 1},
         ),
         tune_config=tune.TuneConfig(
             num_samples=parse_args()[

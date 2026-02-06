@@ -695,6 +695,7 @@ def validate_model(model, dataloader, device):
     model.eval()
     all_preds = []
     all_y = []
+    all_weights = []
 
     with torch.no_grad():
         for batch in dataloader:
@@ -702,6 +703,7 @@ def validate_model(model, dataloader, device):
                 x, y, weights = batch
             else:
                 x, y = batch
+                weights = None
 
             x, y = x.to(device), y.to(device)
 
@@ -709,12 +711,52 @@ def validate_model(model, dataloader, device):
 
             all_preds.append(preds.cpu().numpy())
             all_y.append(y.cpu().numpy())
+            if weights is not None:
+                all_weights.append(weights.cpu().numpy())
 
-    pred_derivatives = np.diff(np.concatenate(all_preds, axis=0), axis=1)
-    true_derivatives = np.diff(np.concatenate(all_y, axis=0), axis=1)
+    all_preds_np = np.concatenate(all_preds, axis=0)
+    all_y_np = np.concatenate(all_y, axis=0)
+
+    # 1. Standard RMSE (Value)
+    mse = np.mean((all_preds_np - all_y_np) ** 2)
+    rmse = np.sqrt(mse)
+
+    # 2. Derivative RMSE
+    pred_derivatives = np.diff(all_preds_np, axis=1)
+    true_derivatives = np.diff(all_y_np, axis=1)
     derivative_rmse = np.sqrt(np.mean((pred_derivatives - true_derivatives) ** 2))
 
-    return derivative_rmse
+    # 3. Weighted RMSE & Weighted Derivative RMSE
+    if all_weights:
+        all_weights_np = np.concatenate(all_weights, axis=0)
+        # Weights are (batch,). Need to broadcast to (batch, num_pred) or just average over batch?
+        # The loss function averages over batch AND time.
+        # weights correspond to the sample (row). So we weight each row.
+        # (batch, num_pred) -> average over axes.
+        weights_expanded = all_weights_np[:, np.newaxis]
+        # Weighted mean of squared errors
+        w_mse = np.average(
+            (all_preds_np - all_y_np) ** 2,
+            weights=np.broadcast_to(weights_expanded, all_preds_np.shape),
+        )
+        w_rmse = np.sqrt(w_mse)
+
+        # Weighted Derivative RMSE
+        w_deriv_mse = np.average(
+            (pred_derivatives - true_derivatives) ** 2,
+            weights=np.broadcast_to(weights_expanded, pred_derivatives.shape),
+        )
+        w_deriv_rmse = np.sqrt(w_deriv_mse)
+    else:
+        w_rmse = rmse
+        w_deriv_rmse = derivative_rmse
+
+    return {
+        "RMSE": rmse,
+        "Deriv_RMSE": derivative_rmse,
+        "Weighted_RMSE": w_rmse,
+        "Weighted_Deriv_RMSE": w_deriv_rmse,
+    }
 
 
 class PlateauStopper(tune.stopper.Stopper):
