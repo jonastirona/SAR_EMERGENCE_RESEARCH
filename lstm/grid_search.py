@@ -149,7 +149,7 @@ def main(config, train_data_raw, val_data_raw):  # Accept raw data
     model_name = f"{model_type}_n{config['num_layers']}_h{config['hidden_size']}_lr{config['learning_rate']:.8f}_d{config['dropout']}_w{config['weight_decay']}_{'shuffle' if config['shuffle'] else 'noshuffle'}_custom_weights"
     # Initialize wandb
     wandb.init(
-        project="Active Region RMSE | labeled_regions.json ",
+        project="Active Region RMSE | labeled_regions.json | fix early stopping ",
         entity=os.environ.get("WANDB_ENTITY"),
         config=config,
         name=f"Fixed_W_0.05_1.0_{model_name}",
@@ -427,7 +427,7 @@ if __name__ == "__main__":
     scheduler = ASHAScheduler(
         metric="Active_Deriv_RMSE",  # Optimize for active regions!
         mode="min",
-        grace_period=15,  # Min epochs before a trial can be stopped
+        grace_period=30,  # Min epochs before ASHA can kill a trial
         reduction_factor=2,
     )
 
@@ -439,11 +439,13 @@ if __name__ == "__main__":
     early_stopper = TrialPlateauStopper(
         metric="Active_Deriv_RMSE",
         mode="min",
-        grace_period=10,  # Number of epochs to wait for improvement
+        num_results=8,  # Check last 8 values for plateau (default was 4)
+        grace_period=25,  # Don't check until at least 25 epochs
+        std=0.001,  # Require truly flat metric (default 0.01 was too generous)
     )
 
     # Set up the Tuner
-    ray.init(num_cpus=32, num_gpus=2, include_dashboard=False, _temp_dir="/tmp/ray")
+    ray.init(num_cpus=32, num_gpus=4, include_dashboard=False, _temp_dir="/tmp/ray")
 
     # Put large data in Ray object store
     train_data_ref = ray.put(train_data_raw)
@@ -456,7 +458,7 @@ if __name__ == "__main__":
                 train_data_raw=train_data_ref,
                 val_data_raw=val_data_ref,
             ),
-            {"gpu": 1/16, "cpu": 1},
+            {"gpu": 1 / 8, "cpu": 1},
         ),
         tune_config=tune.TuneConfig(
             num_samples=parse_args()[
