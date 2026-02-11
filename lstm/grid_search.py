@@ -6,7 +6,7 @@ import warnings
 import torch
 from math import log
 
-os.environ["WANDB_MODE"] = "disabled"
+# os.environ["WANDB_MODE"] = "disabled"
 
 import wandb
 from torch import nn
