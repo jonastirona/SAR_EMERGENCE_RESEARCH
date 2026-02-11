@@ -443,7 +443,7 @@ if __name__ == "__main__":
     )
 
     # Set up the Tuner
-    ray.init(num_cpus=1, num_gpus=1, include_dashboard=False, _temp_dir="/tmp/ray")
+    ray.init(num_cpus=32, num_gpus=2, include_dashboard=False, _temp_dir="/tmp/ray")
 
     # Put large data in Ray object store
     train_data_ref = ray.put(train_data_raw)
@@ -456,7 +456,7 @@ if __name__ == "__main__":
                 train_data_raw=train_data_ref,
                 val_data_raw=val_data_ref,
             ),
-            {"gpu": 1, "cpu": 1},
+            {"gpu": 1/16, "cpu": 1},
         ),
         tune_config=tune.TuneConfig(
             num_samples=parse_args()[
