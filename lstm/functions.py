@@ -1,23 +1,14 @@
 # functions to be used in pipeline
 
-import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
 import numpy as np
-from astropy.io import fits
-import sys
-from PIL import Image
 import os
 import torch
 import torch.nn as nn
-from torch.optim.lr_scheduler import StepLR
-from scipy.signal import detrend
-from scipy.signal import detrend
 import warnings
 import random
 from ray import tune
 import re
-from collections import OrderedDict
-import glob
 
 isVanillaLSTM = True
 if isVanillaLSTM:
@@ -25,12 +16,17 @@ if isVanillaLSTM:
 else:
     model_type = "LSTM"
 warnings.filterwarnings("ignore")
-l = re.split(r"[\\/]", os.path.abspath(os.getcwd()))
-BASE_PATH = "/".join(l[:-1]) + "/"
+# Determine paths relative to this file
+current_dir = os.path.dirname(os.path.abspath(__file__))
+# Assumes structure: project/lstm/functions.py
+#                  project/data/
+#                  project/models/
+#                  project/lstm/results/
+BASE_PROJECT_DIR = os.path.normpath(os.path.join(current_dir, ".."))
 
-DATA_PATH = BASE_PATH + "SAR_EMERGENCE_RESEARCH/data"
-RESULTS_PATH = BASE_PATH + "SAR_EMERGENCE_RESEARCH/lstm/results/"
-MODELS_PATH = BASE_PATH + "SAR_EMERGENCE_RESEARCH/lstm/models"
+DATA_PATH = os.path.join(BASE_PROJECT_DIR, "data")
+RESULTS_PATH = os.path.join(current_dir, "results") + "/"
+MODELS_PATH = os.path.join(current_dir, "models")
 
 
 ##### Sept 18th and later
@@ -510,8 +506,8 @@ def prepare_dataset(
                         ar_list[i]
                     )  # ar_list corresponds to processed_inputs
 
-                    # Default weight
-                    w = 0.3
+                    # Default weight for non-labeled tiles
+                    w = 0.05
 
                     # Check if AR is in our labeled regions
                     if current_ar in tile_weights:
@@ -525,7 +521,7 @@ def prepare_dataset(
                         # If AR not in dict, maybe default to 0.3 or 1.0?
                         # User said: "calculate loss with proportions 0.3 for non labeled tiles and 1 for labeled tiles."
                         # Implies if not labeled, it's non-labeled -> 0.3
-                        w = 0.3
+                        w = 0.05
                 else:
                     # Fallback or Validation case (if tile_weights is None)
                     w = 1.0
@@ -778,15 +774,43 @@ def validate_model(model, dataloader, device):
             weights=np.broadcast_to(weights_expanded, pred_derivatives.shape),
         )
         w_deriv_rmse = np.sqrt(w_deriv_mse)
+
+        # 4. Active vs Background RMSE (split by weight)
+        active_mask = all_weights_np == 1.0
+        bg_mask = all_weights_np < 1.0
+
+        if np.any(active_mask):
+            active_rmse = np.sqrt(
+                np.mean((all_preds_np[active_mask] - all_y_np[active_mask]) ** 2)
+            )
+            active_deriv_rmse = np.sqrt(
+                np.mean(
+                    (pred_derivatives[active_mask] - true_derivatives[active_mask]) ** 2
+                )
+            )
+        else:
+            active_rmse = rmse
+            active_deriv_rmse = derivative_rmse
+
+        if np.any(bg_mask):
+            bg_rmse = np.sqrt(np.mean((all_preds_np[bg_mask] - all_y_np[bg_mask]) ** 2))
+        else:
+            bg_rmse = rmse
     else:
         w_rmse = rmse
         w_deriv_rmse = derivative_rmse
+        active_rmse = rmse
+        active_deriv_rmse = derivative_rmse
+        bg_rmse = rmse
 
     return {
         "RMSE": rmse,
         "Deriv_RMSE": derivative_rmse,
         "Weighted_RMSE": w_rmse,
         "Weighted_Deriv_RMSE": w_deriv_rmse,
+        "Active_RMSE": active_rmse,
+        "Active_Deriv_RMSE": active_deriv_rmse,
+        "Background_RMSE": bg_rmse,
     }
 
 

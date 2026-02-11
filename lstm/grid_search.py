@@ -6,7 +6,7 @@ import warnings
 import torch
 from math import log
 
-# os.environ["WANDB_MODE"] = "disabled"
+os.environ["WANDB_MODE"] = "disabled"
 
 import wandb
 from torch import nn
@@ -114,7 +114,6 @@ train_data_raw = load_all_ar_data(train_ars, 9, rot)
 print("Loading and preparing test data...")
 val_ars = [11462, 11521, 11907, 12219, 12271, 12275, 12567]
 val_ars = filter_valid_ars(val_ars)
-val_ars = filter_valid_ars(val_ars)
 
 # Val data can be prepared once as it doesn't depend on hyperparams (unless we change rot/num_in/num_pred which are constants here)
 # However, scalers come from training data.
@@ -150,11 +149,11 @@ def main(config, train_data_raw, val_data_raw):  # Accept raw data
     model_name = f"{model_type}_n{config['num_layers']}_h{config['hidden_size']}_lr{config['learning_rate']:.8f}_d{config['dropout']}_w{config['weight_decay']}_{'shuffle' if config['shuffle'] else 'noshuffle'}_custom_weights"
     # Initialize wandb
     wandb.init(
-        project="Weighted Tiles Test | labeled_regions.json",
+        project="Active Region RMSE | labeled_regions.json",
         entity=os.environ.get("WANDB_ENTITY"),
         config=config,
-        name=f"Fixed_W_0.3_1.0_{model_name}",
-        notes="Using labeled_regions.json: 1.0 for labeled, 0.3 for others.",
+        name=f"Fixed_W_0.05_1.0_{model_name}",
+        notes="Using labeled_regions.json: 1.0 for labeled, 0.05 for others. Granular metrics.",
     )
 
     best_val_rmse = float("inf")
@@ -203,8 +202,9 @@ def main(config, train_data_raw, val_data_raw):  # Accept raw data
     )
 
     # Generate Validation Dataset (using scalers from train)
+    # Pass tile_weights so validation can compute Active vs Background RMSE
     x_val, y_val, last_all, weights_val, tile_indices_val, _, _, _, _ = prepare_dataset(
-        None,
+        val_ars,
         9,
         rot,
         num_in,
@@ -212,7 +212,7 @@ def main(config, train_data_raw, val_data_raw):  # Accept raw data
         m_scale,
         flux_scale,
         cont_int_scale,
-        tile_weights=None,  # No weighting for validation
+        tile_weights=tile_weights,  # Pass weights for metric splitting
         pre_loaded_data=val_data_raw,
     )
 
@@ -311,27 +311,30 @@ def main(config, train_data_raw, val_data_raw):  # Accept raw data
         val_deriv_rmse = val_metrics["Deriv_RMSE"]
         val_weighted_rmse = val_metrics["Weighted_RMSE"]
         val_weighted_deriv_rmse = val_metrics["Weighted_Deriv_RMSE"]
+        val_active_rmse = val_metrics["Active_RMSE"]
+        val_active_deriv_rmse = val_metrics["Active_Deriv_RMSE"]
+        val_bg_rmse = val_metrics["Background_RMSE"]
 
         lr = scheduler.get_last_lr()[0]
-        # Scheduler steps on the metric we want to optimize.
-        # User wants to predict emergence (slope) and uses proportion to emphasize specific regions.
-        # So we should schedule on Weighted Derivative RMSE.
-        scheduler.step(val_weighted_deriv_rmse)
+        # Schedule on Active Deriv RMSE — the metric that matters
+        scheduler.step(val_active_deriv_rmse)
 
         log_metrics = {
             "epoch": epoch,
             "train_loss": train_loss,
-            # "validation_loss": val_loss,
             "learning_rate": float(lr),
             "RMSE": val_rmse,
             "Deriv_RMSE": val_deriv_rmse,
             "Weighted_RMSE": val_weighted_rmse,
             "Weighted_Deriv_RMSE": val_weighted_deriv_rmse,
+            "Active_RMSE": val_active_rmse,
+            "Active_Deriv_RMSE": val_active_deriv_rmse,
+            "Background_RMSE": val_bg_rmse,
         }
 
-        # Save best model based on Weighted Deriv RMSE
-        if val_weighted_deriv_rmse < best_val_rmse:
-            best_val_rmse = val_weighted_deriv_rmse
+        # Save best model based on Active Deriv RMSE
+        if val_active_deriv_rmse < best_val_rmse:
+            best_val_rmse = val_active_deriv_rmse
             # Save strictly for upload purposes
             save_filename = f"{model_name}.pth"
             save_path = os.path.join(MODELS_PATH, save_filename)
@@ -340,13 +343,14 @@ def main(config, train_data_raw, val_data_raw):  # Accept raw data
             model_artifact = wandb.Artifact(
                 name=f"{model_type}-model-{wandb.run.id}",
                 type="model",
-                description=f"Best {model_type} model (Weighted Deriv RMSE: {best_val_rmse:.4f})",
+                description=f"Best {model_type} model (Active Deriv RMSE: {best_val_rmse:.4f})",
                 metadata={
                     **config,
                     "best_rmse": val_rmse,
                     "best_deriv_rmse": val_deriv_rmse,
                     "best_weighted_rmse": val_weighted_rmse,
-                    "best_weighted_deriv_rmse": best_val_rmse,
+                    "best_weighted_deriv_rmse": val_weighted_deriv_rmse,
+                    "best_active_deriv_rmse": best_val_rmse,
                     "epoch": epoch,
                 },
             )
@@ -421,7 +425,7 @@ if __name__ == "__main__":
 
     # Scheduler to early-stop bad trials
     scheduler = ASHAScheduler(
-        metric="Weighted_Deriv_RMSE",  # Optimize for this!
+        metric="Active_Deriv_RMSE",  # Optimize for active regions!
         mode="min",
         grace_period=15,  # Min epochs before a trial can be stopped
         reduction_factor=2,
@@ -429,17 +433,17 @@ if __name__ == "__main__":
 
     # Search algorithm
     search_alg = HyperOptSearch(
-        space=search_space, metric="Weighted_Deriv_RMSE", mode="min"
+        space=search_space, metric="Active_Deriv_RMSE", mode="min"
     )
 
     early_stopper = TrialPlateauStopper(
-        metric="Weighted_Deriv_RMSE",
+        metric="Active_Deriv_RMSE",
         mode="min",
         grace_period=10,  # Number of epochs to wait for improvement
     )
 
     # Set up the Tuner
-    ray.init(num_cpus=32, num_gpus=1, include_dashboard=False, _temp_dir="/tmp/ray")
+    ray.init(num_cpus=1, num_gpus=1, include_dashboard=False, _temp_dir="/tmp/ray")
 
     # Put large data in Ray object store
     train_data_ref = ray.put(train_data_raw)
@@ -452,7 +456,7 @@ if __name__ == "__main__":
                 train_data_raw=train_data_ref,
                 val_data_raw=val_data_ref,
             ),
-            {"gpu": 1 / 32, "cpu": 1},
+            {"gpu": 1, "cpu": 1},
         ),
         tune_config=tune.TuneConfig(
             num_samples=parse_args()[
@@ -471,5 +475,5 @@ if __name__ == "__main__":
     results = tuner.fit()
 
     # Get the best result
-    best_config = results.get_best_result(metric="RMSE", mode="min").config
+    best_config = results.get_best_result(metric="Active_Deriv_RMSE", mode="min").config
     print("Best config found: ", best_config)
