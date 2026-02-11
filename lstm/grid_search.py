@@ -22,6 +22,7 @@ from functions import (
     load_all_ar_data,
     RESULTS_PATH,
     MODELS_PATH,
+    DATA_PATH,
     VanillaLSTM,
     LSTM,
 )
@@ -43,6 +44,24 @@ rot = 0
 num_in = 110
 num_pred = 12
 # --- Data Loading ---
+
+
+# Filter ARs to identify which ones exist, to ensure index alignment
+def filter_valid_ars(ar_list):
+    valid_ars = []
+    for ar in ar_list:
+        # Check if file exists roughly based on load_ar_data logic
+        # We assume if one file exists, others likely do, or we rely on load_ar_data returning None
+        # But we need to know BEFORE calling load_all_ar_data to align indices.
+        # Check one file:
+        pm_path = os.path.join(DATA_PATH, f"AR{ar}", f"mean_pmdop{ar}_flat.npz")
+        if os.path.exists(pm_path):
+            valid_ars.append(ar)
+        else:
+            print(f"Warning: Data for AR {ar} not found at {pm_path}. Skipping.")
+    return valid_ars
+
+
 print("Loading and preparing training data...")
 train_ars = [
     11130,
@@ -94,6 +113,9 @@ train_data_raw = load_all_ar_data(train_ars, 9, rot)
 
 print("Loading and preparing test data...")
 val_ars = [11462, 11521, 11907, 12219, 12271, 12275, 12567]
+val_ars = filter_valid_ars(val_ars)
+val_ars = filter_valid_ars(val_ars)
+
 # Val data can be prepared once as it doesn't depend on hyperparams (unless we change rot/num_in/num_pred which are constants here)
 # However, scalers come from training data.
 # The original code loaded scaled training data then valid data using those scalers.
@@ -125,30 +147,39 @@ def main(config, train_data_raw, val_data_raw):  # Accept raw data
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Runs on: {device}")
 
-    model_name = f"{model_type}_n{config['num_layers']}_h{config['hidden_size']}_lr{config['learning_rate']:.8f}_d{config['dropout']}_w{config['weight_decay']}_{'shuffle' if config['shuffle'] else 'noshuffle'}_p{config['proportion']}"
+    model_name = f"{model_type}_n{config['num_layers']}_h{config['hidden_size']}_lr{config['learning_rate']:.8f}_d{config['dropout']}_w{config['weight_decay']}_{'shuffle' if config['shuffle'] else 'noshuffle'}_custom_weights"
     # Initialize wandb
     wandb.init(
-        project="Weighted Tiles Test | Weighted RMSE",
+        project="Weighted Tiles Test | labeled_regions.json",
         entity=os.environ.get("WANDB_ENTITY"),
         config=config,
-        name=f"{model_name}",
-        notes="",
+        name=f"Fixed_W_0.3_1.0_{model_name}",
+        notes="Using labeled_regions.json: 1.0 for labeled, 0.3 for others.",
     )
 
     best_val_rmse = float("inf")
 
-    # --- Compute Weights Dynamically ---
-    proportion = config["proportion"]
-    # size = 9 # Implicit in prepare_dataset call if we used it, but here we just pass proportion.
-    # Wait, prepare_dataset needs tile_weights list.
-    # Logic from original grid_search:
-    # weights[rows < 4] = proportion
-    # weights[rows >= (size - 4)] = proportion
-    # So for size 9, rows 0,1,2,3 are weighted, 5,6,7,8 are weighted. Row 4 is 1.0?
-    # Index 0-3: prop. Index 5-8: prop. Index 4: 1.0 (default).
+    # --- Load Labeled Regions ---
+    import json
 
-    # Construct tile_weights list of length 9
-    tile_weights = [proportion] * 4 + [1.0] + [proportion] * 4
+    # Use path relative to the script or project root lookup
+    # labeled_regions.json is in parent of lstm dir (project root)
+    # DATA_PATH is .../SAR_EMERGENCE_RESEARCH/data
+    # So it should be at .../SAR_EMERGENCE_RESEARCH/labeled_regions.json
+    json_path = os.path.join(os.path.dirname(DATA_PATH), "labeled_regions.json")
+    if not os.path.exists(json_path):
+        # Try current directory or parent
+        if os.path.exists("labeled_regions.json"):
+            json_path = "labeled_regions.json"
+        elif os.path.exists("../labeled_regions.json"):
+            json_path = "../labeled_regions.json"
+
+    print(f"Loading labeled regions from: {json_path}")
+    with open(json_path, "r") as f:
+        labeled_regions = json.load(f)
+
+    # We pass the dictionary directly.
+    tile_weights = labeled_regions
 
     # Generate Training Dataset
     (
@@ -162,7 +193,7 @@ def main(config, train_data_raw, val_data_raw):  # Accept raw data
         flux_scale,
         cont_int_scale,
     ) = prepare_dataset(
-        None,  # ar_list is None because we use pre_loaded_data
+        train_ars,  # ar_list passed explicitly for AR-based weighting
         9,
         rot,
         num_in,
@@ -181,7 +212,7 @@ def main(config, train_data_raw, val_data_raw):  # Accept raw data
         m_scale,
         flux_scale,
         cont_int_scale,
-        tile_weights=tile_weights,  # Pass weights to validation too
+        tile_weights=None,  # No weighting for validation
         pre_loaded_data=val_data_raw,
     )
 
@@ -358,7 +389,7 @@ if __name__ == "__main__":
         "batch_size": hp.choice("batch_size", [32, 64]),
         "weight_decay": hp.loguniform("weight_decay", log(1e-6), log(1e-3)),
         "n_epochs": 100,
-        "proportion": hp.choice("proportion", [0.1, 0.5, 1.0, 2.0, 5.0, 10.0]),
+        # "proportion": hp.choice("proportion", [0.1, 0.5, 1.0, 2.0, 5.0, 10.0]),
         # Dataset
         "shuffle": hp.choice("shuffle", [True, False]),
         # Model architecture | Conditional Search Space

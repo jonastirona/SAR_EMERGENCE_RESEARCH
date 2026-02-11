@@ -459,6 +459,11 @@ def prepare_dataset(
             ar_list, size, rid_of_top
         )
 
+    if tile_weights is not None:
+        print(f"Applying AR-specific tile weights. Labeled: 1.0, Unlabeled: 0.3")
+    else:
+        print("No tile weights provided. Using default weight 1.0.")
+
     if power_maps_scale is None:
         power_maps_scale = (np.min(all_power_maps), np.max(all_power_maps))
         flux_scale = (np.min(all_flux), np.max(all_flux))
@@ -484,7 +489,7 @@ def prepare_dataset(
     x_list, y_list, last_list, weight_list, tile_idx_list = [], [], [], [], []
     tiles = size**2 - 2 * size * rid_of_top
 
-    for inputs, flux in zip(processed_inputs, processed_flux):
+    for i, (inputs, flux) in enumerate(zip(processed_inputs, processed_flux)):
         for tile in range(tiles):
             x_seq, y_seq, last_seq = lstm_ready(
                 tile, size, inputs, flux, num_in, num_pred
@@ -497,8 +502,34 @@ def prepare_dataset(
 
                 # Assign weights to each sample in the sequence based on the tile
                 real_tile_idx = tile + rid_of_top * size
-                tile_row = real_tile_idx // size
-                w = tile_weights[tile_row] if tile_weights is not None else 1.0
+
+                # Check if we have an AR list and a weight dict
+                if ar_list is not None and isinstance(tile_weights, dict):
+                    # Get the current AR number
+                    current_ar = str(
+                        ar_list[i]
+                    )  # ar_list corresponds to processed_inputs
+
+                    # Default weight
+                    w = 0.3
+
+                    # Check if AR is in our labeled regions
+                    if current_ar in tile_weights:
+                        # tile_weights[current_ar] is a list of ACTIVE tiles (1-based index usually, let's verify)
+                        # The json had indices like 39, 40 etc. Let's assume these are 1-based as per user request in other contexts?
+                        # "labeled regions in region: [tile_num (index 1)] json format" -> YES, 1-based.
+                        # real_tile_idx is 0-based. So we compare real_tile_idx + 1 with the list.
+                        if (real_tile_idx + 1) in tile_weights[current_ar]:
+                            w = 1.0
+                    else:
+                        # If AR not in dict, maybe default to 0.3 or 1.0?
+                        # User said: "calculate loss with proportions 0.3 for non labeled tiles and 1 for labeled tiles."
+                        # Implies if not labeled, it's non-labeled -> 0.3
+                        w = 0.3
+                else:
+                    # Fallback or Validation case (if tile_weights is None)
+                    w = 1.0
+
                 weight_list.append(torch.full((x_seq.shape[0],), float(w)))
                 tile_idx_list.append(
                     torch.full((x_seq.shape[0],), float(real_tile_idx))
