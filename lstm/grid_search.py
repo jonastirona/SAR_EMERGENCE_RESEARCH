@@ -6,7 +6,7 @@ import warnings
 import torch
 from math import log
 
-# os.environ["WANDB_MODE"] = "disabled"
+os.environ["WANDB_MODE"] = "disabled"
 
 import wandb
 from torch import nn
@@ -18,6 +18,7 @@ from functions import (
     train_epochHybridVanillaLSTM,
     train_epochTeacherForcingLSTM,
     train_epoch,
+    train_epoch_emergence_aware,
     validate_model,
     load_all_ar_data,
     RESULTS_PATH,
@@ -266,9 +267,30 @@ def main(config, train_data_raw, val_data_raw):  # Accept raw data
 
     # --- Training Loop ---
     print("Starting training...")
-    for epoch in range(config["n_epochs"]):
+    n_epochs = config["n_epochs"]
+    for epoch in range(n_epochs):
         train_loss = None
-        if model_type == "LSTM":
+
+        if lossFn == "emergence":
+            # Curriculum annealing: k ramps from 10 to 100 over training
+            k = 10.0 + (epoch / max(n_epochs - 1, 1)) * 90.0
+            teacher_forcing = (
+                config["model"]["teacher_forcing_ratio"]
+                if model_type == "LSTM"
+                else None
+            )
+            train_loss = train_epoch_emergence_aware(
+                model,
+                train_loader,
+                loss_fn,
+                optimizer,
+                device,
+                alpha=config["lossFn"]["alpha"],
+                gamma=config["lossFn"]["gamma"],
+                k=k,
+                teacher_forcing=teacher_forcing,
+            )
+        elif model_type == "LSTM":
             if lossFn == "hybrid":
                 train_loss = train_epochHybridLSTM(
                     model,
@@ -314,10 +336,14 @@ def main(config, train_data_raw, val_data_raw):  # Accept raw data
         val_active_rmse = val_metrics["Active_RMSE"]
         val_active_deriv_rmse = val_metrics["Active_Deriv_RMSE"]
         val_bg_rmse = val_metrics["Background_RMSE"]
+        val_emergence_mae = val_metrics["Emergence_Timing_MAE"]
+
+        # Composite metric: normalize MAE by 0.05 so 1 timestep error ≈ 0.05 RMSE
+        composite_score = 0.8 * val_active_deriv_rmse + 0.2 * (val_emergence_mae * 0.05)
 
         lr = scheduler.get_last_lr()[0]
-        # Schedule on Active Deriv RMSE — the metric that matters
-        scheduler.step(val_active_deriv_rmse)
+        # Schedule on composite score
+        scheduler.step(composite_score)
 
         log_metrics = {
             "epoch": epoch,
@@ -330,11 +356,13 @@ def main(config, train_data_raw, val_data_raw):  # Accept raw data
             "Active_RMSE": val_active_rmse,
             "Active_Deriv_RMSE": val_active_deriv_rmse,
             "Background_RMSE": val_bg_rmse,
+            "Emergence_Timing_MAE": val_emergence_mae,
+            "Composite_Score": composite_score,
         }
 
-        # Save best model based on Active Deriv RMSE
-        if val_active_deriv_rmse < best_val_rmse:
-            best_val_rmse = val_active_deriv_rmse
+        # Save best model based on composite score
+        if composite_score < best_val_rmse:
+            best_val_rmse = composite_score
             # Save strictly for upload purposes
             save_filename = f"{model_name}.pth"
             save_path = os.path.join(MODELS_PATH, save_filename)
@@ -343,14 +371,16 @@ def main(config, train_data_raw, val_data_raw):  # Accept raw data
             model_artifact = wandb.Artifact(
                 name=f"{model_type}-model-{wandb.run.id}",
                 type="model",
-                description=f"Best {model_type} model (Active Deriv RMSE: {best_val_rmse:.4f})",
+                description=f"Best {model_type} model (Composite: {best_val_rmse:.4f})",
                 metadata={
                     **config,
                     "best_rmse": val_rmse,
                     "best_deriv_rmse": val_deriv_rmse,
                     "best_weighted_rmse": val_weighted_rmse,
                     "best_weighted_deriv_rmse": val_weighted_deriv_rmse,
-                    "best_active_deriv_rmse": best_val_rmse,
+                    "best_active_deriv_rmse": val_active_deriv_rmse,
+                    "best_emergence_timing_mae": val_emergence_mae,
+                    "best_composite_score": best_val_rmse,
                     "epoch": epoch,
                 },
             )
@@ -419,13 +449,18 @@ if __name__ == "__main__":
                     "alpha": hp.choice("alpha", [0.1, 0.3, 0.5, 0.7, 0.9]),
                 },
                 {"lossFn": "value"},
+                {
+                    "lossFn": "emergence",
+                    "alpha": hp.choice("alpha_emergence", [0.3, 0.5, 0.7]),
+                    "gamma": hp.choice("gamma", [0.05, 0.1, 0.3, 0.5]),
+                },
             ],
         ),
     }
 
     # Scheduler to early-stop bad trials
     scheduler = ASHAScheduler(
-        metric="Active_Deriv_RMSE",  # Optimize for active regions!
+        metric="Composite_Score",
         mode="min",
         grace_period=30,  # Min epochs before ASHA can kill a trial
         reduction_factor=2,
@@ -433,11 +468,11 @@ if __name__ == "__main__":
 
     # Search algorithm
     search_alg = HyperOptSearch(
-        space=search_space, metric="Active_Deriv_RMSE", mode="min"
+        space=search_space, metric="Composite_Score", mode="min"
     )
 
     early_stopper = TrialPlateauStopper(
-        metric="Active_Deriv_RMSE",
+        metric="Composite_Score",
         mode="min",
         num_results=8,  # Check last 8 values for plateau (default was 4)
         grace_period=25,  # Don't check until at least 25 epochs
@@ -477,5 +512,5 @@ if __name__ == "__main__":
     results = tuner.fit()
 
     # Get the best result
-    best_config = results.get_best_result(metric="Active_Deriv_RMSE", mode="min").config
+    best_config = results.get_best_result(metric="Composite_Score", mode="min").config
     print("Best config found: ", best_config)

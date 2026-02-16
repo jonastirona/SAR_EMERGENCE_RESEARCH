@@ -12,6 +12,7 @@ from functions import (
     train_epochHybridVanillaLSTM,
     train_epochHybridLSTM,
     train_epochTeacherForcingLSTM,
+    train_epoch_emergence_aware,
     validate_model,
     RESULTS_PATH,
 )
@@ -147,11 +148,31 @@ def main(config):
 
     # --- Training Loop ---
     print("Starting training...")
-    for epoch in range(config["n_epochs"]):
-        train_loss = train_epochTeacherForcingLSTM(
-            model, train_loader, loss_fn, optimizer, device, config["tfr"]
-        )
-        val_rmse = validate_model(model, val_loader, device)
+    n_epochs = config["n_epochs"]
+    loss_type = config.get("lossFn", "value")
+    for epoch in range(n_epochs):
+        if loss_type == "emergence":
+            # Curriculum annealing: k ramps from 10 to 100 over training
+            k = 10.0 + (epoch / max(n_epochs - 1, 1)) * 90.0
+            teacher_forcing = config["tfr"] if config["model_type"] == "LSTM" else None
+            train_loss = train_epoch_emergence_aware(
+                model,
+                train_loader,
+                loss_fn,
+                optimizer,
+                device,
+                alpha=config["alpha"],
+                gamma=config.get("gamma", 0.1),
+                k=k,
+                teacher_forcing=teacher_forcing,
+            )
+        else:
+            train_loss = train_epochTeacherForcingLSTM(
+                model, train_loader, loss_fn, optimizer, device, config["tfr"]
+            )
+        val_metrics = validate_model(model, val_loader, device)
+        val_rmse = val_metrics["RMSE"]
+        emergence_mae = val_metrics["Emergence_Timing_MAE"]
 
         lr = scheduler.get_last_lr()[0]
         scheduler.step(val_rmse)
@@ -161,6 +182,7 @@ def main(config):
             "train_loss": train_loss,
             "learning_rate": float(lr),
             "RMSE": val_rmse,
+            "Emergence_Timing_MAE": emergence_mae,
         }
         print(log_metrics)
 
@@ -198,6 +220,8 @@ def parse_args():
             "num_in": 110,
             "num_pred": 12,
             "tfr": 0.5,
+            "lossFn": "value",  # Options: "value", "emergence"
+            "gamma": 0.1,  # Emergence timing weight (only used with lossFn="emergence")
         }
         return config
     except (ValueError, IndexError) as e:

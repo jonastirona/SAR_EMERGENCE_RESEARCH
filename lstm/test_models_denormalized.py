@@ -6,7 +6,7 @@ from functions import (
     recalibrate,
     add_grid_lines,
     highlight_tile,
-    process_data,
+    scale_and_combine_data,
     get_params,
     AR_defs,
     load_ar_data,
@@ -138,10 +138,8 @@ def eval_AR_emergence_with_plots(
         flux_scale = (-78.26012229919434, 490.13057708740234)
         m_scale = (-365079096.0, 118424064.0)
 
-        maps, flux, cont_int, time = load_ar_data(
-            test_AR, size, rid_of_top
-        )
-        inputs, mag_flux = process_data(
+        maps, flux, cont_int, time = load_ar_data(test_AR, size, rid_of_top)
+        inputs, mag_flux = scale_and_combine_data(
             maps, flux, cont_int, m_scale, flux_scale, cont_int_scale
         )
 
@@ -349,7 +347,7 @@ def eval_AR_emergence_with_plots(
                 )
             # Metrics (Primary)
             metrics = calculate_metrics(
-                true_plot[len(nan_array):],
+                true_plot[len(nan_array) :],
                 pred_recal_denorm,
             )
             all_metrics.append(metrics)
@@ -515,8 +513,6 @@ def eval_AR_emergence_with_plots(
                     linewidth=1.2,
                 )
 
-            
-
             # Table (Primary)
             to_append = f"Tile {starting_tile + i + 1} \n"
             if pred_emergence_dt is None and true_emergence_dt is None:
@@ -636,7 +632,7 @@ def eval_AR_emergence_with_plots(
                         va="center",
                         fontsize=11,
                         color="black",
-                        rotation=90
+                        rotation=90,
                     )
                     # Add time text to right of second image
                     ax.text(
@@ -704,20 +700,8 @@ if __name__ == "__main__":
     # Format: ("Vanilla" or "Regular", "filename.pth")
     models_to_compare = [
         (
-            "MagFluxEnc-Dec MSE Loss",
-            "../models/LSTM12_r4_i110_n4_h32_e8_lr0.00170074_d0.3.pth",
-        ),
-        (
-            "MagFluxEnc-Dec hybrid Loss",
-            "../models/LSTM12_r4_i110_n4_h64_e10_lr0.00972080_d0.2.pth",
-        ),
-        (
-            "MagFluxLSTM MSE Loss",
-            "../models/VanillaLSTM12_r4_i110_n1_h64_e10_lr0.00232000_d0.2.pth",
-        ),
-        (
-            "MagFluxLSTM hybrid Loss",
-            "../models/VanillaLSTM12_r4_i110_n4_h128_e8_lr0.00700000_d0.1.pth",
+            "curr",
+            "../models/VanillaLSTM_n3_h8_lr0.00307792_d0_w8.01339448970107e-06_shuffle_custom_weights.pth",
         ),
     ]
 

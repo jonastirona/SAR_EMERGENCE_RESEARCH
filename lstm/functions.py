@@ -345,20 +345,18 @@ def get_params(filename):
         raise Exception("UNKNOWN NAME", filename)
 
     matches = re.findall(
-        r"(\d+)_r(\d+)_i(\d+)_n(\d+)_h(\d+)_e(\d+)_lr([0-9.]+)_d([0-9.]+)\.pth",
+        r"_n(\d+)_h(\d+)_lr([0-9.]+)_d([0-9.]+)",
         filename,
     )  # Extract numbers from the filename
+    if not matches:
+        raise Exception("Could not parse parameters from filename", filename)
     (
-        num_pred,
-        rid_of_top,
-        num_in,
         num_layers,
         hidden_size,
-        n_epochs,
         learning_rate,
         dropout,
     ) = [
-        float(val) if i >= 6 else int(val) for i, val in enumerate(matches[0])
+        float(val) if i >= 2 else int(val) for i, val in enumerate(matches[0])
     ]  # Unpack the matched values into variables
     return (
         model_type,
@@ -555,6 +553,102 @@ def prepare_dataset(
     )
 
 
+# --- Emergence-Aware Loss Components ---
+def differentiable_smooth(x, window_size=5):
+    """Differentiable 1D smoothing using convolution.
+    Args:
+        x: tensor of shape (batch, timesteps)
+        window_size: smoothing window (must be odd)
+    Returns:
+        smoothed tensor of same shape
+    """
+    if window_size <= 1:
+        return x
+    kernel = torch.ones(1, 1, window_size, device=x.device, dtype=x.dtype) / window_size
+    # Pad to maintain length
+    pad = window_size // 2
+    # x shape: (batch, timesteps) -> (batch, 1, timesteps) for conv1d
+    x_padded = torch.nn.functional.pad(x.unsqueeze(1), (pad, pad), mode="replicate")
+    smoothed = torch.nn.functional.conv1d(x_padded, kernel).squeeze(1)
+    return smoothed
+
+
+def soft_emergence_time(derivatives, threshold=0.01, k=20.0, window_size=5):
+    """Compute differentiable emergence onset time using rising-edge detection.
+
+    Instead of finding the centroid of the sustained indicator (which would
+    misrepresent onset for long emergences), this isolates the rising edge
+    of the soft threshold crossing.
+
+    Args:
+        derivatives: tensor (batch, timesteps) — discrete derivatives of the signal
+        threshold: emergence threshold
+        k: sigmoid steepness (annealed during training)
+        window_size: smoothing window size
+    Returns:
+        soft_times: tensor (batch,) — differentiable onset time per sample
+        has_emergence: tensor (batch,) — soft indicator of whether emergence exists
+    """
+    # 1. Smooth the derivatives
+    smoothed = differentiable_smooth(derivatives, window_size)
+
+    # 2. Soft threshold: sigmoid approximation of (smoothed >= threshold)
+    soft_ind = torch.sigmoid(k * (smoothed - threshold))
+
+    # 3. Rising edge detection: diff of soft indicator, keep only positive (onsets)
+    soft_edge = soft_ind[:, 1:] - soft_ind[:, :-1]
+    rising = torch.relu(soft_edge)  # Only keep positive transitions (onsets)
+
+    # 4. Weighted average of rising edge to find onset time
+    timesteps = torch.arange(rising.shape[1], device=rising.device, dtype=rising.dtype)
+    timesteps = timesteps.unsqueeze(0).expand_as(rising)  # (batch, T-1)
+
+    # Sum of rising edge weights (how much emergence is detected)
+    rising_sum = rising.sum(dim=1) + 1e-8  # avoid division by zero
+
+    # Weighted onset time
+    soft_times = (timesteps * rising).sum(dim=1) / rising_sum
+
+    # "has emergence" indicator: is the total rising signal significant?
+    has_emergence = torch.sigmoid(10.0 * (rising.sum(dim=1) - 0.1))
+
+    return soft_times, has_emergence
+
+
+def emergence_timing_loss(pred, y, threshold=0.01, k=20.0):
+    """Compute emergence timing loss between predicted and true sequences.
+
+    Uses rising-edge detection to isolate onset times, then penalizes
+    squared difference. Quiet samples (no emergence in either) contribute 0.
+
+    Args:
+        pred: tensor (batch, num_pred) — predicted values
+        y: tensor (batch, num_pred) — ground truth values
+        threshold: emergence threshold for derivative
+        k: sigmoid steepness (annealed via curriculum)
+    Returns:
+        scalar loss
+    """
+    # Compute derivatives (discrete differences)
+    d_pred = pred[:, 1:] - pred[:, :-1]
+    d_true = y[:, 1:] - y[:, :-1]
+
+    # Get soft emergence onset times
+    t_pred, has_pred = soft_emergence_time(d_pred, threshold, k)
+    t_true, has_true = soft_emergence_time(d_true, threshold, k)
+
+    # Only penalize when both have emergence (avoid penalizing quiet samples)
+    # Soft AND: multiply the two indicators
+    # Detach mask so the model can't learn to "hide" emergence to avoid penalty
+    both_have = (has_pred * has_true).detach()
+
+    # Squared timing error, weighted by whether both have emergence
+    timing_error = (t_pred - t_true) ** 2
+    loss = (timing_error * both_have).sum() / (both_have.sum() + 1e-8)
+
+    return loss
+
+
 # --- Model Training & Evaluation ---
 def train_epochHybridLSTM(
     model, dataloader, loss_fn, optimizer, device, teacher_ratio, alpha
@@ -718,6 +812,67 @@ def train_epoch(model, dataloader, loss_fn, optimizer, device):
     return total_loss / len(dataloader)
 
 
+def train_epoch_emergence_aware(
+    model, dataloader, loss_fn, optimizer, device, alpha, gamma, k, teacher_forcing=None
+):
+    """Training epoch with emergence-aware loss.
+
+    Combines:
+      - Value MSE (weight alpha)
+      - Derivative MSE (weight beta = (1-alpha)*(1-gamma))
+      - Emergence timing loss (weight gamma)
+
+    Works for both LSTM (with teacher_forcing) and VanillaLSTM (teacher_forcing=None).
+    """
+    model.train()
+    total_loss = 0
+    beta = (1.0 - alpha) * (1.0 - gamma)
+
+    for batch in dataloader:
+        if len(batch) == 3:
+            x, y, weights = batch
+            weights = weights.to(device)
+        else:
+            x, y = batch
+            weights = None
+
+        x, y = x.to(device), y.to(device)
+        optimizer.zero_grad()
+
+        # Forward pass (teacher forcing for encoder-decoder LSTM)
+        if teacher_forcing is not None:
+            outputs = model(x, y, teacher_forcing_ratio=teacher_forcing)
+        else:
+            outputs = model(x)
+
+        # 1. Value MSE
+        if weights is not None:
+            value_loss = (torch.mean((outputs - y) ** 2, dim=1) * weights).mean()
+        else:
+            value_loss = loss_fn(outputs, y)
+
+        # 2. Derivative MSE
+        d_out = outputs[:, 1:] - outputs[:, :-1]
+        d_y = y[:, 1:] - y[:, :-1]
+        if weights is not None:
+            derivative_loss = (torch.mean((d_out - d_y) ** 2, dim=1) * weights).mean()
+        else:
+            derivative_loss = loss_fn(d_out, d_y)
+
+        # 3. Emergence timing loss
+        timing_loss = emergence_timing_loss(outputs, y, threshold=0.01, k=k)
+
+        # Combined loss
+        loss = alpha * value_loss + beta * derivative_loss + gamma * timing_loss
+
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+        optimizer.step()
+        total_loss += loss.item()
+
+    return total_loss / len(dataloader)
+
+
 def validate_model(model, dataloader, device):
     model.eval()
     all_preds = []
@@ -803,6 +958,33 @@ def validate_model(model, dataloader, device):
         active_deriv_rmse = derivative_rmse
         bg_rmse = rmse
 
+    # 5. Emergence Timing MAE (non-differentiable, using existing emergence_indication)
+    threshold = 0.01
+    sust_time = 4
+    timing_errors = []
+    for i in range(len(all_preds_np)):
+        d_pred_i = np.gradient(all_preds_np[i])
+        d_true_i = np.gradient(all_y_np[i])
+        ind_pred = emergence_indication(d_pred_i, threshold, sust_time)
+        ind_true = emergence_indication(d_true_i, threshold, sust_time)
+
+        # Find first emergence timestep for each
+        t_pred_i = None
+        t_true_i = None
+        for t_idx in range(len(ind_pred)):
+            if ind_pred[t_idx] == 1 and t_pred_i is None:
+                t_pred_i = t_idx
+            if ind_true[t_idx] == 1 and t_true_i is None:
+                t_true_i = t_idx
+            if t_pred_i is not None and t_true_i is not None:
+                break
+
+        # Only count if both have emergence
+        if t_pred_i is not None and t_true_i is not None:
+            timing_errors.append(abs(t_pred_i - t_true_i))
+
+    emergence_timing_mae = np.mean(timing_errors) if timing_errors else 0.0
+
     return {
         "RMSE": rmse,
         "Deriv_RMSE": derivative_rmse,
@@ -811,6 +993,7 @@ def validate_model(model, dataloader, device):
         "Active_RMSE": active_rmse,
         "Active_Deriv_RMSE": active_deriv_rmse,
         "Background_RMSE": bg_rmse,
+        "Emergence_Timing_MAE": emergence_timing_mae,
     }
 
 
