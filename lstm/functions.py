@@ -959,9 +959,17 @@ def validate_model(model, dataloader, device):
         bg_rmse = rmse
 
     # 5. Emergence Timing MAE (non-differentiable, using existing emergence_indication)
+    #    Fixes the "lazy student" loophole: models that never predict emergence
+    #    used to get MAE=0.0. Now missed emergences are penalized with max error.
     threshold = 0.01
     sust_time = 4
+    num_pred = all_preds_np.shape[1]  # Max possible timing error
     timing_errors = []
+    true_emergence_count = 0
+    detected_count = 0
+    missed_count = 0
+    false_alarm_count = 0
+
     for i in range(len(all_preds_np)):
         d_pred_i = np.gradient(all_preds_np[i])
         d_true_i = np.gradient(all_y_np[i])
@@ -979,11 +987,27 @@ def validate_model(model, dataloader, device):
             if t_pred_i is not None and t_true_i is not None:
                 break
 
-        # Only count if both have emergence
-        if t_pred_i is not None and t_true_i is not None:
-            timing_errors.append(abs(t_pred_i - t_true_i))
+        if t_true_i is not None:  # Ground truth HAS emergence
+            true_emergence_count += 1
+            if t_pred_i is not None:  # Model also predicts emergence
+                timing_errors.append(abs(t_pred_i - t_true_i))
+                detected_count += 1
+            else:  # Model MISSED it — penalize with max error
+                timing_errors.append(num_pred)
+                missed_count += 1
+        else:  # Ground truth has NO emergence
+            if t_pred_i is not None:  # False alarm
+                false_alarm_count += 1
 
     emergence_timing_mae = np.mean(timing_errors) if timing_errors else 0.0
+    # Detection rate: fraction of true emergences that were detected (recall)
+    # Defaults to 1.0 when there are no true emergences (nothing to miss)
+    detection_rate = (
+        detected_count / true_emergence_count if true_emergence_count > 0 else 1.0
+    )
+    false_alarm_rate = (
+        false_alarm_count / len(all_preds_np) if len(all_preds_np) > 0 else 0.0
+    )
 
     return {
         "RMSE": rmse,
@@ -994,6 +1018,8 @@ def validate_model(model, dataloader, device):
         "Active_Deriv_RMSE": active_deriv_rmse,
         "Background_RMSE": bg_rmse,
         "Emergence_Timing_MAE": emergence_timing_mae,
+        "Emergence_Detection_Rate": detection_rate,
+        "Emergence_False_Alarm_Rate": false_alarm_rate,
     }
 
 

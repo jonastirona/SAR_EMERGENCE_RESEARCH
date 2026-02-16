@@ -701,7 +701,7 @@ if __name__ == "__main__":
     models_to_compare = [
         (
             "curr",
-            "../models/VanillaLSTM_n3_h8_lr0.00307792_d0_w8.01339448970107e-06_shuffle_custom_weights.pth",
+            "../models/VanillaLSTM_n2_h2_lr0.00014324_d0_w0.00035337257093670207_shuffle_custom_weights.pth",
         ),
     ]
 

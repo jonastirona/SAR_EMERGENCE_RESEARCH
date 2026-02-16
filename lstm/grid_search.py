@@ -150,7 +150,7 @@ def main(config, train_data_raw, val_data_raw):  # Accept raw data
     model_name = f"{model_type}_n{config['num_layers']}_h{config['hidden_size']}_lr{config['learning_rate']:.8f}_d{config['dropout']}_w{config['weight_decay']}_{'shuffle' if config['shuffle'] else 'noshuffle'}_custom_weights"
     # Initialize wandb
     wandb.init(
-        project="Active Region RMSE | emergence timing",
+        project="Active Region RMSE | emergence timing missed prediction fix",
         entity=os.environ.get("WANDB_ENTITY"),
         config=config,
         name=f"Fixed_W_0.05_1.0_{model_name}",
@@ -337,9 +337,17 @@ def main(config, train_data_raw, val_data_raw):  # Accept raw data
         val_active_deriv_rmse = val_metrics["Active_Deriv_RMSE"]
         val_bg_rmse = val_metrics["Background_RMSE"]
         val_emergence_mae = val_metrics["Emergence_Timing_MAE"]
+        val_detection_rate = val_metrics["Emergence_Detection_Rate"]
+        val_false_alarm_rate = val_metrics["Emergence_False_Alarm_Rate"]
 
-        # Composite metric: normalize MAE by 0.05 so 1 timestep error ≈ 0.05 RMSE
-        composite_score = 0.8 * val_active_deriv_rmse + 0.2 * (val_emergence_mae * 0.05)
+        # Composite metric: 70% derivative accuracy, 20% emergence timing, 10% detection reliability
+        # Detection penalty ensures models that never predict emergence are punished
+        detection_penalty = 0.2 * (1.0 - val_detection_rate)
+        composite_score = (
+            0.7 * val_active_deriv_rmse
+            + 0.2 * (val_emergence_mae * 0.05)
+            + detection_penalty
+        )
 
         lr = scheduler.get_last_lr()[0]
         # Schedule on composite score
@@ -357,6 +365,8 @@ def main(config, train_data_raw, val_data_raw):  # Accept raw data
             "Active_Deriv_RMSE": val_active_deriv_rmse,
             "Background_RMSE": val_bg_rmse,
             "Emergence_Timing_MAE": val_emergence_mae,
+            "Emergence_Detection_Rate": val_detection_rate,
+            "Emergence_False_Alarm_Rate": val_false_alarm_rate,
             "Composite_Score": composite_score,
         }
 
@@ -380,6 +390,8 @@ def main(config, train_data_raw, val_data_raw):  # Accept raw data
                     "best_weighted_deriv_rmse": val_weighted_deriv_rmse,
                     "best_active_deriv_rmse": val_active_deriv_rmse,
                     "best_emergence_timing_mae": val_emergence_mae,
+                    "best_detection_rate": val_detection_rate,
+                    "best_false_alarm_rate": val_false_alarm_rate,
                     "best_composite_score": best_val_rmse,
                     "epoch": epoch,
                 },
