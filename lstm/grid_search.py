@@ -150,7 +150,7 @@ def main(config, train_data_raw, val_data_raw):  # Accept raw data
     model_name = f"{model_type}_n{config['num_layers']}_h{config['hidden_size']}_lr{config['learning_rate']:.8f}_d{config['dropout']}_w{config['weight_decay']}_{'shuffle' if config['shuffle'] else 'noshuffle'}_custom_weights"
     # Initialize wandb
     wandb.init(
-        project="Active Region RMSE | labeled_regions.json | fix early stopping ",
+        project="Active Region RMSE | emergence timing",
         entity=os.environ.get("WANDB_ENTITY"),
         config=config,
         name=f"Fixed_W_0.05_1.0_{model_name}",
