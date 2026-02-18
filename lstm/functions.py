@@ -561,7 +561,6 @@ def train_epochHybridLSTM(
 ):
     model.train()
     total_loss = 0
-    loss_scaler = 100.0
 
     for batch in dataloader:
         if len(batch) == 3:
@@ -578,59 +577,23 @@ def train_epochHybridLSTM(
 
         # 1. Calculate loss on the actual values
         if weights is not None:
-            # Manually calculate weighted MSE
             value_loss = (torch.mean((outputs - y) ** 2, dim=1) * weights).mean()
         else:
             value_loss = loss_fn(outputs, y)
 
-        # 2. Calculate loss on the derivatives
-        outputs_deriv = outputs[:, 1:] - outputs[:, :-1]
-        y_deriv = y[:, 1:] - y[:, :-1]
+        # 2. Calculate loss on the gradients (central differences, matching np.gradient in test)
+        outputs_grad = torch.gradient(outputs, dim=1)[0]
+        y_grad = torch.gradient(y, dim=1)[0]
 
         if weights is not None:
-            derivative_loss = (
-                torch.mean((outputs_deriv - y_deriv) ** 2, dim=1) * weights
+            gradient_loss = (
+                torch.mean((outputs_grad - y_grad) ** 2, dim=1) * weights
             ).mean()
         else:
-            derivative_loss = loss_fn(outputs_deriv, y_deriv)
+            gradient_loss = loss_fn(outputs_grad, y_grad)
 
-        # 3. Combine them into a hybrid loss
-        loss = alpha * value_loss + (1 - alpha) * derivative_loss
-
-        scaled_loss = loss * loss_scaler
-        scaled_loss.backward()
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-        optimizer.step()
-        total_loss += loss.item()
-
-    return total_loss / len(dataloader)
-
-
-def train_epochTeacherForcingLSTM(
-    model, dataloader, loss_fn, optimizer, device, teacher_forcing
-):
-    """Runs a single training epoch."""
-    model.train()
-    total_loss = 0
-
-    for batch in dataloader:
-        if len(batch) == 3:
-            x, y, weights = batch
-            weights = weights.to(device)
-        else:
-            x, y = batch
-            weights = None
-
-        x, y = x.to(device), y.to(device)
-        optimizer.zero_grad()
-
-        outputs = model(x, y, teacher_forcing_ratio=teacher_forcing)
-
-        if weights is not None:
-            # Weighted MSE loss: (pred - true)^2 * weights
-            loss = (torch.mean((outputs - y) ** 2, dim=1) * weights).mean()
-        else:
-            loss = loss_fn(outputs, y)
+        # 3. Combine: alpha=1.0 -> value only, alpha=0.0 -> gradient only
+        loss = alpha * value_loss + (1 - alpha) * gradient_loss
 
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
@@ -643,7 +606,6 @@ def train_epochTeacherForcingLSTM(
 def train_epochHybridVanillaLSTM(model, dataloader, loss_fn, optimizer, device, alpha):
     model.train()
     total_loss = 0
-    loss_scaler = 100.0
 
     for batch in dataloader:
         if len(batch) == 3:
@@ -664,51 +626,19 @@ def train_epochHybridVanillaLSTM(model, dataloader, loss_fn, optimizer, device, 
         else:
             value_loss = loss_fn(outputs, y)
 
-        # 2. Calculate loss on the derivatives
-        outputs_deriv = outputs[:, 1:] - outputs[:, :-1]
-        y_deriv = y[:, 1:] - y[:, :-1]
+        # 2. Calculate loss on the gradients (central differences, matching np.gradient in test)
+        outputs_grad = torch.gradient(outputs, dim=1)[0]
+        y_grad = torch.gradient(y, dim=1)[0]
 
         if weights is not None:
-            derivative_loss = (
-                torch.mean((outputs_deriv - y_deriv) ** 2, dim=1) * weights
+            gradient_loss = (
+                torch.mean((outputs_grad - y_grad) ** 2, dim=1) * weights
             ).mean()
         else:
-            derivative_loss = loss_fn(outputs_deriv, y_deriv)
+            gradient_loss = loss_fn(outputs_grad, y_grad)
 
-        # 3. Combine them into a hybrid loss
-        loss = alpha * value_loss + (1 - alpha) * derivative_loss
-
-        scaled_loss = loss * loss_scaler
-        scaled_loss.backward()
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-        optimizer.step()
-        total_loss += loss.item()
-
-    return total_loss / len(dataloader)
-
-
-def train_epoch(model, dataloader, loss_fn, optimizer, device):
-    """Runs a single training epoch."""
-    model.train()
-    total_loss = 0
-
-    for batch in dataloader:
-        if len(batch) == 3:
-            x, y, weights = batch
-            weights = weights.to(device)
-        else:
-            x, y = batch
-            weights = None
-
-        x, y = x.to(device), y.to(device)
-        optimizer.zero_grad()
-
-        outputs = model(x)
-
-        if weights is not None:
-            loss = (torch.mean((outputs - y) ** 2, dim=1) * weights).mean()
-        else:
-            loss = loss_fn(outputs, y)
+        # 3. Combine: alpha=1.0 -> value only, alpha=0.0 -> gradient only
+        loss = alpha * value_loss + (1 - alpha) * gradient_loss
 
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
@@ -748,12 +678,12 @@ def validate_model(model, dataloader, device):
     mse = np.mean((all_preds_np - all_y_np) ** 2)
     rmse = np.sqrt(mse)
 
-    # 2. Derivative RMSE
-    pred_derivatives = np.diff(all_preds_np, axis=1)
-    true_derivatives = np.diff(all_y_np, axis=1)
-    derivative_rmse = np.sqrt(np.mean((pred_derivatives - true_derivatives) ** 2))
+    # 2. Gradient RMSE (central differences, matching np.gradient in test)
+    pred_gradients = np.gradient(all_preds_np, axis=1)
+    true_gradients = np.gradient(all_y_np, axis=1)
+    gradient_rmse = np.sqrt(np.mean((pred_gradients - true_gradients) ** 2))
 
-    # 3. Weighted RMSE & Weighted Derivative RMSE
+    # 3. Weighted RMSE & Weighted Gradient RMSE
     if all_weights:
         all_weights_np = np.concatenate(all_weights, axis=0)
         # Weights are (batch,). Need to broadcast to (batch, num_pred) or just average over batch?
@@ -768,12 +698,12 @@ def validate_model(model, dataloader, device):
         )
         w_rmse = np.sqrt(w_mse)
 
-        # Weighted Derivative RMSE
-        w_deriv_mse = np.average(
-            (pred_derivatives - true_derivatives) ** 2,
-            weights=np.broadcast_to(weights_expanded, pred_derivatives.shape),
+        # Weighted Gradient RMSE
+        w_grad_mse = np.average(
+            (pred_gradients - true_gradients) ** 2,
+            weights=np.broadcast_to(weights_expanded, pred_gradients.shape),
         )
-        w_deriv_rmse = np.sqrt(w_deriv_mse)
+        w_grad_rmse = np.sqrt(w_grad_mse)
 
         # 4. Active vs Background RMSE (split by weight)
         active_mask = all_weights_np == 1.0
@@ -783,14 +713,14 @@ def validate_model(model, dataloader, device):
             active_rmse = np.sqrt(
                 np.mean((all_preds_np[active_mask] - all_y_np[active_mask]) ** 2)
             )
-            active_deriv_rmse = np.sqrt(
+            active_grad_rmse = np.sqrt(
                 np.mean(
-                    (pred_derivatives[active_mask] - true_derivatives[active_mask]) ** 2
+                    (pred_gradients[active_mask] - true_gradients[active_mask]) ** 2
                 )
             )
         else:
             active_rmse = rmse
-            active_deriv_rmse = derivative_rmse
+            active_grad_rmse = gradient_rmse
 
         if np.any(bg_mask):
             bg_rmse = np.sqrt(np.mean((all_preds_np[bg_mask] - all_y_np[bg_mask]) ** 2))
@@ -798,18 +728,18 @@ def validate_model(model, dataloader, device):
             bg_rmse = rmse
     else:
         w_rmse = rmse
-        w_deriv_rmse = derivative_rmse
+        w_grad_rmse = gradient_rmse
         active_rmse = rmse
-        active_deriv_rmse = derivative_rmse
+        active_grad_rmse = gradient_rmse
         bg_rmse = rmse
 
     return {
         "RMSE": rmse,
-        "Deriv_RMSE": derivative_rmse,
+        "Grad_RMSE": gradient_rmse,
         "Weighted_RMSE": w_rmse,
-        "Weighted_Deriv_RMSE": w_deriv_rmse,
+        "Weighted_Grad_RMSE": w_grad_rmse,
         "Active_RMSE": active_rmse,
-        "Active_Deriv_RMSE": active_deriv_rmse,
+        "Active_Grad_RMSE": active_grad_rmse,
         "Background_RMSE": bg_rmse,
     }
 

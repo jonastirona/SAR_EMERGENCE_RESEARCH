@@ -17,7 +17,7 @@ from torch.utils.data import DataLoader, TensorDataset
 from functions import (
     prepare_dataset,
     load_all_ar_data,
-    train_epoch,
+    train_epochHybridVanillaLSTM,
     validate_model,
     DATA_PATH,
     VanillaLSTM,
@@ -133,7 +133,9 @@ print(f"OVERFIT TEST: {len(dataset)} samples, {N_EPOCHS} epochs")
 print(f"{'=' * 60}")
 
 for epoch in range(N_EPOCHS):
-    train_loss = train_epoch(model, loader, loss_fn, optimizer, device)
+    train_loss = train_epochHybridVanillaLSTM(
+        model, loader, loss_fn, optimizer, device, alpha=1.0
+    )
     lr = scheduler.get_last_lr()[0]
     scheduler.step(train_loss)
 

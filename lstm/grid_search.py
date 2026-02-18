@@ -16,8 +16,6 @@ from functions import (
     prepare_dataset,
     train_epochHybridLSTM,
     train_epochHybridVanillaLSTM,
-    train_epochTeacherForcingLSTM,
-    train_epoch,
     validate_model,
     load_all_ar_data,
     RESULTS_PATH,
@@ -140,13 +138,12 @@ if train_data_raw[0] is None:
 
 def main(config, train_data_raw, val_data_raw):  # Accept raw data
     model_type = config["model"]["model"]
-    lossFn = config["lossFn"]["lossFn"]
     """Main function to run the experiment."""
     start_time = time.time()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Runs on: {device}")
 
-    model_name = f"{model_type}_n{config['num_layers']}_h{config['hidden_size']}_lr{config['learning_rate']:.8f}_d{config['dropout']}_w{config['weight_decay']}_{'shuffle' if config['shuffle'] else 'noshuffle'}_custom_weights"
+    model_name = f"{model_type}_n{config['num_layers']}_h{config['hidden_size']}_lr{config['learning_rate']:.8f}_d{config['dropout']}_w{config['weight_decay']}_a{config['alpha']}_{'shuffle' if config['shuffle'] else 'noshuffle'}"
     # Initialize wandb
     wandb.init(
         project="Active Region RMSE | labeled_regions.json | fix early stopping ",
@@ -267,90 +264,75 @@ def main(config, train_data_raw, val_data_raw):  # Accept raw data
     # --- Training Loop ---
     print("Starting training...")
     for epoch in range(config["n_epochs"]):
-        train_loss = None
+        # Teacher forcing decay: linearly from initial value to 0 over grace period
+        grace_period = 25
+        initial_tf = config["model"].get("teacher_forcing_ratio", 0)
+        teacher_ratio = max(0.0, initial_tf * (1 - epoch / grace_period))
+
         if model_type == "LSTM":
-            if lossFn == "hybrid":
-                train_loss = train_epochHybridLSTM(
-                    model,
-                    train_loader,
-                    loss_fn,
-                    optimizer,
-                    device,
-                    config["model"]["teacher_forcing_ratio"],
-                    config["lossFn"]["alpha"],
-                )
-            else:
-                train_loss = train_epochTeacherForcingLSTM(
-                    model,
-                    train_loader,
-                    loss_fn,
-                    optimizer,
-                    device,
-                    config["model"]["teacher_forcing_ratio"],
-                )
+            train_loss = train_epochHybridLSTM(
+                model,
+                train_loader,
+                loss_fn,
+                optimizer,
+                device,
+                teacher_ratio,
+                config["alpha"],
+            )
         else:
-            if lossFn == "hybrid":
-                train_loss = train_epochHybridVanillaLSTM(
-                    model,
-                    train_loader,
-                    loss_fn,
-                    optimizer,
-                    device,
-                    config["lossFn"]["alpha"],
-                )
-            else:
-                train_loss = train_epoch(
-                    model,
-                    train_loader,
-                    loss_fn,
-                    optimizer,
-                    device,
-                )
+            train_loss = train_epochHybridVanillaLSTM(
+                model,
+                train_loader,
+                loss_fn,
+                optimizer,
+                device,
+                config["alpha"],
+            )
         val_metrics = validate_model(model, val_loader, device)
         val_rmse = val_metrics["RMSE"]
-        val_deriv_rmse = val_metrics["Deriv_RMSE"]
+        val_grad_rmse = val_metrics["Grad_RMSE"]
         val_weighted_rmse = val_metrics["Weighted_RMSE"]
-        val_weighted_deriv_rmse = val_metrics["Weighted_Deriv_RMSE"]
+        val_weighted_grad_rmse = val_metrics["Weighted_Grad_RMSE"]
         val_active_rmse = val_metrics["Active_RMSE"]
-        val_active_deriv_rmse = val_metrics["Active_Deriv_RMSE"]
+        val_active_grad_rmse = val_metrics["Active_Grad_RMSE"]
         val_bg_rmse = val_metrics["Background_RMSE"]
 
         lr = scheduler.get_last_lr()[0]
-        # Schedule on Active Deriv RMSE — the metric that matters
-        scheduler.step(val_active_deriv_rmse)
+        # Schedule on Active Grad RMSE — the metric that matters
+        scheduler.step(val_active_grad_rmse)
 
         log_metrics = {
             "epoch": epoch,
             "train_loss": train_loss,
             "learning_rate": float(lr),
             "RMSE": val_rmse,
-            "Deriv_RMSE": val_deriv_rmse,
+            "Grad_RMSE": val_grad_rmse,
             "Weighted_RMSE": val_weighted_rmse,
-            "Weighted_Deriv_RMSE": val_weighted_deriv_rmse,
+            "Weighted_Grad_RMSE": val_weighted_grad_rmse,
             "Active_RMSE": val_active_rmse,
-            "Active_Deriv_RMSE": val_active_deriv_rmse,
+            "Active_Grad_RMSE": val_active_grad_rmse,
             "Background_RMSE": val_bg_rmse,
         }
 
-        # Save best model based on Active Deriv RMSE
-        if val_active_deriv_rmse < best_val_rmse:
-            best_val_rmse = val_active_deriv_rmse
+        # Save best model based on Active Grad RMSE
+        if val_active_grad_rmse < best_val_rmse:
+            best_val_rmse = val_active_grad_rmse
             # Save strictly for upload purposes
             save_filename = f"{model_name}.pth"
             save_path = os.path.join(MODELS_PATH, save_filename)
             torch.save(model.state_dict(), save_path)
 
             model_artifact = wandb.Artifact(
-                name=f"{model_type}-model-{wandb.run.id}",
+                name=f"{model_type}-model-{wandb.run.id}-epoch{epoch}",
                 type="model",
-                description=f"Best {model_type} model (Active Deriv RMSE: {best_val_rmse:.4f})",
+                description=f"Best {model_type} model (Active Grad RMSE: {best_val_rmse:.4f})",
                 metadata={
                     **config,
                     "best_rmse": val_rmse,
-                    "best_deriv_rmse": val_deriv_rmse,
+                    "best_grad_rmse": val_grad_rmse,
                     "best_weighted_rmse": val_weighted_rmse,
-                    "best_weighted_deriv_rmse": val_weighted_deriv_rmse,
-                    "best_active_deriv_rmse": best_val_rmse,
+                    "best_weighted_grad_rmse": val_weighted_grad_rmse,
+                    "best_active_grad_rmse": best_val_rmse,
                     "epoch": epoch,
                 },
             )
@@ -411,21 +393,13 @@ if __name__ == "__main__":
                 },
             ],
         ),
-        "lossFn": hp.choice(
-            "lossFn_branch",
-            [
-                {
-                    "lossFn": "hybrid",
-                    "alpha": hp.choice("alpha", [0.1, 0.3, 0.5, 0.7, 0.9]),
-                },
-                {"lossFn": "value"},
-            ],
-        ),
+        # alpha=1.0 -> value only, alpha=0.0 -> gradient only, between -> hybrid
+        "alpha": hp.choice("alpha", [0, 0.1, 0.3, 0.5, 0.7, 0.9, 1.0]),
     }
 
     # Scheduler to early-stop bad trials
     scheduler = ASHAScheduler(
-        metric="Active_Deriv_RMSE",  # Optimize for active regions!
+        metric="Active_Grad_RMSE",  # Optimize for active regions!
         mode="min",
         grace_period=30,  # Min epochs before ASHA can kill a trial
         reduction_factor=2,
@@ -433,11 +407,11 @@ if __name__ == "__main__":
 
     # Search algorithm
     search_alg = HyperOptSearch(
-        space=search_space, metric="Active_Deriv_RMSE", mode="min"
+        space=search_space, metric="Active_Grad_RMSE", mode="min"
     )
 
     early_stopper = TrialPlateauStopper(
-        metric="Active_Deriv_RMSE",
+        metric="Active_Grad_RMSE",
         mode="min",
         num_results=8,  # Check last 8 values for plateau (default was 4)
         grace_period=25,  # Don't check until at least 25 epochs
@@ -445,7 +419,7 @@ if __name__ == "__main__":
     )
 
     # Set up the Tuner
-    ray.init(num_cpus=32, num_gpus=2, include_dashboard=False, _temp_dir="/tmp/ray")
+    ray.init(num_cpus=8, num_gpus=1, include_dashboard=False, _temp_dir="/tmp/ray")
 
     # Put large data in Ray object store
     train_data_ref = ray.put(train_data_raw)
@@ -477,5 +451,5 @@ if __name__ == "__main__":
     results = tuner.fit()
 
     # Get the best result
-    best_config = results.get_best_result(metric="Active_Deriv_RMSE", mode="min").config
+    best_config = results.get_best_result(metric="Active_Grad_RMSE", mode="min").config
     print("Best config found: ", best_config)

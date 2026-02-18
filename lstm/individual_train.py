@@ -8,10 +8,8 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader, TensorDataset
 from functions import (
     prepare_dataset,
-    train_epoch,
     train_epochHybridVanillaLSTM,
     train_epochHybridLSTM,
-    train_epochTeacherForcingLSTM,
     validate_model,
     RESULTS_PATH,
 )
@@ -148,9 +146,25 @@ def main(config):
     # --- Training Loop ---
     print("Starting training...")
     for epoch in range(config["n_epochs"]):
-        train_loss = train_epochTeacherForcingLSTM(
-            model, train_loader, loss_fn, optimizer, device, config["tfr"]
-        )
+        # Teacher forcing decay: linearly from initial value to 0 over 25 epochs
+        grace_period = 25
+        initial_tf = config.get("tfr", 0)
+        teacher_ratio = max(0.0, initial_tf * (1 - epoch / grace_period))
+
+        if config["model_type"] == "LSTM":
+            train_loss = train_epochHybridLSTM(
+                model,
+                train_loader,
+                loss_fn,
+                optimizer,
+                device,
+                teacher_ratio,
+                config["alpha"],
+            )
+        else:
+            train_loss = train_epochHybridVanillaLSTM(
+                model, train_loader, loss_fn, optimizer, device, config["alpha"]
+            )
         val_rmse = validate_model(model, val_loader, device)
 
         lr = scheduler.get_last_lr()[0]
