@@ -18,6 +18,8 @@ from matplotlib import gridspec
 import numpy as np
 import warnings
 import torch
+import os
+import json
 from collections import OrderedDict
 from datetime import datetime
 
@@ -29,33 +31,19 @@ warnings.filterwarnings("ignore")
 
 
 def initialize_lstm(
-    model_class_type,  # New argument to determine class
-    inputs,
-    hidden_size,
-    num_layers,
-    num_pred,
-    filepath,
-    device,
+    model_class_type, inputs, hidden_size, num_layers, num_pred, filepath, device
 ):
     input_size = np.shape(inputs)[1]
+    ModelClass = VanillaLSTM if model_class_type == "VanillaLSTM" else LSTM
 
-    # Select the class based on the type string
-
-    if model_class_type == "VanillaLSTM":
-        ModelClass = VanillaLSTM
-    else:
-        ModelClass = LSTM
-
-    # Initialize the selected LSTM and move it to GPU
     lstm = ModelClass(input_size, hidden_size, num_layers, num_pred).to(device)
-
     saved_state_dict = torch.load(filepath, map_location=device)
     new_state_dict = OrderedDict()
     for k, v in saved_state_dict.items():
-        name = k[7:] if k.startswith("module.") else k  # remove 'module.' prefix
+        name = k[7:] if k.startswith("module.") else k
         new_state_dict[name] = v
     lstm.load_state_dict(new_state_dict)
-    lstm.eval()  # Set the model to evaluation model
+    lstm.eval()
     return lstm
 
 
@@ -80,6 +68,16 @@ def eval_AR_emergence_with_plots(
         dropout,
     ) = get_params(filename)
 
+    # Load scales from scales.json (computed from 41 training ARs)
+    scales_path = os.path.join(os.path.dirname(__file__), "scales.json")
+    with open(scales_path, "r") as f:
+        scales = json.load(f)
+    m_scale = tuple(scales["m_scale"])
+    flux_scale = tuple(scales["flux_scale"])
+    cont_int_scale = tuple(scales["cont_int_scale"])
+    num_in = scales["num_in"]
+    rid_of_top = scales["rid_of_top"]
+
     all_emergences = []
     rows = ["AR11698", "AR11726", "AR13165", "AR13179", "AR13183"]
     AR_pred = []
@@ -87,7 +85,7 @@ def eval_AR_emergence_with_plots(
         AR_emergences = []
         (
             before_plot,
-            num_in,
+            _,  # num_in from AR_defs unused; LSTM uses training num_in
             _,
             _,
             starting_tile,
@@ -97,40 +95,24 @@ def eval_AR_emergence_with_plots(
         ) = AR_defs(test_AR)
         if not before_plot:
             return
-
-        # Define the AR information
+        # Load and scale AR data
         size = 9
-        rid_of_top = 4
-
-        # SCALES FOR DATA
-        cont_int_scale = (-12419.59375, 3119.267578125)
-        flux_scale = (-78.26012229919434, 490.13057708740234)
-        m_scale = (-365079096.0, 118424064.0)
-
         maps, flux, cont_int, time = load_ar_data(test_AR, size, rid_of_top)
         inputs, mag_flux = scale_and_combine_data(
             maps, flux, cont_int, m_scale, flux_scale, cont_int_scale
         )
+
         lstm = initialize_lstm(
-            model_type,
-            inputs,
-            hidden_size,
-            num_layers,
-            num_pred,
-            filepath,
-            device,
+            model_type, inputs, hidden_size, num_layers, num_pred, filepath, device
         )
 
-        # Assuming prediction, y_test_tensors, ARs, learning_rate, and n_epochs are already defined
-        fig = plt.figure(figsize=(12, 10))  # Adjust the figure size if necessary
-        main_gs = gridspec.GridSpec(
-            4, 2, figure=fig
-        )  # Create a GridSpec with 4 rows and 2 columns
+        # Prepare figure
+        fig = plt.figure(figsize=(12, 10))
+        main_gs = gridspec.GridSpec(4, 2, figure=fig)
 
-        # Loop to create 8 plots
         future = 11
         all_metrics = []
-        threshold = 0.01  # -0.006
+        threshold = 0.01
         sust_time = 4
         window_end = window_start + 72
         allNeeded = []
@@ -143,10 +125,9 @@ def eval_AR_emergence_with_plots(
         for i in range(7):
             print("Tile {}".format(starting_tile + i + 1))
 
-            ### Validation
             X_test, y_test, _ = lstm_ready(
                 1 + i, size, inputs, mag_flux, num_in, num_pred
-            )  # ,min_p,max_p,min_i,max_i)
+            )
             X_test = X_test.to(device)
 
             all_predictions = lstm(X_test)
@@ -154,9 +135,8 @@ def eval_AR_emergence_with_plots(
             true = y_test[:, future].numpy()
             allNeeded.append([pred, true])
 
-            last_known_idx = (
-                np.shape(mag_flux[1 + i, :])[0] - np.shape(true)[0] - 1
-            )  # the index in the timeline before we start predicting
+            # Index before prediction starts
+            last_known_idx = np.shape(mag_flux[1 + i, :])[0] - np.shape(true)[0] - 1
 
             mag_before_pred = mag_flux[
                 1 + i, last_known_idx - before_plot : last_known_idx
@@ -222,7 +202,7 @@ def eval_AR_emergence_with_plots(
             ### Plot
             gs = gridspec.GridSpecFromSubplotSpec(
                 3, 1, subplot_spec=main_gs[i], height_ratios=[4, 1, 1], hspace=0.05
-            )  # Define GridSpec for this iteration
+            )
 
             # Main plot
             ax0 = plt.subplot(gs[0])
@@ -280,7 +260,7 @@ def eval_AR_emergence_with_plots(
             if i == 0:
                 ax0.text(
                     x_time_pred,
-                    ax0.get_ylim()[1],  # top of y-axis
+                    ax0.get_ylim()[1],
                     "First Warning ⚑",
                     color="blue",
                     fontsize=10,
@@ -296,9 +276,7 @@ def eval_AR_emergence_with_plots(
                     ha="left",
                     va="bottom",
                 )
-            plt.xticks(
-                rotation=45, ha="right"
-            )  # Rotate x-tick labels for better readability
+            plt.xticks(rotation=45, ha="right")
 
             # Subplot d_true
             ax1 = plt.subplot(gs[1])
@@ -499,12 +477,9 @@ def eval_AR_emergence_with_plots(
         for tile_num in range(starting_tile, starting_tile + 7):
             highlight_tile(ax_image1, tile_num + 2)
             highlight_tile(ax_image2, tile_num + 2)
-        all_metrics_np = np.array(
-            all_metrics
-        )  # Convert all_metrics to a NumPy array for easier manipulation
-        means = np.mean(
-            all_metrics_np, axis=0
-        )  # Calculate the mean and standard deviation for each metric across the 7 runs
+        # Calculate average metrics across tiles
+        all_metrics_np = np.array(all_metrics)
+        means = np.mean(all_metrics_np, axis=0)
         mae_string = r"Average metrics for all tiles plotted:  $\mathrm{{MAE}} = {}$,  $\mathrm{{MSE}} = {}$,  $\mathrm{{RMSE}} = {}$,  $\mathrm{{RMSLE}} = {}$,  $R^2 = {}$".format(
             round(means[0], 3),
             round(means[1], 3),
@@ -574,18 +549,23 @@ def eval_AR_emergence(
         f"Extracted from filename: Time Window: {num_pred}, Rid of Top: {rid_of_top}, Number of Inputs: {num_in}, Number of Layers: {num_layers}, Hidden Size: {hidden_size}, Number of Epochs: {n_epochs}, Learning Rate: {learning_rate}"
     )  # Print extracted values for confirmation
 
-    before_plot, num_in, _, _, starting_tile, window_start = AR_defs(test_AR)
+    before_plot, _, _, _, starting_tile, window_start, end, start = AR_defs(test_AR)
     if not before_plot:
         return
 
-    # Define the AR information
+    # Load scales from scales.json
+    scales_path = os.path.join(os.path.dirname(__file__), "scales.json")
+    with open(scales_path, "r") as f:
+        scales = json.load(f)
+    m_scale = tuple(scales["m_scale"])
+    flux_scale = tuple(scales["flux_scale"])
+    cont_int_scale = tuple(scales["cont_int_scale"])
+    num_in = scales["num_in"]
+    rid_of_top = scales["rid_of_top"]
+
     size = 9
-    rid_of_top = 4
-    cont_int_scale = (-12419.59375, 3119.267578125)
-    flux_scale = (-78.26012229919434, 490.13057708740234)
-    m_scale = (-365079096.0, 118424064.0)
     maps, flux, cont_int, time = load_ar_data(test_AR, size, rid_of_top)
-    inputs, mag_flux = process_data(
+    inputs, mag_flux = scale_and_combine_data(
         maps, flux, cont_int, m_scale, flux_scale, cont_int_scale
     )
     lstm = initialize_lstm(

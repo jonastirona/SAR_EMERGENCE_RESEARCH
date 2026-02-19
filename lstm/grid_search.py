@@ -32,11 +32,8 @@ from ray.tune.schedulers import ASHAScheduler
 from ray.tune.stopper import TrialPlateauStopper
 
 
-# Assume these are defined in a 'functions.py' file or similar
-# from functions import LSTM, lstm_ready, min_max_scaling
-
 warnings.filterwarnings("ignore")
-os.makedirs(RESULTS_PATH, exist_ok=True)  # Ensure the results directory exists
+os.makedirs(RESULTS_PATH, exist_ok=True)
 
 rot = 0
 num_in = 110
@@ -44,14 +41,10 @@ num_pred = 12
 # --- Data Loading ---
 
 
-# Filter ARs to identify which ones exist, to ensure index alignment
+# Filter ARs to ensure data exists before loading
 def filter_valid_ars(ar_list):
     valid_ars = []
     for ar in ar_list:
-        # Check if file exists roughly based on load_ar_data logic
-        # We assume if one file exists, others likely do, or we rely on load_ar_data returning None
-        # But we need to know BEFORE calling load_all_ar_data to align indices.
-        # Check one file:
         pm_path = os.path.join(DATA_PATH, f"AR{ar}", f"mean_pmdop{ar}_flat.npz")
         if os.path.exists(pm_path):
             valid_ars.append(ar)
@@ -105,31 +98,13 @@ train_ars = [
     13098,
 ]
 
-# PRE-LOAD DATA ONCE
-print("Pre-loading all AR data...")
+# Pre-load data to avoid repeated reads during search
+print("Pre-loading training data...")
 train_data_raw = load_all_ar_data(train_ars, 9, rot)
 
-print("Loading and preparing test data...")
-val_ars = [11462, 11521, 11907, 12219, 12271, 12275, 12567]
-val_ars = filter_valid_ars(val_ars)
-
-# Val data can be prepared once as it doesn't depend on hyperparams (unless we change rot/num_in/num_pred which are constants here)
-# However, scalers come from training data.
-# The original code loaded scaled training data then valid data using those scalers.
-# Since scalers only depend on raw values, we can compute them once if we assume the training split is constant.
-# BUT, prepare_dataset calculates scalers if not provided.
-
-# Let's keep validation loading inside or pass raw validation data too?
-# Validation dataset doesn't change between trials, so we can prepare it fully ONCE.
-# Wait, prepare_dataset returns scalers. We need those scalers to prepare validation data.
-# So we run prepare_dataset on raw training data ONCE to get scalers and initial X/y (with default weights 1.0 maybe?)
-# Actually prepare_dataset logic is: calculate scalers -> scale -> create sequences.
-
-# To be safe and support the flow:
-# We will pass raw training data to the loop.
-# Validation data: we can pre-load raw validation data too.
-
-val_data_raw = load_all_ar_data(val_ars, 9, rot)  # Load raw val data
+print("Preparing validation data...")
+val_ars = filter_valid_ars([11462, 11521, 11907, 12219, 12271, 12275, 12567])
+val_data_raw = load_all_ar_data(val_ars, 9, rot)
 
 if train_data_raw[0] is None:
     print("Could not create datasets. Exiting.")
@@ -155,41 +130,33 @@ def main(config, train_data_raw, val_data_raw):  # Accept raw data
 
     best_val_rmse = float("inf")
 
-    # --- Load Labeled Regions ---
+    # Load labeled regions for weighting
     import json
 
-    # Use path relative to the script or project root lookup
-    # labeled_regions.json is in parent of lstm dir (project root)
-    # DATA_PATH is .../SAR_EMERGENCE_RESEARCH/data
-    # So it should be at .../SAR_EMERGENCE_RESEARCH/labeled_regions.json
     json_path = os.path.join(os.path.dirname(DATA_PATH), "labeled_regions.json")
     if not os.path.exists(json_path):
-        # Try current directory or parent
-        if os.path.exists("labeled_regions.json"):
-            json_path = "labeled_regions.json"
-        elif os.path.exists("../labeled_regions.json"):
-            json_path = "../labeled_regions.json"
+        for candidate in ["labeled_regions.json", "../labeled_regions.json"]:
+            if os.path.exists(candidate):
+                json_path = candidate
+                break
 
-    print(f"Loading labeled regions from: {json_path}")
+    print(f"Loading weights from: {json_path}")
     with open(json_path, "r") as f:
-        labeled_regions = json.load(f)
+        tile_weights = json.load(f)
 
-    # We pass the dictionary directly.
-    tile_weights = labeled_regions
-
-    # Generate Training Dataset
+    # Scale and prepare sequences
     (
         x_train,
         y_train,
         _,
-        weights_train,  # These will be correctly weighted now
+        weights_train,
         tile_indices_train,
         input_size,
         m_scale,
         flux_scale,
         cont_int_scale,
     ) = prepare_dataset(
-        train_ars,  # ar_list passed explicitly for AR-based weighting
+        train_ars,
         9,
         rot,
         num_in,
@@ -198,9 +165,7 @@ def main(config, train_data_raw, val_data_raw):  # Accept raw data
         pre_loaded_data=train_data_raw,
     )
 
-    # Generate Validation Dataset (using scalers from train)
-    # Pass tile_weights so validation can compute Active vs Background RMSE
-    x_val, y_val, last_all, weights_val, tile_indices_val, _, _, _, _ = prepare_dataset(
+    x_val, y_val, _, weights_val, _, _, _, _, _ = prepare_dataset(
         val_ars,
         9,
         rot,
@@ -209,7 +174,7 @@ def main(config, train_data_raw, val_data_raw):  # Accept raw data
         m_scale,
         flux_scale,
         cont_int_scale,
-        tile_weights=tile_weights,  # Pass weights for metric splitting
+        tile_weights=tile_weights,
         pre_loaded_data=val_data_raw,
     )
 
@@ -298,7 +263,7 @@ def main(config, train_data_raw, val_data_raw):  # Accept raw data
         val_bg_rmse = val_metrics["Background_RMSE"]
 
         lr = scheduler.get_last_lr()[0]
-        # Schedule on Active Grad RMSE — the metric that matters
+        # Optimize primarily for Active Grad RMSE
         scheduler.step(val_active_grad_rmse)
 
         log_metrics = {
@@ -314,12 +279,10 @@ def main(config, train_data_raw, val_data_raw):  # Accept raw data
             "Background_RMSE": val_bg_rmse,
         }
 
-        # Save best model based on Active Grad RMSE
+        # Save best model
         if val_active_grad_rmse < best_val_rmse:
             best_val_rmse = val_active_grad_rmse
-            # Save strictly for upload purposes
-            save_filename = f"{model_name}.pth"
-            save_path = os.path.join(MODELS_PATH, save_filename)
+            save_path = os.path.join(MODELS_PATH, f"{model_name}.pth")
             torch.save(model.state_dict(), save_path)
 
             model_artifact = wandb.Artifact(
@@ -421,29 +384,25 @@ if __name__ == "__main__":
     # Set up the Tuner
     ray.init(num_cpus=8, num_gpus=1, include_dashboard=False, _temp_dir="/tmp/ray")
 
-    # Put large data in Ray object store
+    # Pass raw data via Ray object store
     train_data_ref = ray.put(train_data_raw)
     val_data_ref = ray.put(val_data_raw)
 
     tuner = tune.Tuner(
         tune.with_resources(
             tune.with_parameters(
-                main,
-                train_data_raw=train_data_ref,
-                val_data_raw=val_data_ref,
+                main, train_data_raw=train_data_ref, val_data_raw=val_data_ref
             ),
             {"gpu": 1 / 8, "cpu": 1},
         ),
         tune_config=tune.TuneConfig(
-            num_samples=parse_args()[
-                "sample_size"
-            ],  # Number of different hyperparameter combinations to try
+            num_samples=parse_args()["sample_size"],
             scheduler=scheduler,
             search_alg=search_alg,
         ),
         run_config=ray.train.RunConfig(
             name="lstm_hyperparameter_search",
-            stop=early_stopper,  # Max epochs per trial
+            stop=early_stopper,
         ),
     )
 

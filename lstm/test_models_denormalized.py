@@ -2,19 +2,16 @@ from functions import (
     lstm_ready,
     calculate_metrics,
     emergence_indication,
-    smooth_with_numpy,
     recalibrate,
-    add_grid_lines,
     highlight_tile,
     scale_and_combine_data,
     get_params,
     AR_defs,
     load_ar_data,
     RESULTS_PATH,
+    VanillaLSTM,
+    LSTM,
 )
-from functions import VanillaLSTM
-from functions import LSTM
-
 import matplotlib.patches as patches
 import matplotlib.image as mpimg
 import matplotlib.dates as mdates
@@ -24,6 +21,7 @@ import numpy as np
 import warnings
 import torch
 import os
+import json
 from collections import OrderedDict
 
 
@@ -31,35 +29,19 @@ warnings.filterwarnings("ignore")
 
 
 def initialize_lstm(
-    model_class_type,  # New argument to determine class
-    inputs,
-    hidden_size,
-    num_layers,
-    num_pred,
-    filepath,
-    device,
+    model_class_type, inputs, hidden_size, num_layers, num_pred, filepath, device
 ):
     input_size = np.shape(inputs)[1]
+    ModelClass = VanillaLSTM if model_class_type == "VanillaLSTM" else LSTM
 
-    # Select the class based on the type string
-
-    if model_class_type == "VanillaLSTM":
-        print(model_class_type, "vanilla")
-        ModelClass = VanillaLSTM
-    else:
-        print(model_class_type, "lstm")
-        ModelClass = LSTM
-
-    # Initialize the selected LSTM and move it to GPU
     lstm = ModelClass(input_size, hidden_size, num_layers, num_pred).to(device)
-
     saved_state_dict = torch.load(filepath, map_location=device)
     new_state_dict = OrderedDict()
     for k, v in saved_state_dict.items():
-        name = k[7:] if k.startswith("module.") else k  # remove 'module.' prefix
+        name = k[7:] if k.startswith("module.") else k
         new_state_dict[name] = v
     lstm.load_state_dict(new_state_dict)
-    lstm.eval()  # Set the model to evaluation model
+    lstm.eval()
     return lstm
 
 
@@ -105,6 +87,18 @@ def eval_AR_emergence_with_plots(
             }
         )
 
+    # Load scales from scales.json (computed once from 41 training ARs)
+    scales_path = os.path.join(os.path.dirname(__file__), "scales.json")
+    with open(scales_path, "r") as f:
+        scales = json.load(f)
+    m_scale = tuple(scales["m_scale"])
+    flux_scale = tuple(scales["flux_scale"])
+    cont_int_scale = tuple(scales["cont_int_scale"])
+    num_in = scales["num_in"]
+    rid_of_top = scales["rid_of_top"]
+    for m in loaded_models:
+        m["params"]["num_in"] = num_in
+
     all_emergences = []
     rows = ["AR11698", "AR11726", "AR13165", "AR13179", "AR13183"]
     AR_pred = []
@@ -130,13 +124,8 @@ def eval_AR_emergence_with_plots(
         if not before_plot:
             continue
 
-        # Define the AR information
         size = 9
         rid_of_top = 4
-
-        cont_int_scale = (-12419.59375, 3119.267578125)
-        flux_scale = (-78.26012229919434, 490.13057708740234)
-        m_scale = (-365079096.0, 118424064.0)
 
         maps, flux, cont_int, time = load_ar_data(test_AR, size, rid_of_top)
         inputs, mag_flux = scale_and_combine_data(
@@ -164,13 +153,13 @@ def eval_AR_emergence_with_plots(
         sust_time = 4
         window_end = window_start + 72
 
-        # State tracking for the PRIMARY model (index 0)
+        # State tracking for the PRIMARY model
         firstTimePred = float("inf")
         firstTimeTrue = float("inf")
         lineStylesTrue = set()
         lineStylesPred = set()
 
-        # --- 1. PRE-CALCULATION FOR PRIMARY MODEL (Index 0) ---
+        # PRE-CALCULATION
         for i in range(7):
             primary = loaded_models[-1]
             p_params = primary["params"]
@@ -224,7 +213,6 @@ def eval_AR_emergence_with_plots(
         maxObserved = -float("inf")
         minObserved = float("inf")
         axArray = []
-        # --- 2. PLOTTING LOOP ---
         for i in range(7):
             print()
             print("Tile {}".format(starting_tile + i + 1))
@@ -313,7 +301,6 @@ def eval_AR_emergence_with_plots(
 
                 pred_raw = m_data["model"](X_test_m)[:, future].detach().cpu().numpy()
 
-                # Recalibrate
                 lk_idx_m = (
                     np.shape(mag_flux[1 + i, :])[0]
                     - np.shape(y_test_m[:, future].numpy())[0]
@@ -513,7 +500,7 @@ def eval_AR_emergence_with_plots(
                     linewidth=1.2,
                 )
 
-            # Table (Primary)
+            # Table logic for emergence timing
             to_append = f"Tile {starting_tile + i + 1} \n"
             if pred_emergence_dt is None and true_emergence_dt is None:
                 to_append += "Quiet"
@@ -521,13 +508,12 @@ def eval_AR_emergence_with_plots(
                 to_append += "ILAP"
             elif pred_emergence_dt is None and true_emergence_dt:
                 to_append += "NO PRED"
+            elif pred_emergence_dt and true_emergence_dt:
+                diff = pred_emergence_dt - true_emergence_dt
+                hours = 12 - (diff.days * 24 * 60 + (diff.seconds / 60)) // 60
+                to_append += f"{hours:.0f}h Alarm"
             else:
-                if pred_emergence_dt and true_emergence_dt:
-                    diff = pred_emergence_dt - true_emergence_dt
-                    hours = 12 - (diff.days * 24 * 60 + (diff.seconds / 60)) // 60
-                    to_append += f"{hours:.0f}h Alarm"
-                else:
-                    to_append += "N/A"
+                to_append += "N/A"
             AR_emergences.append(to_append)
 
         for ax in axArray:
@@ -589,7 +575,7 @@ def eval_AR_emergence_with_plots(
                     zorder=0,
                 )
 
-                # --- draw 9x9 tile grid (1x1 squares from 0..9 in x and y) ---
+                # Draw 9x9 tile grid
                 tile_num = starting_tile + i + 2
                 for ix in range(9):  # columns
                     for iy in range(9):  # rows
@@ -701,19 +687,15 @@ if __name__ == "__main__":
     models_to_compare = [
         (
             "MagFluxEnc-Dec MSE Loss",
-            "../models/LSTM12_r4_i110_n4_h32_e8_lr0.00170074_d0.3.pth",
+            "../models/VanillaLSTM_n3_h32_lr0.00002096_d0.1_w8.528754481596011e-05_a0_shuffle(1).pth",
         ),
         (
-            "MagFluxEnc-Dec hybrid Loss",
-            "../models/LSTM12_r4_i110_n4_h64_e10_lr0.00972080_d0.2.pth",
+            "asd",
+            "../models/VanillaLSTM_n3_h128_lr0.00001378_d0.3_w0.0001734541676161388_a1.0_noshuffle.pth",
         ),
         (
-            "MagFluxLSTM MSE Loss",
-            "../models/VanillaLSTM12_r4_i110_n1_h64_e10_lr0.00232000_d0.2.pth",
-        ),
-        (
-            "MagFluxLSTM hybrid Loss",
-            "../models/VanillaLSTM12_r4_i110_n4_h128_e8_lr0.00700000_d0.1.pth",
+            "1",
+            "../models/VanillaLSTM_n3_h8_lr0.00307792_d0_w8.01339448970107e-06_shuffle_custom_weights(2).pth",
         ),
     ]
 

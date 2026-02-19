@@ -1,12 +1,3 @@
-"""
-Overfit verification script.
-Tests whether the LSTM can learn AT ALL by training on 1-2 active ARs
-with only labeled tiles (weight 1.0, background 0.05).
-
-SUCCESS: Training loss goes to near-zero -> model CAN learn, issue is data balance.
-FAILURE: Training loss stays flat -> model/data pipeline is broken.
-"""
-
 import os
 import json
 import torch

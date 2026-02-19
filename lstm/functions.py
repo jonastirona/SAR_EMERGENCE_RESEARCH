@@ -1,6 +1,5 @@
 # functions to be used in pipeline
-
-from datetime import datetime, timedelta
+from datetime import datetime
 import numpy as np
 import os
 import torch
@@ -16,12 +15,8 @@ if isVanillaLSTM:
 else:
     model_type = "LSTM"
 warnings.filterwarnings("ignore")
-# Determine paths relative to this file
+# Setup project paths
 current_dir = os.path.dirname(os.path.abspath(__file__))
-# Assumes structure: project/lstm/functions.py
-#                  project/data/
-#                  project/models/
-#                  project/lstm/results/
 BASE_PROJECT_DIR = os.path.normpath(os.path.join(current_dir, ".."))
 
 DATA_PATH = os.path.join(BASE_PROJECT_DIR, "data")
@@ -31,9 +26,6 @@ MODELS_PATH = os.path.join(current_dir, "models")
 
 ##### Sept 18th and later
 def min_max_scaling(arr, min_val, max_val):
-    """
-    Set values
-    """
     return (arr - min_val) / (max_val - min_val)
 
 
@@ -50,7 +42,6 @@ def lstm_ready(
 
 
 class LSTM(nn.Module):
-    # __init__ stays the same...
     def __init__(self, input_size, hidden_size, num_layers, output_length, dropout=0.0):
         super(LSTM, self).__init__()
         self.hidden_size = hidden_size
@@ -98,17 +89,13 @@ class LSTM(nn.Module):
 class VanillaLSTM(nn.Module):
     def __init__(self, input_size, hidden_size, num_layers, output_length, dropout=0.0):
         super(VanillaLSTM, self).__init__()
-
-        # A single LSTM layer that processes the entire input sequence
         self.lstm = nn.LSTM(
             input_size=input_size,
             hidden_size=hidden_size,
             num_layers=num_layers,
-            batch_first=True,  # Input tensor shape: [batch_size, seq_length, input_size]
+            batch_first=True,
             dropout=dropout,
         )
-
-        # A single linear layer to map the final LSTM state to the desired output length
         self.fc = nn.Linear(hidden_size, output_length)
 
     def forward(self, x):
@@ -127,44 +114,33 @@ class VanillaLSTM(nn.Module):
         return prediction
 
 
-# split a multivariate sequence past, future samples (X and y)
 def split_sequences(input_sequences, output_sequences, n_steps_in, n_steps_out):
-    X, y = list(), list()  # instantiate X and y
+    X, y = list(), list()
     last_vals = list()
     for i in range(len(input_sequences)):
-        # find the end of the input, output sequence
         end_ix = i + n_steps_in
         out_end_ix = end_ix + n_steps_out - 1
-        # check if we are beyond the dataset
         if out_end_ix > len(input_sequences):
             break
-        # gather input and output of the pattern
         seq_x, seq_y = (
             input_sequences[i:end_ix],
             output_sequences[end_ix - 1 : out_end_ix],
         )
-        last_val = output_sequences[
-            end_ix - 2
-        ]  # for calibration purposes when doing RMSE on validation
+        # Store last value for RMSE calibration on validation
+        last_val = output_sequences[end_ix - 2]
         X.append(seq_x), y.append(seq_y), last_vals.append(last_val)
     return np.array(X), np.array(y), np.array(last_vals)
 
 
 def calculate_metrics(timeline_true, timeline_predicted):
-    # Ensure inputs are NumPy arrays for consistency
     timeline_true = np.array(timeline_true)
     timeline_predicted = np.array(timeline_predicted)
-    # Calculate Mean Absolute Error (MAE)
     MAE = np.mean(np.abs(timeline_predicted - timeline_true))
-    # Calculate Mean Squared Error (MSE)
     MSE = np.mean(np.square(timeline_predicted - timeline_true))
-    # Calculate Root Mean Squared Error (RMSE)
     RMSE = np.sqrt(MSE)
-    # Calculate Root Mean Squared Logarithmic Error (RMSLE)
     RMSLE = np.sqrt(
         np.mean(np.square(np.log1p(timeline_predicted) - np.log1p(timeline_true)))
     )
-    # Calculate R-squared (R²)
     SS_res = np.sum(np.square(timeline_true - timeline_predicted))
     SS_tot = np.sum(np.square(timeline_true - np.mean(timeline_true)))
     R_squared = 1 - (SS_res / SS_tot)
@@ -173,44 +149,33 @@ def calculate_metrics(timeline_true, timeline_predicted):
 
 def emergence_indication(d_true, threshold, sust_time):
     d_true = smooth_with_numpy(d_true)
-    indicator = np.zeros(d_true.shape)  # Initialize with 0s (green)
-    # Populate the indicator array
+    indicator = np.zeros(d_true.shape)
     for j in range(len(d_true)):
         if d_true[j] >= threshold:
-            indicator[j] = 1  # Mark as red
-    # Enforce the sustained condition
-    sustained = True
-    if sustained:
-        start_idx = None
-        for i in range(len(indicator)):
-            if indicator[i] == 1 and start_idx is None:
-                start_idx = i  # Start of a red sequence
-            elif (
-                indicator[i] == 0 and start_idx is not None
-            ):  # End of a red sequence, check its length
-                if i - start_idx < sust_time:
-                    indicator[start_idx:i] = 0  # Sequence too short, revert to green
-                start_idx = None  # Reset start index for the next sequence
-        # Check for a sequence that goes till the end of the array
-        if start_idx is not None and len(indicator) - start_idx < sust_time:
-            indicator[start_idx:] = 0
+            indicator[j] = 1
+
+    # Enforce sustained condition
+    start_idx = None
+    for i in range(len(indicator)):
+        if indicator[i] == 1 and start_idx is None:
+            start_idx = i
+        elif indicator[i] == 0 and start_idx is not None:
+            if i - start_idx < sust_time:
+                indicator[start_idx:i] = 0
+            start_idx = None
+    if start_idx is not None and len(indicator) - start_idx < sust_time:
+        indicator[start_idx:] = 0
     return indicator
 
 
 def smooth_with_numpy(d_true, window_size=5):
     if window_size <= 1:
         return d_true
-    pad_width = window_size // 2  # Calculate the number of elements to pad on each side
-    padded_d_true = np.pad(
-        d_true, pad_width, mode="edge"
-    )  # Pad the beginning and end of d_true with its first and last values, respectively
-    window = np.ones(window_size) / window_size  # Create the smoothing window
-    smoothed_d_true = np.convolve(
-        padded_d_true, window, mode="same"
-    )  # Apply convolution on the padded data
-    return (
-        smoothed_d_true[pad_width:-pad_width] if pad_width else smoothed_d_true
-    )  # Remove the padding to return the smoothed array to its original length
+    pad_width = window_size // 2
+    padded_d_true = np.pad(d_true, pad_width, mode="edge")
+    window = np.ones(window_size) / window_size
+    smoothed_d_true = np.convolve(padded_d_true, window, mode="same")
+    return smoothed_d_true[pad_width:-pad_width] if pad_width else smoothed_d_true
 
 
 def recalibrate(pred, previous_value):
@@ -220,30 +185,18 @@ def recalibrate(pred, previous_value):
 
 
 def highlight_tile(ax, tile_number, divisions=9, color="r", linewidth=1):
-    """
-    Highlights a specific tile in the grid with a colored box.
-
-    Parameters:
-    - ax: The axes object on which the grid and image are plotted.
-    - tile_number: The number of the tile to highlight, in row-major order.
-    - divisions: The number of divisions along each axis (assumes a square grid).
-    - color: Color of the highlight box.
-    - linewidth: Width of the highlight box lines.
-    """
+    """Highlights a specific tile in the grid."""
     xlim = ax.get_xlim()
     ylim = ax.get_ylim()
 
-    # Calculate width and height of each tile
     tile_width = (xlim[1] - xlim[0]) / divisions
     tile_height = (ylim[1] - ylim[0]) / divisions
 
-    # Calculate row and column index of the tile (0-indexed)
     row_idx = (tile_number - 1) // divisions
     col_idx = (tile_number - 1) % divisions
 
-    # Calculate coordinates for the bottom-left corner of the tile
     x = xlim[0] + col_idx * tile_width
-    y = ylim[1] - (row_idx + 1) * tile_height  # y coordinates go top-to-bottom
+    y = ylim[1] - (row_idx + 1) * tile_height
 
     # Create a rectangle patch to highlight the tile
     from matplotlib.patches import Rectangle
@@ -276,7 +229,6 @@ def highlight_tile(ax, tile_number, divisions=9, color="r", linewidth=1):
 def load_ar_data(ar_num, size, rid_of_top):
     """Loads and preprocesses data for a single Active Region (AR)."""
     try:
-        # Load data from .npz files
         pm_path = os.path.join(DATA_PATH, f"AR{ar_num}", f"mean_pmdop{ar_num}_flat.npz")
         mag_path = os.path.join(DATA_PATH, f"AR{ar_num}", f"mean_mag{ar_num}_flat.npz")
         int_path = os.path.join(DATA_PATH, f"AR{ar_num}", f"mean_int{ar_num}_flat.npz")
@@ -286,12 +238,11 @@ def load_ar_data(ar_num, size, rid_of_top):
         intensities_data = np.load(int_path, allow_pickle=True)
         time = power_maps["arr_4"]
 
-        # Unpack arrays
         power_maps = [power_maps[f"arr_{i}"] for i in range(4)]
         mag_flux = mag_flux_data["arr_0"]
         intensities = intensities_data["arr_0"]
 
-        # Trim, stack, and handle NaNs
+        # Trim top/bottom rows and handle NaNs
         trim_slice = slice(rid_of_top * size, size**2 - rid_of_top * size)
         power_maps = [pm[trim_slice, :] for pm in power_maps]
         mag_flux = mag_flux[trim_slice, :]
@@ -345,21 +296,16 @@ def get_params(filename):
         raise Exception("UNKNOWN NAME", filename)
 
     matches = re.findall(
-        r"(\d+)_r(\d+)_i(\d+)_n(\d+)_h(\d+)_e(\d+)_lr([0-9.]+)_d([0-9.]+)\.pth",
+        r"_n(\d+)_h(\d+)_lr([0-9.]+)_d([0-9.]+)",
         filename,
-    )  # Extract numbers from the filename
-    (
-        num_pred,
-        rid_of_top,
-        num_in,
-        num_layers,
-        hidden_size,
-        n_epochs,
-        learning_rate,
-        dropout,
-    ) = [
-        float(val) if i >= 6 else int(val) for i, val in enumerate(matches[0])
-    ]  # Unpack the matched values into variables
+    )
+    if not matches:
+        raise Exception("Could not parse parameters from filename", filename)
+
+    # Parse num_layers, hidden_size, learning_rate, dropout
+    num_layers, hidden_size, learning_rate, dropout = [
+        float(val) if i >= 2 else int(val) for i, val in enumerate(matches[0])
+    ]
     return (
         model_type,
         num_layers,
@@ -496,34 +442,18 @@ def prepare_dataset(
                 y_list.append(y_seq)
                 last_list.append(last_seq)
 
-                # Assign weights to each sample in the sequence based on the tile
+                # Assign weights based on labeled tiles from scales.json
                 real_tile_idx = tile + rid_of_top * size
-
-                # Check if we have an AR list and a weight dict
                 if ar_list is not None and isinstance(tile_weights, dict):
-                    # Get the current AR number
-                    current_ar = str(
-                        ar_list[i]
-                    )  # ar_list corresponds to processed_inputs
-
-                    # Default weight for non-labeled tiles
-                    w = 0.05
-
-                    # Check if AR is in our labeled regions
+                    current_ar = str(ar_list[i])
+                    w = 0.05  # Default background weight
                     if current_ar in tile_weights:
-                        # tile_weights[current_ar] is a list of ACTIVE tiles (1-based index usually, let's verify)
-                        # The json had indices like 39, 40 etc. Let's assume these are 1-based as per user request in other contexts?
-                        # "labeled regions in region: [tile_num (index 1)] json format" -> YES, 1-based.
-                        # real_tile_idx is 0-based. So we compare real_tile_idx + 1 with the list.
+                        # tiles in json are 1-based indices
                         if (real_tile_idx + 1) in tile_weights[current_ar]:
                             w = 1.0
                     else:
-                        # If AR not in dict, maybe default to 0.3 or 1.0?
-                        # User said: "calculate loss with proportions 0.3 for non labeled tiles and 1 for labeled tiles."
-                        # Implies if not labeled, it's non-labeled -> 0.3
                         w = 0.05
                 else:
-                    # Fallback or Validation case (if tile_weights is None)
                     w = 1.0
 
                 weight_list.append(torch.full((x_seq.shape[0],), float(w)))
@@ -575,13 +505,13 @@ def train_epochHybridLSTM(
 
         outputs = model(x, y, teacher_forcing_ratio=teacher_ratio)
 
-        # 1. Calculate loss on the actual values
+        # Loss on values
         if weights is not None:
             value_loss = (torch.mean((outputs - y) ** 2, dim=1) * weights).mean()
         else:
             value_loss = loss_fn(outputs, y)
 
-        # 2. Calculate loss on the gradients (central differences, matching np.gradient in test)
+        # Loss on gradients (matching np.gradient in test)
         outputs_grad = torch.gradient(outputs, dim=1)[0]
         y_grad = torch.gradient(y, dim=1)[0]
 
@@ -592,7 +522,7 @@ def train_epochHybridLSTM(
         else:
             gradient_loss = loss_fn(outputs_grad, y_grad)
 
-        # 3. Combine: alpha=1.0 -> value only, alpha=0.0 -> gradient only
+        # Combine weighted losses
         loss = alpha * value_loss + (1 - alpha) * gradient_loss
 
         loss.backward()
@@ -768,38 +698,28 @@ class PlateauStopper(tune.stopper.Stopper):
         self._trial_history = {}  # To store the history of each trial
 
     def __call__(self, trial_id: str, result: dict) -> bool:
-        """This is called after each tune.report() call."""
-        # Initialize history for a new trial
         if trial_id not in self._trial_history:
             self._trial_history[trial_id] = []
 
         history = self._trial_history[trial_id]
         history.append(result[self._metrics])
 
-        # Don't stop if we haven't reached the minimum number of epochs
         if len(history) <= self._min_epochs:
             return False
 
         # Check for improvement over the patience window
-        # We look at the best value in the last `patience` epochs
-        # and compare it to the best value before that window.
         window = history[-self._patience :]
         previous_best = min(history[: -self._patience])
         current_best = min(window)
 
-        # If there's no meaningful improvement, stop the trial
         improvement_needed = previous_best * self._min_improvement / 100
         if previous_best - current_best < improvement_needed:
-            print(
-                f"Stopping trial {trial_id}: "
-                f"No improvement of {improvement_needed} in the last {self._patience} epochs."
-            )
+            print(f"Stopping trial {trial_id}: plateau reached.")
             return True
 
         return False
 
     def stop_all(self) -> bool:
-        """This function is used to stop all trials at once. We don't need it here."""
         return False
 
 
