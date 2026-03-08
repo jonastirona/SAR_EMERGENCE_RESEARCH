@@ -78,7 +78,7 @@ def eval_AR_emergence_with_plots(
                 "filename": filename,
                 "params": {
                     "num_pred": 12,
-                    "rid_of_top": 4,
+                    "rid_of_top": None,  # filled in after scales.json is loaded
                     "num_in": 110,
                     "num_layers": num_layers,
                     "hidden_size": hidden_size,
@@ -95,9 +95,10 @@ def eval_AR_emergence_with_plots(
     flux_scale = tuple(scales["flux_scale"])
     cont_int_scale = tuple(scales["cont_int_scale"])
     num_in = scales["num_in"]
-    rid_of_top = scales["rid_of_top"]
+    rid_of_top = scales["rid_of_top"]  # 0 — must match training
     for m in loaded_models:
         m["params"]["num_in"] = num_in
+        m["params"]["rid_of_top"] = rid_of_top
 
     all_emergences = []
     rows = ["AR11698", "AR11726", "AR13165", "AR13179", "AR13183"]
@@ -125,7 +126,7 @@ def eval_AR_emergence_with_plots(
             continue
 
         size = 9
-        rid_of_top = 4
+        # rid_of_top comes from scales.json — do NOT override here
 
         maps, flux, cont_int, time = load_ar_data(test_AR, size, rid_of_top)
         inputs, mag_flux = scale_and_combine_data(
@@ -165,7 +166,12 @@ def eval_AR_emergence_with_plots(
             p_params = primary["params"]
 
             X_test_p, y_test_p, _ = lstm_ready(
-                1 + i, size, inputs, mag_flux, p_params["num_in"], p_params["num_pred"]
+                starting_tile + i,
+                size,
+                inputs,
+                mag_flux,
+                p_params["num_in"],
+                p_params["num_pred"],
             )
             X_test_p = X_test_p.to(device)
 
@@ -173,11 +179,13 @@ def eval_AR_emergence_with_plots(
             pred_p = primary["model"](X_test_p)[:, future].detach().cpu().numpy()
             true_p = y_test_p[:, future].numpy()
 
-            last_known_idx = np.shape(mag_flux[1 + i, :])[0] - np.shape(true_p)[0] - 1
+            last_known_idx = (
+                np.shape(mag_flux[starting_tile + i, :])[0] - np.shape(true_p)[0] - 1
+            )
 
             # True Emergence Check
             mag_before_pred = mag_flux[
-                1 + i,
+                starting_tile + i,
                 last_known_idx
                 - before_plot
                 - p_params["num_pred"]
@@ -220,7 +228,7 @@ def eval_AR_emergence_with_plots(
             # Use Primary Model for timeline setup
             primary = loaded_models[0]
             X_test_p, y_test_p, _ = lstm_ready(
-                1 + i,
+                starting_tile + i,
                 size,
                 inputs,
                 mag_flux,
@@ -229,12 +237,14 @@ def eval_AR_emergence_with_plots(
             )
             true = y_test_p[:, future].numpy()
 
-            last_known_idx = np.shape(mag_flux[1 + i, :])[0] - np.shape(true)[0] - 1
+            last_known_idx = (
+                np.shape(mag_flux[starting_tile + i, :])[0] - np.shape(true)[0] - 1
+            )
 
             true = true[start : len(true) + end]
 
             mag_before_pred = mag_flux[
-                1 + i, last_known_idx - before_plot : last_known_idx
+                starting_tile + i, last_known_idx - before_plot : last_known_idx
             ]
             # print(mag_before_pred + true)
 
@@ -290,7 +300,7 @@ def eval_AR_emergence_with_plots(
             for m_idx, m_data in enumerate(loaded_models):
                 m_params = m_data["params"]
                 X_test_m, y_test_m, _ = lstm_ready(
-                    1 + i,
+                    starting_tile + i,
                     size,
                     inputs,
                     mag_flux,
@@ -302,11 +312,13 @@ def eval_AR_emergence_with_plots(
                 pred_raw = m_data["model"](X_test_m)[:, future].detach().cpu().numpy()
 
                 lk_idx_m = (
-                    np.shape(mag_flux[1 + i, :])[0]
+                    np.shape(mag_flux[starting_tile + i, :])[0]
                     - np.shape(y_test_m[:, future].numpy())[0]
                     - 1
                 )
-                pred_recal = recalibrate(pred_raw, mag_flux[1 + i, lk_idx_m])
+                pred_recal = recalibrate(
+                    pred_raw, mag_flux[starting_tile + i, lk_idx_m]
+                )
                 pred_recal = pred_recal[start : len(pred_recal) + end]
 
                 # Denormalize prediction for plotting
@@ -430,7 +442,7 @@ def eval_AR_emergence_with_plots(
                 ax_pred = plt.subplot(gs[2])
                 m_params = m_data["params"]
                 X_m, y_m, _ = lstm_ready(
-                    1 + i,
+                    starting_tile + i,
                     size,
                     inputs,
                     mag_flux,
@@ -440,11 +452,11 @@ def eval_AR_emergence_with_plots(
                 X_m = X_m.to(device)
                 p_raw = m_data["model"](X_m)[:, future].detach().cpu().numpy()
                 lk_idx_m = (
-                    np.shape(mag_flux[1 + i, :])[0]
+                    np.shape(mag_flux[starting_tile + i, :])[0]
                     - np.shape(y_m[:, future].numpy())[0]
                     - 1
                 )
-                p_rec = recalibrate(p_raw, mag_flux[1 + i, lk_idx_m])
+                p_rec = recalibrate(p_raw, mag_flux[starting_tile + i, lk_idx_m])
                 p_rec = p_rec[start : len(p_rec) + end]
 
                 d_pred = np.gradient(p_rec)
@@ -687,16 +699,8 @@ if __name__ == "__main__":
     models_to_compare = [
         (
             "MagFluxEnc-Dec MSE Loss",
-            "../models/VanillaLSTM_n3_h32_lr0.00002096_d0.1_w8.528754481596011e-05_a0_shuffle(1).pth",
-        ),
-        (
-            "asd",
-            "../models/VanillaLSTM_n3_h128_lr0.00001378_d0.3_w0.0001734541676161388_a1.0_noshuffle.pth",
-        ),
-        (
-            "1",
-            "../models/VanillaLSTM_n3_h8_lr0.00307792_d0_w8.01339448970107e-06_shuffle_custom_weights(2).pth",
-        ),
+            "../models/VanillaLSTM_n3_h32_lr0.00002096_d0.1_w8.528754481596011e-05_a0_shuffle(2).pth",
+        )
     ]
 
     eval_AR_emergence_with_plots(

@@ -303,7 +303,7 @@ def main(config, train_data_raw, val_data_raw):  # Accept raw data
             wandb.log_artifact(model_artifact)
 
         wandb.log(log_metrics)
-        tune.report(log_metrics)
+        tune.report(**log_metrics)
 
     # --- Save Model & Artifacts ---
     # We already saved the best model during the loop to wandb.
