@@ -44,10 +44,8 @@ def initialize_lstm(
     # Select the class based on the type string
 
     if model_class_type == "VanillaLSTM":
-        print(model_class_type, "vanilla")
         ModelClass = VanillaLSTM
     else:
-        print(model_class_type, "lstm")
         ModelClass = LSTM
 
     # Initialize the selected LSTM and move it to GPU
@@ -113,6 +111,7 @@ def eval_AR_emergence_with_plots(
         test_ARs = [test_ARs]
 
     for test_AR in test_ARs:
+        print("\nAR:", test_AR)
         AR_emergences = []
         (
             before_plot,
@@ -188,16 +187,15 @@ def eval_AR_emergence_with_plots(
 
             last_known_idx = np.shape(mag_flux[1 + i, :])[0] - np.shape(true_p)[0] - 1
 
-            # True Emergence Check
+            # True Emergence Check — must match plotting loop's slicing
             mag_before_pred = mag_flux[
-                1 + i,
-                last_known_idx
-                - before_plot
-                - p_params["num_pred"]
-                - future : last_known_idx - p_params["num_pred"] - future,
+                1 + i, last_known_idx - before_plot : last_known_idx
             ]
+            true_sliced = (
+                true_p[start : len(true_p) + end] if end != 0 else true_p[start:]
+            )
 
-            d_true = np.gradient(np.concatenate((mag_before_pred, true_p)))
+            d_true = np.gradient(np.concatenate((mag_before_pred, true_sliced)))
             indicator_true = emergence_indication(d_true, threshold, sust_time)
 
             for idx, indic in enumerate(indicator_true):
@@ -221,15 +219,14 @@ def eval_AR_emergence_with_plots(
                     elif idx == firstTimePred:
                         lineStylesPred.add(i)
                     break
-        print(firstTimePred)
         firstTimePred -= 12
         maxObserved = -float("inf")
         minObserved = float("inf")
         axArray = []
         # --- 2. PLOTTING LOOP ---
         for i in range(7):
-            print()
-            print("Tile {}".format(starting_tile + i + 1))
+            # print()
+            # print("Tile {}".format(starting_tile + i + 1))
 
             # Use Primary Model for timeline setup
             primary = loaded_models[0]
@@ -262,10 +259,12 @@ def eval_AR_emergence_with_plots(
 
             # Markers
             x_time_true = time_cut_mpl[min(firstTimeTrue, len(time_cut_mpl) - 1)]
+            # time_cut_mpl[min(firstTimeTrue, len(time_cut_mpl) - 1)]
             idx_pred_line = firstTimePred + len(mag_before_pred)
             if idx_pred_line >= len(time_cut_mpl):
                 idx_pred_line = len(time_cut_mpl) - 1
             x_time_pred = time_cut_mpl[idx_pred_line]
+            print("true:", time_cut[firstTimeTrue], x_time_true)
 
             num_models = len(loaded_models)
             height_ratios = [4, 1, 1]
@@ -299,7 +298,7 @@ def eval_AR_emergence_with_plots(
             minObserved = min(minObserved, np.min(true_plot))
 
             # Overlay Predictions
-            colors = ["blue", "orange", "purple", "green"]
+            colors = ["cyan", "orange", "purple", "green"]
 
             for m_idx, m_data in enumerate(loaded_models):
                 m_params = m_data["params"]
@@ -342,18 +341,18 @@ def eval_AR_emergence_with_plots(
                     time_cut_mpl,
                     plot_data,
                     color=colors[m_idx % len(colors)],
-                    label=" $\Phi_m$ for " + m_data["graphName"],  # Simple label
+                    label=" $\Phi'_m$ for " + m_data["graphName"],  # Simple label
                     linestyle="-" if m_idx == len(loaded_models) - 1 else "--",
                     alpha=0.8 if m_idx == len(loaded_models) - 1 else 0.7,
                     linewidth=2.2 if m_idx == len(loaded_models) - 1 else 1.5,
                 )
             # Metrics (Primary)
             metrics = calculate_metrics(
-                true_plot[len(nan_array):],
+                true_plot[len(nan_array) :],
                 pred_recal_denorm,
             )
             all_metrics.append(metrics)
-            print(f"RMSE (Primary): {metrics[2]}")
+            # print(f"RMSE (Primary): {metrics[2]}")
             # Formatting
             ax0.set_ylabel(f"Tile {starting_tile + i + 2}", fontsize=12)
             ax0.set_ylim([minObserved, maxObserved])
@@ -501,7 +500,7 @@ def eval_AR_emergence_with_plots(
                 ax_pred.set_ylim([-0.05, 0.05])
                 ax_pred.set_yticks([0])
                 ax_pred.grid(True, linestyle="--", linewidth=0.5)
-                ax_pred.set_ylabel(r"$\frac{d P}{dt}$", fontsize=14)
+                ax_pred.set_ylabel(r"$\frac{d \Phi'_m}{dt}$", fontsize=14)
                 ax_pred.axvline(
                     x=x_time_true,
                     color="red",
@@ -514,8 +513,6 @@ def eval_AR_emergence_with_plots(
                     linestyle="-" if i in lineStylesPred else "--",
                     linewidth=1.2,
                 )
-
-            
 
             # Table (Primary)
             to_append = f"Tile {starting_tile + i + 1} \n"
@@ -550,7 +547,7 @@ def eval_AR_emergence_with_plots(
         ax0.text(
             x_time_true,
             ax0.get_ylim()[1],
-            "⚑ First Emergence",
+            "⚑ Emergence",
             color="red",
             fontsize=10,
             ha="left" if leftAligned else "right",
@@ -586,7 +583,7 @@ def eval_AR_emergence_with_plots(
                 [True, False],
             ):
                 ax.imshow(
-                    img,
+                    np.flipud(img),
                     origin="lower",
                     extent=[0, 9, 0, 9],
                     interpolation="nearest",
@@ -636,7 +633,7 @@ def eval_AR_emergence_with_plots(
                         va="center",
                         fontsize=11,
                         color="black",
-                        rotation=90
+                        rotation=90,
                     )
                     # Add time text to right of second image
                     ax.text(
@@ -665,7 +662,7 @@ def eval_AR_emergence_with_plots(
             round(means[2], 3),
             round(means[4], 3),
         )
-        print(mae_string)
+        # print(mae_string)
         # Add figure-level legend at the bottom
         handles, labels = ax0.get_legend_handles_labels()
         fig.legend(
@@ -682,7 +679,7 @@ def eval_AR_emergence_with_plots(
         save_path = RESULTS_PATH + "/AR{}_comparison_denormalized.png".format(test_AR)
         plt.savefig(save_path)
         plt.close("all")
-        print("Results saved at: " + save_path)
+        # print("Results saved at: " + save_path)
 
     sb = plt.subplot()
     sb.axis("off")

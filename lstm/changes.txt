@@ -1,0 +1,28 @@
+### Change Log - LSTM Grid Search Pipeline Optimization
+
+1. **Bug Fix: Validation Weighting**
+   - Updated `grid_search.py` to pass the `tile_weights` parameter during validation dataset preparation.
+   - Previously, validation was unweighted (defaulting to 1.0), which meant the grid search optimization ignored the `proportion` hyperparameter's intended effect on specific regions. Now, the validation metric correctly prioritizes the regions defined by the `proportion` logic.
+
+2. **Metric Refinement: Weighted Derivative RMSE**
+   - Modified `functions.py`: Updated `validate_model` to calculate and return `Weighted_Deriv_RMSE`.
+   - This metric calculates the RMSE of the slope (differences between steps) but applies weights based on the Tile index. This aligns the evaluation with the goal of detecting Active Region emergence (high slope) in prioritized tiles.
+
+3. **Optimization Goal Alignment**
+   - Updated `grid_search.py` to use `Weighted_Deriv_RMSE` as the primary metric for:
+     - `ASHAScheduler` (Early stopping/Promotion)
+     - `HyperOptSearch` (Hyperparameter tuning)
+     - `TrialPlateauStopper` (Stopping stuck trials)
+     - `ReduceLROnPlateau` (Learning rate scheduling)
+   - This ensures the entire tuning process is focused on prediction accuracy in the high-proportion "emergence-prone" regions.
+
+4. **Enhanced Logging & Monitoring**
+   - Updated `grid_search.py` to log four distinct metrics to WandB:
+     - `RMSE`: Standard value-based error.
+     - `Deriv_RMSE`: Standard slope-based error.
+     - `Weighted_RMSE`: Value-based error weighted by tile importance.
+     - `Weighted_Deriv_RMSE`: Slope-based error weighted by tile importance (Target Metric).
+   - Expanded WandB artifact metadata to include the best values for all four metrics for every saved model.
+
+5. **WandB Metadata**
+   - Updated WandB project name to "Weighted Tiles Test | Weighted RMSE" for better organization.

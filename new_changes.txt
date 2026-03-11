@@ -1,0 +1,47 @@
+## Changes - February 16, 2026
+
+### Emergence-Aware Training Loss
+
+Added a new loss function that directly optimizes for **emergence timing accuracy**, addressing the gap between MSE-based training and timing-based evaluation.
+
+#### New in `functions.py`:
+- `differentiable_smooth()` — 1D convolution-based smoothing for batched PyTorch tensors
+- `soft_emergence_time()` — differentiable emergence onset detection using rising-edge detection (diff → ReLU → weighted average)
+- `emergence_timing_loss()` — batched timing loss with quiet-sample masking
+- `train_epoch_emergence_aware()` — unified training function combining value MSE + derivative MSE + emergence timing loss
+- `Emergence_Timing_MAE` added to `validate_model()` return dict
+
+#### Updated `grid_search.py`:
+- Added `"emergence"` as new `lossFn` option with `gamma ∈ [0.05, 0.1, 0.3, 0.5]` (emergence timing weight)
+- Curriculum annealing for sigmoid steepness `k` (10 → 100 over epochs)
+- Model selection now uses composite metric: `0.6 * Active_Deriv_RMSE + 0.4 * Emergence_Timing_MAE`
+- All downstream references updated (ASHA scheduler, HyperOpt, early stopper, best model saving)
+
+#### Updated `individual_train.py`:
+- Added `lossFn` and `gamma` config options
+- Training loop supports emergence-aware training with curriculum k annealing
+
+#### New `test_emergence_loss.py`:
+- Unit tests for all new functions (6 tests, all passing)
+
+#### Bugfixes (same session):
+- **Scale mismatch**: Composite score now normalizes MAE by 0.05 (`0.8 * RMSE + 0.2 * MAE * 0.05`) so 1 timestep error ≈ 0.05 RMSE
+- **Detached mask**: `both_have` in `emergence_timing_loss` is now `.detach()`'d to prevent model from "hiding" emergence to avoid penalty
+- **Missing alpha**: `individual_train.py` already had `alpha` in defaults (0.9), verified no `KeyError`
+
+### "Lazy Student" Loophole Fix
+
+Fixed a critical bug where models predicting a flat line (no emergence) received MAE = 0.0, making them appear "perfect" and getting selected as best by grid search.
+
+#### Updated `functions.py` — `validate_model()`:
+- Missed emergences (truth has emergence, model doesn't) now penalized with `num_pred` (max possible error = 12)
+- Added `Emergence_Detection_Rate` (recall) and `Emergence_False_Alarm_Rate` to returned metrics
+- `timing_errors` list now properly populated for all true-emergence samples
+
+#### Updated `grid_search.py`:
+- Composite score formula changed: `0.7 * Active_Deriv_RMSE + 0.2 * (MAE * 0.05) + 0.2 * (1 - Detection_Rate)`
+- New metrics logged to wandb: `Emergence_Detection_Rate`, `Emergence_False_Alarm_Rate`
+- Best model metadata includes `best_detection_rate` and `best_false_alarm_rate`
+
+#### New `test_lazy_student.py`:
+- 5 tests verifying: lazy model penalized (MAE=12), good model rewarded (MAE=0), good beats lazy, no-emergence case correct, false alarms tracked
